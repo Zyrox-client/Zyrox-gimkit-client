@@ -79,6 +79,7 @@
     moduleEntries: [],
     moduleConfig: new Map(),
     listeningForBind: null,
+    listeningForMenuBind: false,
   };
 
   const style = document.createElement("style");
@@ -166,6 +167,17 @@
       border-radius: 999px;
       padding: 4px 8px;
       line-height: 1;
+    }
+
+    .zyrox-keybind-btn {
+      font-size: 11px;
+      color: #ffd6d6;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 91, 91, 0.55);
+      border-radius: 8px;
+      padding: 4px 8px;
+      line-height: 1;
+      cursor: pointer;
     }
 
     .zyrox-search {
@@ -334,6 +346,7 @@
       justify-content: center;
       font-weight: 700;
       line-height: 1;
+      font-size: 16px;
     }
 
     .zyrox-config-backdrop {
@@ -381,11 +394,13 @@
     </div>
     <div class="zyrox-topbar-right">
       <input class="zyrox-search" type="text" placeholder="Search utilities..." autocomplete="off" />
+      <button class="zyrox-keybind-btn" type="button" title="Change menu toggle key">Menu Key: ${CONFIG.toggleKey}</button>
       <span class="zyrox-chip">v0.5</span>
     </div>
   `;
 
   const searchInput = topbar.querySelector(".zyrox-search");
+  const menuBindBtn = topbar.querySelector(".zyrox-keybind-btn");
 
   const generalSection = document.createElement("section");
   generalSection.className = "zyrox-section";
@@ -413,7 +428,7 @@
       <div class="zyrox-config-row">
         <span>Keybind</span>
         <div class="zyrox-config-actions">
-          <button class="zyrox-btn zyrox-btn-square" type="button" title="Reset keybind">□</button>
+          <button class="zyrox-btn zyrox-btn-square" type="button" title="Reset keybind">↺</button>
           <button class="zyrox-btn" type="button">Set keybind</button>
         </div>
       </div>
@@ -550,6 +565,12 @@
     setBindBtn.textContent = "Press any key...";
   });
 
+  menuBindBtn.addEventListener("click", () => {
+    state.listeningForMenuBind = true;
+    menuBindBtn.textContent = "Press key...";
+    searchInput.blur();
+  });
+
   resetBindBtn.addEventListener("click", () => {
     if (!openConfigModule) return;
     const cfg = moduleCfg(openConfigModule);
@@ -617,6 +638,15 @@
   }
 
   document.addEventListener("keydown", (event) => {
+    if (state.listeningForMenuBind) {
+      event.preventDefault();
+      CONFIG.toggleKey = event.key;
+      menuBindBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
+      footer.innerHTML = `<span>Press <b>${CONFIG.toggleKey}</b> to show/hide menu</span><span>Right click modules for settings</span>`;
+      state.listeningForMenuBind = false;
+      return;
+    }
+
     if (state.listeningForBind && openConfigModule === state.listeningForBind) {
       event.preventDefault();
       const cfg = moduleCfg(openConfigModule);
