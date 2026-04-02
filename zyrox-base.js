@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.8.3
+// @version      0.8.4
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,7 +45,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.8.3";
+    const CLIENT_VERSION = "0.8.4";
     return CLIENT_VERSION;
   }
 
@@ -1421,6 +1421,7 @@
     currentQuestionId: null,
     questionIdList: [],
     currentQuestionIndex: -1,
+    lastAnsweredId: null,
   };
 
   function getSocketManager() {
@@ -1448,9 +1449,73 @@
     return question.answers.find((a) => a && a.correct)?._id ?? null;
   }
 
+  function normalizeText(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function findQuestionBankInObject(root, depth = 0) {
+    if (!root || typeof root !== "object" || depth > 5) return null;
+    if (Array.isArray(root)) {
+      if (root.length && root.every((q) => q && typeof q === "object" && "_id" in q && Array.isArray(q.answers))) {
+        return root;
+      }
+      for (const item of root) {
+        const found = findQuestionBankInObject(item, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const value of Object.values(root)) {
+      const found = findQuestionBankInObject(value, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function refreshQuestionsFromStoresFallback() {
+    try {
+      const fromStores = findQuestionBankInObject(globalThis.stores);
+      if (fromStores && fromStores.length) {
+        autoAnswerState.questions = fromStores;
+      }
+    } catch (_) {}
+  }
+
+  function findCurrentQuestionFromDom() {
+    const questionTextEl = document.querySelector("[data-testid='question-text'], .question, .Question-text");
+    const questionText = normalizeText(questionTextEl?.textContent);
+    if (!questionText) return null;
+    return autoAnswerState.questions.find((q) => normalizeText(q?.text) === questionText) || null;
+  }
+
+  function tryAnswerViaDom(question) {
+    if (!question || !Array.isArray(question.answers)) return false;
+    if (autoAnswerState.lastAnsweredId === question._id) return false;
+
+    const correct = question.answers.find((a) => a && a.correct);
+    if (!correct) return false;
+
+    const correctText = normalizeText(correct.text);
+    if (!correctText) return false;
+
+    const clickable = [...document.querySelectorAll("button, [role='button'], .option")]
+      .filter((el) => normalizeText(el.textContent) === correctText);
+
+    if (!clickable.length) return false;
+    clickable[0].click();
+    autoAnswerState.lastAnsweredId = question._id;
+    return true;
+  }
+
   function answerCurrentQuestion() {
+    refreshQuestionsFromStoresFallback();
+
     const socketManager = getSocketManager();
-    if (!socketManager) return;
+    if (!socketManager) {
+      const domQuestion = findCurrentQuestionFromDom();
+      tryAnswerViaDom(domQuestion);
+      return;
+    }
 
     const transportType = getTransportType(socketManager);
 
@@ -1465,6 +1530,7 @@
         deviceId: autoAnswerState.answerDeviceId,
         data: { answer },
       });
+      autoAnswerState.lastAnsweredId = question._id;
       return;
     }
 
@@ -1474,6 +1540,7 @@
     const answer = pickAnswerPayload(question);
     if (!answer) return;
     socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+    autoAnswerState.lastAnsweredId = question._id;
   }
 
   function ensureAutoAnswerListeners() {
@@ -1514,7 +1581,21 @@
     if (autoAnswerState.intervalId) {
       clearInterval(autoAnswerState.intervalId);
       autoAnswerState.intervalId = null;
+      console.log("[Zyrox] Auto Answer stopped");
     }
+  }
+
+  function startAutoAnswer() {
+    ensureAutoAnswerListeners();
+    stopAutoAnswer();
+    const cfg = moduleCfg("Auto Answer");
+    const speed = Math.max(100, Number(cfg.speed) || 1000);
+    autoAnswerState.intervalId = setInterval(answerCurrentQuestion, speed);
+    console.log(`[Zyrox] Auto Answer started (${speed}ms)`);
+  }
+
+  function refreshAutoAnswerLoopIfEnabled() {
+    if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
   }
 
   function startAutoAnswer() {
