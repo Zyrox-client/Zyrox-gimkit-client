@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.2
+// @version      0.6.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.2";
+    const CLIENT_VERSION = "0.6.3";
     return CLIENT_VERSION;
   }
 
@@ -95,25 +95,29 @@
   const style = document.createElement("style");
   style.textContent = `
     :root {
-      --zyx-border: rgba(255, 58, 58, 0.35);
+      --zyx-border: #ff6f6f99;
       --zyx-border-soft: rgba(255, 255, 255, 0.12);
       --zyx-text: #d6d6df;
       --zyx-text-strong: #fff;
       --zyx-header-text: #fff;
-      --zyx-header-bg-start: rgba(255, 61, 61, 0.24);
-      --zyx-header-bg-end: rgba(40, 12, 12, 0.92);
-      --zyx-topbar-bg-start: rgba(255, 62, 62, 0.22);
-      --zyx-topbar-bg-end: rgba(32, 10, 10, 0.9);
+      --zyx-header-bg-start: rgba(255, 74, 74, 0.24);
+      --zyx-header-bg-end: rgba(60, 18, 18, 0.92);
+      --zyx-topbar-bg-start: rgba(255, 74, 74, 0.22);
+      --zyx-topbar-bg-end: rgba(56, 16, 16, 0.9);
       --zyx-icon-color: #ffdada;
-      --zyx-outline-color: rgba(255, 91, 91, 0.55);
+      --zyx-outline-color: #ff5b5bcc;
       --zyx-slider-color: #ff6b6b;
       --zyx-panel-count-text: #ffd9d9;
-      --zyx-panel-count-border: rgba(255, 100, 100, 0.4);
+      --zyx-panel-count-border: rgba(255, 100, 100, 0.45);
       --zyx-panel-count-bg: rgba(8, 8, 10, 0.6);
-      --zyx-settings-header-start: rgba(255, 61, 61, .23);
+      --zyx-settings-header-start: rgba(255, 61, 61, .3);
       --zyx-settings-header-end: rgba(45, 12, 12, .95);
-      --zyx-settings-sidebar-bg: rgba(255,255,255,.02);
+      --zyx-settings-sidebar-bg: rgba(24, 24, 32, .22);
       --zyx-settings-body-bg: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
+      --zyx-settings-text: #ffe5e5;
+      --zyx-settings-subtext: #c2c2ce;
+      --zyx-settings-card-bg: rgba(255,255,255,.03);
+      --zyx-settings-card-border: rgba(255,255,255,.08);
       --zyx-shell-blur: 10px;
       --zyx-muted: #9b9bab;
       --zyx-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
@@ -354,24 +358,24 @@
       z-index: 2147483649;
       min-width: 340px;
       border-radius: 11px;
-      border: 1px solid rgba(255, 79, 79, 0.45);
+      border: 1px solid var(--zyx-border);
       background: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
       box-shadow: var(--zyx-shadow);
       overflow: hidden;
     }
 
     .zyrox-config.hidden { display: none !important; }
-    .zyrox-config-header { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, rgba(255, 61, 61, .23), rgba(45, 12, 12, .95)); }
-    .zyrox-config-title { color: #fff; font-size: 14px; font-weight: 700; margin-bottom: 3px; }
-    .zyrox-config-sub { color: #b8b8c2; font-size: 12px; }
+    .zyrox-config-header { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
+    .zyrox-config-title { color: var(--zyx-settings-text); font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+    .zyrox-config-sub { color: var(--zyx-settings-subtext); font-size: 12px; }
     .zyrox-config-body { padding: 13px; }
-    .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:#d8d8df; font-size:14px; }
+    .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--zyx-settings-text); font-size:14px; }
     .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
 
     .zyrox-btn {
       border: 1px solid var(--zyx-outline-color);
       background: rgba(255, 61, 61, 0.12);
-      color: #ffdada;
+      color: var(--zyx-settings-text);
       border-radius: 8px;
       padding: 7px 10px;
       font-size: 12px;
@@ -410,9 +414,9 @@
       position: relative;
       z-index: 2147483649;
       width: min(760px, 92vw);
-      min-height: 460px;
+      height: min(620px, 88vh);
       border-radius: 12px;
-      border: 1px solid rgba(255, 79, 79, 0.45);
+      border: 1px solid var(--zyx-border);
       background: var(--zyx-settings-body-bg);
       box-shadow: var(--zyx-shadow);
       overflow: hidden;
@@ -421,9 +425,9 @@
 
     .zyrox-settings.hidden { display: none !important; }
     .zyrox-settings-header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
-    .zyrox-settings-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-    .zyrox-settings-sub { font-size: 12px; color: #c2c2ce; }
-    .zyrox-settings-layout { display: grid; grid-template-columns: 150px 1fr; min-height: 350px; }
+    .zyrox-settings-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; color: var(--zyx-settings-text); }
+    .zyrox-settings-sub { font-size: 12px; color: var(--zyx-settings-subtext); }
+    .zyrox-settings-layout { display: grid; grid-template-columns: 150px 1fr; min-height: 0; height: 500px; }
     .zyrox-settings-sidebar {
       border-right: 1px solid rgba(255,255,255,.08);
       padding: 10px;
@@ -437,20 +441,23 @@
       border-radius: 8px;
       padding: 7px 8px;
       font-size: 12px;
-      color: #ffdede;
+      color: var(--zyx-settings-text);
       background: rgba(0,0,0,.2);
       text-align: left;
       cursor: pointer;
     }
     .zyrox-settings-tab.active {
-      border-color: rgba(255, 105, 105, 0.6);
-      background: rgba(255, 61, 61, 0.17);
+      border-color: var(--zyx-outline-color);
+      background: color-mix(in srgb, var(--zyx-topbar-bg-start) 75%, transparent);
       color: #fff;
     }
-    .zyrox-settings-body { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .zyrox-settings-pane { min-height: 0; display: flex; }
+    .zyrox-settings-body { padding: 14px; display: flex; flex-direction: column; gap: 8px; overflow: auto; min-height: 0; width: 100%; }
+    .zyrox-settings-body::-webkit-scrollbar { width: 10px; }
+    .zyrox-settings-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--zyx-outline-color) 70%, transparent); border-radius: 999px; }
     .zyrox-settings-pane.hidden { display: none !important; }
-    .zyrox-setting-card { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.03); display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .zyrox-setting-card label { display:block; font-size: 12px; color: #ffe5e5; margin: 0; }
+    .zyrox-setting-card { border: 1px solid var(--zyx-settings-card-border); border-radius: 10px; padding: 8px 10px; background: var(--zyx-settings-card-bg); display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .zyrox-setting-card label { display:block; font-size: 12px; color: var(--zyx-settings-text); margin: 0; }
     .zyrox-setting-card input[type='color'] { width: 52px; height: 30px; border: none; background: transparent; cursor: pointer; }
     .zyrox-setting-card input[type='range'] { width: 190px; accent-color: var(--zyx-slider-color); }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
@@ -657,6 +664,22 @@
             <label>Settings Body Tint</label>
             <input type="color" class="set-settings-body" value="#121216" />
           </div>
+          <div class="zyrox-setting-card">
+            <label>Settings Text Color</label>
+            <input type="color" class="set-settings-text" value="#ffe5e5" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Settings Subtext Color</label>
+            <input type="color" class="set-settings-subtext" value="#c2c2ce" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Settings Card Border</label>
+            <input type="color" class="set-settings-card-border" value="#ffffff" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Settings Card Background</label>
+            <input type="color" class="set-settings-card-bg" value="#ffffff" />
+          </div>
         </div>
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="appearance">
@@ -711,6 +734,10 @@
   const settingsHeaderEndInput = settingsMenu.querySelector(".set-settings-header-end");
   const settingsSidebarInput = settingsMenu.querySelector(".set-settings-sidebar");
   const settingsBodyInput = settingsMenu.querySelector(".set-settings-body");
+  const settingsTextInput = settingsMenu.querySelector(".set-settings-text");
+  const settingsSubtextInput = settingsMenu.querySelector(".set-settings-subtext");
+  const settingsCardBorderInput = settingsMenu.querySelector(".set-settings-card-border");
+  const settingsCardBgInput = settingsMenu.querySelector(".set-settings-card-bg");
   const scaleInput = settingsMenu.querySelector(".set-scale");
   const radiusInput = settingsMenu.querySelector(".set-radius");
   const blurInput = settingsMenu.querySelector(".set-blur");
@@ -806,6 +833,10 @@
     const settingsHeaderEnd = settingsHeaderEndInput.value;
     const settingsSidebar = settingsSidebarInput.value;
     const settingsBody = settingsBodyInput.value;
+    const settingsText = settingsTextInput.value;
+    const settingsSubtext = settingsSubtextInput.value;
+    const settingsCardBorder = settingsCardBorderInput.value;
+    const settingsCardBg = settingsCardBgInput.value;
     const scale = Number(scaleInput.value) / 100;
     const radius = Number(radiusInput.value);
     const blur = Number(blurInput.value);
@@ -826,6 +857,10 @@
     cssRoot.setProperty("--zyx-settings-header-end", toRgba(settingsHeaderEnd, 0.95));
     cssRoot.setProperty("--zyx-settings-sidebar-bg", toRgba(settingsSidebar, 0.22));
     cssRoot.setProperty("--zyx-settings-body-bg", `linear-gradient(180deg, ${toRgba(settingsBody, 0.97)}, rgba(8, 8, 10, 0.97))`);
+    cssRoot.setProperty("--zyx-settings-text", settingsText);
+    cssRoot.setProperty("--zyx-settings-subtext", settingsSubtext);
+    cssRoot.setProperty("--zyx-settings-card-border", toRgba(settingsCardBorder, 0.18));
+    cssRoot.setProperty("--zyx-settings-card-bg", toRgba(settingsCardBg, 0.05));
     cssRoot.setProperty("--zyx-slider-color", sliderColor);
     cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
     cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
@@ -978,6 +1013,10 @@
   settingsHeaderEndInput.addEventListener("input", applyAppearance);
   settingsSidebarInput.addEventListener("input", applyAppearance);
   settingsBodyInput.addEventListener("input", applyAppearance);
+  settingsTextInput.addEventListener("input", applyAppearance);
+  settingsSubtextInput.addEventListener("input", applyAppearance);
+  settingsCardBorderInput.addEventListener("input", applyAppearance);
+  settingsCardBgInput.addEventListener("input", applyAppearance);
   scaleInput.addEventListener("input", applyAppearance);
   radiusInput.addEventListener("input", applyAppearance);
   blurInput.addEventListener("input", applyAppearance);
@@ -1001,6 +1040,10 @@
     settingsHeaderEndInput.value = "#2d0c0c";
     settingsSidebarInput.value = "#181820";
     settingsBodyInput.value = "#121216";
+    settingsTextInput.value = "#ffe5e5";
+    settingsSubtextInput.value = "#c2c2ce";
+    settingsCardBorderInput.value = "#ffffff";
+    settingsCardBgInput.value = "#ffffff";
     scaleInput.value = "100";
     radiusInput.value = "14";
     blurInput.value = "10";
@@ -1021,6 +1064,10 @@
     cssRoot.removeProperty("--zyx-settings-header-end");
     cssRoot.removeProperty("--zyx-settings-sidebar-bg");
     cssRoot.removeProperty("--zyx-settings-body-bg");
+    cssRoot.removeProperty("--zyx-settings-text");
+    cssRoot.removeProperty("--zyx-settings-subtext");
+    cssRoot.removeProperty("--zyx-settings-card-border");
+    cssRoot.removeProperty("--zyx-settings-card-bg");
     cssRoot.removeProperty("--zyx-slider-color");
     cssRoot.removeProperty("--zyx-radius-xl");
     cssRoot.removeProperty("--zyx-radius-lg");
