@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.8
+// @version      0.6.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.8";
+    const CLIENT_VERSION = "0.6.9";
     return CLIENT_VERSION;
   }
 
@@ -88,13 +88,21 @@
     modulePanels: new Map(),
     moduleEntries: [],
     moduleConfig: new Map(),
+    collapsedPanels: {},
     listeningForBind: null,
     listeningForMenuBind: false,
     searchAutofocus: true,
+    displayMode: "merged",
+    looseInitialized: false,
+    loosePositions: {
+      topbar: { x: 12, y: 12 },
+    },
+    loosePanelPositions: {},
+    mergedRootPosition: { left: 20, top: 28 },
   };
 
-  // Bumped to v2 — clears any stale saved presets (e.g. green) from v1
-  const STORAGE_KEY = "zyrox_client_settings_v2";
+  // Bumped to v3 — includes display-mode and loose layout position persistence
+  const STORAGE_KEY = "zyrox_client_settings_v3";
 
   const style = document.createElement("style");
   style.textContent = `
@@ -191,6 +199,66 @@
       align-items: center;
       gap: 8px;
     }
+
+    /* Hide legacy topbar category controls from older builds/state */
+    .zyrox-collapse-row,
+    .zyrox-collapse-btn {
+      display: none !important;
+    }
+
+    .zyrox-shell.loose-mode {
+      padding: 0;
+      width: auto !important;
+      height: auto !important;
+      min-width: 0;
+      min-height: 0;
+      border: none;
+      box-shadow: none;
+      background: transparent !important;
+      backdrop-filter: none !important;
+      overflow: visible;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-footer,
+    .zyrox-shell.loose-mode .zyrox-resize-handle {
+      display: none;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: fit-content;
+      min-height: 38px;
+      padding: 6px 10px;
+      z-index: 4;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-section {
+      display: contents;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-section-label {
+      display: none;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-panels {
+      display: block;
+      overflow: visible;
+      max-height: none;
+      padding: 0;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-panel {
+      position: absolute;
+      width: 212px;
+      z-index: 3;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-panel-header {
+      cursor: move;
+    }
+
 
     .zyrox-brand { display: flex; align-items: center; gap: 10px; color: var(--zyx-text-strong); }
 
@@ -306,7 +374,7 @@
       background: linear-gradient(90deg, var(--zyx-header-bg-start), var(--zyx-header-bg-end));
     }
 
-    .zyrox-panel-count {
+    .zyrox-panel-collapse-btn {
       font-size: 10px;
       color: var(--zyx-panel-count-text);
       background: var(--zyx-panel-count-bg);
@@ -314,6 +382,11 @@
       border-radius: 999px;
       padding: 3px 7px;
       line-height: 1;
+      cursor: pointer;
+    }
+
+    .zyrox-panel-collapse-btn.collapsed {
+      opacity: 0.62;
     }
 
     .zyrox-module-list { margin: 0; padding: 7px; list-style: none; display: flex; flex-direction: column; gap: 5px; }
@@ -477,7 +550,16 @@
     .zyrox-settings-pane.hidden { display: none !important; }
     .zyrox-setting-card { border: 1px solid var(--zyx-settings-card-border); border-radius: 10px; padding: 8px 10px; background: var(--zyx-settings-card-bg); display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .zyrox-setting-card label { display:block; font-size: 12px; color: var(--zyx-settings-text); margin: 0; }
-    .zyrox-setting-card input[type='color'] { width: 52px; height: 30px; border: none; background: transparent; cursor: pointer; }
+    .zyrox-setting-card input[type='color'] {
+      width: 52px;
+      height: 30px;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+      overflow: hidden;
+      padding: 0;
+    }
     .zyrox-setting-card input[type='range'] { width: 190px; accent-color: var(--zyx-slider-color); }
     .zyrox-setting-card input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--zyx-checkmark-color); }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
@@ -765,6 +847,13 @@
         <div class="zyrox-settings-body">
           <div class="zyrox-subheading">Layout</div>
           <div class="zyrox-setting-card">
+            <label>Display Mode</label>
+            <div class="zyrox-settings-actions-group">
+              <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
+              <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
+            </div>
+          </div>
+          <div class="zyrox-setting-card">
             <label>UI Scale</label>
             <input type="range" class="set-scale" min="80" max="130" value="100" />
           </div>
@@ -859,8 +948,11 @@
   const radiusInput = settingsMenu.querySelector(".set-radius");
   const blurInput = settingsMenu.querySelector(".set-blur");
   const hoverShiftInput = settingsMenu.querySelector(".set-hover-shift");
+  const displayModeButtons = [...settingsMenu.querySelectorAll(".set-display-mode")];
   const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
+  const panelByName = new Map();
+  const panelCollapseButtons = new Map();
   let openConfigModule = null;
 
   function moduleCfg(name) {
@@ -953,7 +1045,109 @@
       radius: radiusInput.value,
       blur: blurInput.value,
       hoverShift: hoverShiftInput.value,
+      displayMode: state.displayMode,
+      looseInitialized: state.looseInitialized,
+      loosePositions: state.loosePositions,
+      loosePanelPositions: state.loosePanelPositions,
+      collapsedPanels: state.collapsedPanels,
     };
+  }
+
+  function setPanelCollapsed(panelName, collapsed) {
+    const panel = panelByName.get(panelName);
+    if (!panel) return;
+    const list = panel.querySelector(".zyrox-module-list");
+    if (!list) return;
+    state.collapsedPanels[panelName] = collapsed;
+    list.style.display = collapsed ? "none" : "";
+    const button = panelCollapseButtons.get(panelName);
+    if (button) {
+      button.textContent = collapsed ? "▸" : "▾";
+      button.title = collapsed ? "Expand category" : "Collapse category";
+      button.setAttribute("aria-label", button.title);
+      button.classList.toggle("collapsed", collapsed);
+    }
+  }
+
+  function syncCollapseButtons() {
+    for (const [panelName, button] of panelCollapseButtons.entries()) {
+      const collapsed = !!state.collapsedPanels[panelName];
+      button.textContent = collapsed ? "▸" : "▾";
+      button.title = collapsed ? "Expand category" : "Collapse category";
+      button.setAttribute("aria-label", button.title);
+      button.classList.toggle("collapsed", collapsed);
+    }
+  }
+
+  function clampToViewport(x, y, el) {
+    const maxX = Math.max(0, window.innerWidth - el.offsetWidth);
+    const maxY = Math.max(0, window.innerHeight - el.offsetHeight);
+    return {
+      x: Math.max(0, Math.min(x, maxX)),
+      y: Math.max(0, Math.min(y, maxY)),
+    };
+  }
+
+  function captureLoosePanelPositionsFromMerged() {
+    const shellRect = shell.getBoundingClientRect();
+    for (const [name, panel] of panelByName.entries()) {
+      const rect = panel.getBoundingClientRect();
+      state.loosePanelPositions[name] = {
+        x: Math.round(rect.left - shellRect.left),
+        y: Math.round(rect.top - shellRect.top),
+      };
+    }
+  }
+
+  function setDisplayMode(mode) {
+    const nextMode = mode === "loose" ? "loose" : "merged";
+
+    if (nextMode === "loose" && !state.looseInitialized) {
+      // Capture while still in merged flow layout so the first loose layout mirrors merged positions.
+      shell.classList.remove("loose-mode");
+      captureLoosePanelPositionsFromMerged();
+      state.looseInitialized = true;
+    }
+
+    state.displayMode = nextMode;
+    shell.classList.toggle("loose-mode", state.displayMode === "loose");
+
+    for (const btn of displayModeButtons) {
+      btn.classList.toggle("active", btn.dataset.displayMode === state.displayMode);
+    }
+
+    if (state.displayMode === "loose") {
+      state.mergedRootPosition = {
+        left: parseInt(root.style.left || "20", 10),
+        top: parseInt(root.style.top || "28", 10),
+      };
+      root.style.left = "0px";
+      root.style.top = "0px";
+
+      const clampedTopbar = clampToViewport(state.loosePositions.topbar.x, state.loosePositions.topbar.y, topbar);
+      state.loosePositions.topbar = clampedTopbar;
+      topbar.style.left = `${clampedTopbar.x}px`;
+      topbar.style.top = `${clampedTopbar.y}px`;
+
+      for (const [name, panel] of panelByName.entries()) {
+        const pos = state.loosePanelPositions[name] || { x: 0, y: 0 };
+        const clamped = clampToViewport(pos.x, pos.y, panel);
+        state.loosePanelPositions[name] = clamped;
+        panel.style.left = `${clamped.x}px`;
+        panel.style.top = `${clamped.y}px`;
+      }
+    } else {
+      root.style.left = `${state.mergedRootPosition.left}px`;
+      root.style.top = `${state.mergedRootPosition.top}px`;
+      topbar.style.left = "";
+      topbar.style.top = "";
+      for (const panel of panelByName.values()) {
+        panel.style.left = "";
+        panel.style.top = "";
+      }
+      shell.style.width = `${state.shellWidth}px`;
+      shell.style.height = `${state.shellHeight}px`;
+    }
   }
 
   function applyPreset(presetName) {
@@ -1128,13 +1322,13 @@
       }
 
       panel.style.display = visibleCount > 0 ? "" : "none";
-      meta.countEl.textContent = `${visibleCount}`;
     }
   }
 
   function buildPanel(name, modules) {
     const panel = document.createElement("section");
     panel.className = "zyrox-panel";
+    panel.dataset.panelName = name;
 
     const header = document.createElement("header");
     header.className = "zyrox-panel-header";
@@ -1142,12 +1336,20 @@
     const title = document.createElement("span");
     title.textContent = name;
 
-    const count = document.createElement("span");
-    count.className = "zyrox-panel-count";
-    count.textContent = `${modules.length}`;
+    const collapseButton = document.createElement("button");
+    collapseButton.type = "button";
+    collapseButton.className = "zyrox-panel-collapse-btn";
+    collapseButton.textContent = "▾";
+    collapseButton.title = "Collapse category";
+    collapseButton.setAttribute("aria-label", "Collapse category");
+    collapseButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextCollapsed = !state.collapsedPanels[name];
+      setPanelCollapsed(name, nextCollapsed);
+    });
 
     header.appendChild(title);
-    header.appendChild(count);
+    header.appendChild(collapseButton);
 
     const list = document.createElement("ul");
     list.className = "zyrox-module-list";
@@ -1176,7 +1378,9 @@
 
     panel.appendChild(header);
     panel.appendChild(list);
-    state.modulePanels.set(panel, { countEl: count, modules: [...modules] });
+    panelByName.set(name, panel);
+    panelCollapseButtons.set(name, collapseButton);
+    state.modulePanels.set(panel, { modules: [...modules] });
     return panel;
   }
 
@@ -1271,6 +1475,9 @@
   radiusInput.addEventListener("input", applyAppearance);
   blurInput.addEventListener("input", applyAppearance);
   hoverShiftInput.addEventListener("input", applyAppearance);
+  displayModeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setDisplayMode(btn.dataset.displayMode || "merged"));
+  });
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
   });
@@ -1310,6 +1517,15 @@
     radiusInput.value = "14";
     blurInput.value = "10";
     hoverShiftInput.value = "2";
+    state.looseInitialized = false;
+    state.loosePositions = { topbar: { x: 12, y: 12 } };
+    state.loosePanelPositions = {};
+    state.collapsedPanels = {};
+    for (const panelName of panelByName.keys()) {
+      setPanelCollapsed(panelName, false);
+    }
+    syncCollapseButtons();
+    setDisplayMode("merged");
     const cssRoot = document.documentElement.style;
     cssRoot.removeProperty("--zyx-border");
     cssRoot.removeProperty("--zyx-text");
@@ -1445,12 +1661,30 @@
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
         assign(hoverShiftInput, "hoverShift");
+        if (saved.displayMode) state.displayMode = saved.displayMode === "loose" ? "loose" : "merged";
+        if (typeof saved.looseInitialized === "boolean") state.looseInitialized = saved.looseInitialized;
+        if (saved.loosePositions && typeof saved.loosePositions === "object") {
+          state.loosePositions = {
+            topbar: saved.loosePositions.topbar || state.loosePositions.topbar,
+          };
+        }
+        if (saved.loosePanelPositions && typeof saved.loosePanelPositions === "object") {
+          state.loosePanelPositions = saved.loosePanelPositions;
+        }
+        if (saved.collapsedPanels && typeof saved.collapsedPanels === "object") {
+          state.collapsedPanels = saved.collapsedPanels;
+        }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         footer.innerHTML = `<span>Press <b>${CONFIG.toggleKey}</b> to show/hide menu</span><span>Right click modules for settings</span>`;
       }
     }
   } catch (_) {}
+  for (const panelName of panelByName.keys()) {
+    setPanelCollapsed(panelName, !!state.collapsedPanels[panelName]);
+  }
+  syncCollapseButtons();
   applyAppearance();
+  setDisplayMode(state.displayMode);
 
   function setVisible(nextVisible) {
     state.visible = nextVisible;
@@ -1469,6 +1703,14 @@
   }
 
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      if (!configBackdrop.classList.contains("hidden")) {
+        event.preventDefault();
+        closeConfig();
+        return;
+      }
+    }
+
     if (state.listeningForMenuBind) {
       event.preventDefault();
       CONFIG.toggleKey = event.key;
@@ -1508,31 +1750,79 @@
   let dragState = null;
   let resizeState = null;
 
+  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0 };
+
   topbar.addEventListener("mousedown", (event) => {
+    const interactiveTarget = event.target instanceof Element
+      ? event.target.closest("input, button")
+      : null;
+    if (interactiveTarget) return;
+
     const rootBox = root.getBoundingClientRect();
-    dragState = {
-      offsetX: event.clientX - rootBox.left,
-      offsetY: event.clientY - rootBox.top,
-    };
+    if (state.displayMode === "loose") {
+      const box = topbar.getBoundingClientRect();
+      dragState = {
+        mode: "topbar",
+        offsetX: event.clientX - box.left,
+        offsetY: event.clientY - box.top,
+      };
+    } else {
+      dragState = {
+        mode: "root",
+        offsetX: event.clientX - rootBox.left,
+        offsetY: event.clientY - rootBox.top,
+      };
+    }
     event.preventDefault();
   });
 
+  panelByName.forEach((panel, panelName) => {
+    const header = panel.querySelector(".zyrox-panel-header");
+    header.addEventListener("mousedown", (event) => {
+      if (state.displayMode !== "loose") return;
+      const box = panel.getBoundingClientRect();
+      panelDragState.panelName = panelName;
+      panelDragState.offsetX = event.clientX - box.left;
+      panelDragState.offsetY = event.clientY - box.top;
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  });
+
   document.addEventListener("mousemove", (event) => {
-    if (!dragState) return;
+    if (dragState?.mode === "root") {
+      const nextX = Math.max(0, event.clientX - dragState.offsetX);
+      const nextY = Math.max(0, event.clientY - dragState.offsetY);
+      root.style.left = `${nextX}px`;
+      root.style.top = `${nextY}px`;
+    }
 
-    const nextX = Math.max(0, event.clientX - dragState.offsetX);
-    const nextY = Math.max(0, event.clientY - dragState.offsetY);
+    if (dragState?.mode === "topbar") {
+      const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY, topbar);
+      state.loosePositions.topbar = clamped;
+      topbar.style.left = `${clamped.x}px`;
+      topbar.style.top = `${clamped.y}px`;
+    }
 
-    root.style.left = `${nextX}px`;
-    root.style.top = `${nextY}px`;
+    if (panelDragState.panelName) {
+      const panel = panelByName.get(panelDragState.panelName);
+      if (panel) {
+        const clamped = clampToViewport(event.clientX - panelDragState.offsetX, event.clientY - panelDragState.offsetY, panel);
+        state.loosePanelPositions[panelDragState.panelName] = clamped;
+        panel.style.left = `${clamped.x}px`;
+        panel.style.top = `${clamped.y}px`;
+      }
+    }
   });
 
   document.addEventListener("mouseup", () => {
     dragState = null;
     resizeState = null;
+    panelDragState.panelName = null;
   });
 
   resizeHandle.addEventListener("mousedown", (event) => {
+    if (state.displayMode === "loose") return;
     resizeState = {
       startX: event.clientX,
       startY: event.clientY,
@@ -1544,7 +1834,7 @@
   });
 
   document.addEventListener("mousemove", (event) => {
-    if (!resizeState) return;
+    if (!resizeState || state.displayMode === "loose") return;
 
     const width = Math.max(760, resizeState.startWidth + (event.clientX - resizeState.startX));
     const height = Math.max(420, resizeState.startHeight + (event.clientY - resizeState.startY));
