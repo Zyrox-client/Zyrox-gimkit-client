@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Zyrox Client (UI Base)
 // @namespace    https://github.com/zyrox
-// @version      0.1.0
-// @description  Base click-GUI shell for Zyrox client (UI only, no utilities wired)
+// @version      0.2.0
+// @description  Modern UI/menu shell for Zyrox client (visual only, no utilities wired)
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-idle
@@ -17,42 +17,43 @@
 
   const CONFIG = {
     toggleKey: "\\",
-    title: "Zyrox Client",
-    subtitle: "UI Base",
+    title: "Zyrox",
+    subtitle: "Client UI Base",
   };
 
+  // UI labels only; no functionality is implemented yet.
   const CATEGORIES = [
     {
-      name: "Combat",
-      modules: ["Aura", "AutoCrystal", "Criticals", "Velocity", "TriggerBot"],
+      name: "Gameplay",
+      modules: ["Auto Answer", "Answer Streak", "Question Preview", "Skip Animation", "Instant Continue"],
     },
     {
-      name: "Exploits",
-      modules: ["PacketControl", "FastUse", "NoDelay", "Disabler", "Phase"],
+      name: "Economy",
+      modules: ["Auto Purchase", "Priority Upgrades", "Shop Presets", "Auto Save Loadout", "Quick Sell"],
     },
     {
-      name: "Movement",
-      modules: ["Sprint", "Speed", "Fly", "NoSlow", "HighJump"],
+      name: "Automation",
+      modules: ["Auto Ready", "Auto Requeue", "Auto Respawn", "Idle Prevention", "Smart Delay"],
     },
     {
-      name: "Render",
-      modules: ["ESP", "Tracers", "Waypoints", "NoWeather", "NameTags"],
+      name: "Lobby",
+      modules: ["Name Presets", "Join Shortcuts", "Party Helper", "Host Tools", "Code History"],
     },
     {
-      name: "World",
-      modules: ["Scaffold", "FastPlace", "AutoMine", "NoInteract", "GhostHand"],
+      name: "Visual",
+      modules: ["HUD", "Overlay", "Theme", "Compact Cards", "Minimal Labels"],
     },
     {
-      name: "Misc",
-      modules: ["AutoGG", "AutoRespawn", "Spammer", "MiddleClick", "Timer"],
+      name: "QoL",
+      modules: ["Hotkeys", "Notifications", "Session Timer", "Clipboard Tools", "Menu Lock"],
     },
     {
-      name: "Other",
-      modules: ["ClickGUI", "Theme", "HUD", "Chat", "Profiles"],
+      name: "Profiles",
+      modules: ["Config Slots", "Import Config", "Export Config", "Quick Reset", "Cloud Sync"],
     },
     {
       name: "Debug",
-      modules: ["UptimeResolver"],
+      modules: ["Event Log", "State Viewer", "Latency Meter"],
     },
   ];
 
@@ -64,25 +65,32 @@
   const style = document.createElement("style");
   style.textContent = `
     :root {
-      --zyx-bg: rgba(18, 18, 23, 0.96);
-      --zyx-bg-soft: rgba(29, 29, 37, 0.92);
-      --zyx-line: #d33;
-      --zyx-text: #a9a9b2;
-      --zyx-text-strong: #efefef;
-      --zyx-accent: #ff3a3a;
-      --zyx-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-      --zyx-font: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      --zyx-bg: rgba(8, 10, 18, 0.72);
+      --zyx-bg-strong: rgba(10, 13, 24, 0.92);
+      --zyx-panel: rgba(18, 22, 36, 0.72);
+      --zyx-panel-hover: rgba(25, 30, 48, 0.82);
+      --zyx-border: rgba(255, 255, 255, 0.14);
+      --zyx-text: #c7cfde;
+      --zyx-text-strong: #f3f6ff;
+      --zyx-muted: #8f9ab1;
+      --zyx-accent: #7c5cff;
+      --zyx-accent-2: #15d1ff;
+      --zyx-shadow: 0 18px 50px rgba(5, 8, 15, 0.55);
+      --zyx-radius-xl: 14px;
+      --zyx-radius-lg: 12px;
+      --zyx-radius-md: 9px;
+      --zyx-font: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     }
 
     .zyrox-root {
       all: initial;
-      font-family: var(--zyx-font);
       position: fixed;
       top: 28px;
       left: 20px;
       z-index: 2147483647;
       color: var(--zyx-text);
       user-select: none;
+      font-family: var(--zyx-font);
     }
 
     .zyrox-root * {
@@ -94,127 +102,197 @@
       display: none !important;
     }
 
+    .zyrox-shell {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      border-radius: var(--zyx-radius-xl);
+      background: linear-gradient(140deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+      backdrop-filter: blur(8px) saturate(115%);
+      border: 1px solid var(--zyx-border);
+      box-shadow: var(--zyx-shadow);
+    }
+
     .zyrox-topbar {
-      height: 28px;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 12px;
+      border-radius: var(--zyx-radius-lg);
+      background: linear-gradient(110deg, rgba(124, 92, 255, 0.22), rgba(21, 209, 255, 0.18));
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      cursor: move;
+    }
+
+    .zyrox-brand {
       display: flex;
       align-items: center;
       gap: 10px;
       color: var(--zyx-text-strong);
-      background: linear-gradient(180deg, #3a1515 0%, #2c0f0f 100%);
-      border: 1px solid var(--zyx-line);
-      box-shadow: var(--zyx-shadow);
-      width: fit-content;
-      min-width: 260px;
-      padding: 0 10px;
-      margin-bottom: 8px;
-      cursor: move;
-    }
-
-    .zyrox-topbar .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 99px;
-      background: var(--zyx-accent);
-      box-shadow: 0 0 8px rgba(255, 58, 58, 0.7);
-    }
-
-    .zyrox-topbar .meta {
-      font-size: 12px;
-      opacity: 0.95;
       letter-spacing: 0.2px;
+    }
+
+    .zyrox-logo {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      background: radial-gradient(circle at 25% 25%, #9e87ff 0%, #7c5cff 55%, #6040ff 100%);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 0 22px rgba(124, 92, 255, 0.55);
+    }
+
+    .zyrox-brand .title {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .zyrox-brand .subtitle {
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(243, 246, 255, 0.78);
+    }
+
+    .zyrox-chip {
+      font-size: 10px;
+      color: #eff6ff;
+      background: rgba(10, 14, 28, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 99px;
+      padding: 4px 8px;
+      line-height: 1;
     }
 
     .zyrox-panels {
       display: flex;
-      gap: 3px;
+      gap: 8px;
       align-items: flex-start;
+      overflow-x: auto;
+      max-width: min(96vw, 1530px);
+      padding-bottom: 2px;
+    }
+
+    .zyrox-panels::-webkit-scrollbar {
+      height: 8px;
+    }
+
+    .zyrox-panels::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 999px;
     }
 
     .zyrox-panel {
-      width: 185px;
-      border: 1px solid var(--zyx-line);
-      background: var(--zyx-bg);
-      box-shadow: var(--zyx-shadow);
+      width: 210px;
+      border-radius: var(--zyx-radius-lg);
+      border: 1px solid var(--zyx-border);
+      background: linear-gradient(180deg, rgba(20, 25, 39, 0.8), rgba(10, 13, 23, 0.78));
       overflow: hidden;
     }
 
     .zyrox-panel-header {
-      height: 24px;
+      min-height: 33px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 7px;
+      padding: 0 10px;
       font-size: 12px;
-      background: linear-gradient(180deg, #bb3434 0%, #7a1e1e 100%);
-      color: #fff;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+      font-weight: 600;
+      color: var(--zyx-text-strong);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background: linear-gradient(90deg, rgba(124, 92, 255, 0.2), rgba(21, 209, 255, 0.12));
     }
 
     .zyrox-panel-count {
-      color: rgba(255, 255, 255, 0.9);
-      font-size: 11px;
-      border: 1px solid rgba(255, 255, 255, 0.45);
-      padding: 0 4px;
-      line-height: 14px;
-      height: 15px;
-      border-radius: 2px;
+      font-size: 10px;
+      color: #dbe8ff;
+      background: rgba(6, 10, 18, 0.48);
+      border: 1px solid rgba(255, 255, 255, 0.17);
+      border-radius: 999px;
+      padding: 3px 7px;
+      line-height: 1;
     }
 
     .zyrox-module-list {
       margin: 0;
-      padding: 3px 0;
+      padding: 7px;
       list-style: none;
-      background: var(--zyx-bg-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      background: transparent;
     }
 
     .zyrox-module {
-      height: 25px;
+      min-height: 30px;
       display: flex;
       align-items: center;
       padding: 0 10px;
-      font-size: 15px;
-      line-height: 1;
+      font-size: 13px;
+      font-weight: 500;
       color: var(--zyx-text);
-      transition: background 0.12s ease, color 0.12s ease;
+      border: 1px solid transparent;
+      border-radius: var(--zyx-radius-md);
+      background: rgba(255, 255, 255, 0.02);
+      transition: transform 0.11s ease, background 0.11s ease, border-color 0.11s ease, color 0.11s ease;
       cursor: pointer;
+      white-space: nowrap;
     }
 
     .zyrox-module:hover {
-      background: rgba(255, 70, 70, 0.09);
+      background: var(--zyx-panel-hover);
+      border-color: rgba(255, 255, 255, 0.14);
       color: var(--zyx-text-strong);
+      transform: translateX(2px);
     }
 
     .zyrox-module.active {
-      color: var(--zyx-accent);
-      text-shadow: 0 0 8px rgba(255, 58, 58, 0.25);
+      color: #ffffff;
+      background: linear-gradient(90deg, rgba(124, 92, 255, 0.34), rgba(21, 209, 255, 0.22));
+      border-color: rgba(167, 195, 255, 0.35);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
     }
 
-    .zyrox-hint {
-      margin-top: 8px;
-      color: #c3c3cb;
+    .zyrox-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      color: var(--zyx-muted);
       font-size: 11px;
-      opacity: 0.85;
-      text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
-      font-family: var(--zyx-font);
+      padding: 0 3px;
     }
   `;
 
   const root = document.createElement("div");
   root.className = "zyrox-root";
 
+  const shell = document.createElement("div");
+  shell.className = "zyrox-shell";
+
   const topbar = document.createElement("div");
   topbar.className = "zyrox-topbar";
   topbar.innerHTML = `
-    <span class="dot"></span>
-    <span class="meta">${CONFIG.title} • ${CONFIG.subtitle}</span>
+    <div class="zyrox-brand">
+      <span class="zyrox-logo"></span>
+      <div>
+        <div class="title">${CONFIG.title}</div>
+        <div class="subtitle">${CONFIG.subtitle}</div>
+      </div>
+    </div>
+    <span class="zyrox-chip">UI ONLY</span>
   `;
 
   const panelsWrap = document.createElement("div");
   panelsWrap.className = "zyrox-panels";
 
-  const hint = document.createElement("div");
-  hint.className = "zyrox-hint";
-  hint.textContent = `Press ${CONFIG.toggleKey} to show/hide UI • Left click toggles visual state only`;
+  const footer = document.createElement("div");
+  footer.className = "zyrox-footer";
+  footer.innerHTML = `
+    <span>Press <b>${CONFIG.toggleKey}</b> to show/hide UI</span>
+    <span>Left click toggles visual state only</span>
+  `;
 
   for (const category of CATEGORIES) {
     const panel = document.createElement("section");
@@ -228,7 +306,7 @@
 
     const count = document.createElement("span");
     count.className = "zyrox-panel-count";
-    count.textContent = `[${category.modules.length}]`;
+    count.textContent = `${category.modules.length}`;
 
     header.appendChild(title);
     header.appendChild(count);
@@ -259,9 +337,11 @@
     panelsWrap.appendChild(panel);
   }
 
-  root.appendChild(topbar);
-  root.appendChild(panelsWrap);
-  root.appendChild(hint);
+  shell.appendChild(topbar);
+  shell.appendChild(panelsWrap);
+  shell.appendChild(footer);
+
+  root.appendChild(shell);
 
   document.head.appendChild(style);
   document.body.appendChild(root);

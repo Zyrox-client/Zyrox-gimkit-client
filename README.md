@@ -1,6 +1,6 @@
 # zyrox gimkit client
 
-UI base script for a Zyrox-themed click GUI on `gimkit.com/join`.
+Modern UI base script for a Zyrox-themed click GUI on `gimkit.com/join`.
 
 ## Files
 - `example.js`: Reference/example userscript from another project.
