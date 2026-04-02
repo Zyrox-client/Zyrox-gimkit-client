@@ -2446,6 +2446,301 @@
     if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
   }
 
+  var zyroxAutoAnswerState = globalThis.__ZYROX_AUTOANSWER_STATE__ || {
+    intervalId: null,
+    listenersAttached: false,
+    socketManager: null,
+    questions: [],
+    answerDeviceId: null,
+    currentQuestionId: null,
+    questionIdList: [],
+    currentQuestionIndex: -1,
+    lastAnsweredId: null,
+    lastDebugAt: 0,
+  };
+  globalThis.__ZYROX_AUTOANSWER_STATE__ = zyroxAutoAnswerState;
+
+  function getSocketManager() {
+    if (zyroxAutoAnswerState.socketManager) return zyroxAutoAnswerState.socketManager;
+    const direct = globalThis.socketManager;
+    if (direct && typeof direct.sendMessage === "function" && typeof direct.addEventListener === "function") {
+      zyroxAutoAnswerState.socketManager = direct;
+      console.log("[Zyrox][AutoAnswer] Found socketManager on window.socketManager");
+      return direct;
+    }
+
+    for (const key of Object.getOwnPropertyNames(globalThis)) {
+      let candidate;
+      try {
+        candidate = globalThis[key];
+      } catch (_) {
+        continue;
+      }
+      if (candidate && typeof candidate.sendMessage === "function" && typeof candidate.addEventListener === "function") {
+        zyroxAutoAnswerState.socketManager = candidate;
+        console.log(`[Zyrox][AutoAnswer] Found socket manager candidate on window.${key}`);
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function getTransportType(socketManager) {
+    const raw = socketManager?.transportType;
+    if (typeof raw === "string") return raw;
+    if (raw && typeof raw.get === "function") {
+      try {
+        return raw.get();
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function pickAnswerPayload(question) {
+    if (!question || !Array.isArray(question.answers) || question.answers.length === 0) return null;
+    if (question.type === "text") return question.answers[0]?.text ?? null;
+    return question.answers.find((a) => a && a.correct)?._id ?? null;
+  }
+
+  function normalizeText(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function findQuestionBankInObject(root, depth = 0) {
+    if (!root || typeof root !== "object" || depth > 8) return null;
+    if (Array.isArray(root)) {
+      if (root.length && root.every((q) => q && typeof q === "object" && "_id" in q && Array.isArray(q.answers))) {
+        return root;
+      }
+      for (const item of root) {
+        const found = findQuestionBankInObject(item, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const value of Object.values(root)) {
+      const found = findQuestionBankInObject(value, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function refreshQuestionsFromStoresFallback() {
+    try {
+      const fromStores = findQuestionBankInObject(globalThis.stores);
+      if (fromStores && fromStores.length) {
+        zyroxAutoAnswerState.questions = fromStores;
+        if (Date.now() - zyroxAutoAnswerState.lastDebugAt > 5000) {
+          console.log(`[Zyrox][AutoAnswer] Loaded ${fromStores.length} questions from stores fallback.`);
+          zyroxAutoAnswerState.lastDebugAt = Date.now();
+        }
+      }
+    } catch (_) {}
+  }
+
+  function deepFindValueByKey(root, keyMatcher, depth = 0) {
+    if (!root || typeof root !== "object" || depth > 6) return null;
+    if (Array.isArray(root)) {
+      for (const item of root) {
+        const found = deepFindValueByKey(item, keyMatcher, depth + 1);
+        if (found !== null) return found;
+      }
+      return null;
+    }
+    for (const [key, value] of Object.entries(root)) {
+      if (keyMatcher(key, value)) return value;
+      const found = deepFindValueByKey(value, keyMatcher, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
+  function refreshQuestionsFromPhaserFallback() {
+    const devices = globalThis.stores?.phaser?.scene?.worldManager?.devices?.allDevices;
+    if (!Array.isArray(devices) || !devices.length) return;
+
+    for (const device of devices) {
+      const globalQuestionsRaw = deepFindValueByKey(device, (key) => key === "GLOBAL_questions");
+      if (typeof globalQuestionsRaw === "string") {
+        try {
+          const parsed = JSON.parse(globalQuestionsRaw);
+          if (Array.isArray(parsed) && parsed.length) {
+            zyroxAutoAnswerState.questions = parsed;
+            zyroxAutoAnswerState.answerDeviceId = device?.id ?? zyroxAutoAnswerState.answerDeviceId;
+          }
+        } catch (_) {}
+      }
+      const currentQuestionId = deepFindValueByKey(device, (key) => key.includes("_currentQuestionId"));
+      if (currentQuestionId) zyroxAutoAnswerState.currentQuestionId = currentQuestionId;
+    }
+  }
+
+  function findPhaserRoomSender() {
+    const scene = globalThis.stores?.phaser?.scene;
+    if (!scene) return null;
+    const roomCandidate = deepFindValueByKey(
+      scene,
+      (_, value) => value && typeof value.send === "function" && typeof value === "object"
+    );
+    return roomCandidate || null;
+  }
+
+  function getQuestionPrompt(question) {
+    return question?.text ?? question?.question ?? question?.prompt ?? question?.title ?? "";
+  }
+
+  function findCurrentQuestionFromDom() {
+    const questionTextEl = document.querySelector(
+      "[data-testid='question-text'], [class*='question'][class*='text'], .question, .Question-text, h1, h2"
+    );
+    const questionText = normalizeText(questionTextEl?.textContent);
+    if (!questionText) return null;
+    return zyroxAutoAnswerState.questions.find((q) => normalizeText(getQuestionPrompt(q)) === questionText) || null;
+  }
+
+  function tryAnswerViaDom(question) {
+    if (!question || !Array.isArray(question.answers)) return false;
+    if (zyroxAutoAnswerState.lastAnsweredId === question._id) return false;
+
+    const correct = question.answers.find((a) => a && a.correct);
+    if (!correct) return false;
+
+    const correctText = normalizeText(correct.text ?? correct.answer ?? correct.value);
+    if (!correctText) return false;
+
+    const clickable = [...document.querySelectorAll(
+      "button, [role='button'], .option, [class*='option'], [class*='answer'], [data-testid*='answer']"
+    )].filter((el) => normalizeText(el.textContent) === correctText);
+
+    if (!clickable.length) return false;
+    clickable[0].click();
+    zyroxAutoAnswerState.lastAnsweredId = question._id;
+    return true;
+  }
+
+  function answerCurrentQuestion() {
+    refreshQuestionsFromStoresFallback();
+    refreshQuestionsFromPhaserFallback();
+
+    const socketManager = getSocketManager();
+    if (!socketManager) {
+      if (globalThis.Phaser && zyroxAutoAnswerState.currentQuestionId && zyroxAutoAnswerState.answerDeviceId) {
+        const question = zyroxAutoAnswerState.questions.find((q) => q?._id == zyroxAutoAnswerState.currentQuestionId);
+        const answer = pickAnswerPayload(question);
+        const roomSender = findPhaserRoomSender();
+        if (answer && roomSender) {
+          roomSender.send("MESSAGE_FOR_DEVICE", {
+            key: "answered",
+            deviceId: zyroxAutoAnswerState.answerDeviceId,
+            data: { answer },
+          });
+          zyroxAutoAnswerState.lastAnsweredId = question?._id || null;
+          console.log(`[Zyrox][AutoAnswer] Answered via Phaser room sender: ${question?._id}`);
+          return;
+        }
+      }
+
+      const domQuestion = findCurrentQuestionFromDom();
+      const answered = tryAnswerViaDom(domQuestion);
+      if (!answered) {
+        if (Date.now() - zyroxAutoAnswerState.lastDebugAt > 3000) {
+          console.log("[Zyrox][AutoAnswer] No socket manager and no DOM match yet.", {
+            questionCount: zyroxAutoAnswerState.questions.length,
+          });
+          zyroxAutoAnswerState.lastDebugAt = Date.now();
+        }
+      }
+      return;
+    }
+
+    const transportType = getTransportType(socketManager);
+
+    if (transportType === "colyseus") {
+      if (!zyroxAutoAnswerState.currentQuestionId || !zyroxAutoAnswerState.answerDeviceId) return;
+      const question = zyroxAutoAnswerState.questions.find((q) => q?._id == zyroxAutoAnswerState.currentQuestionId);
+      const answer = pickAnswerPayload(question);
+      if (!answer) return;
+
+      socketManager.sendMessage("MESSAGE_FOR_DEVICE", {
+        key: "answered",
+        deviceId: zyroxAutoAnswerState.answerDeviceId,
+        data: { answer },
+      });
+      zyroxAutoAnswerState.lastAnsweredId = question._id;
+      console.log(`[Zyrox][AutoAnswer] Answered colyseus question ${question._id}`);
+      return;
+    }
+
+    const questionId = zyroxAutoAnswerState.questionIdList[zyroxAutoAnswerState.currentQuestionIndex];
+    if (!questionId) return;
+    const question = zyroxAutoAnswerState.questions.find((q) => q?._id == questionId);
+    const answer = pickAnswerPayload(question);
+    if (!answer) return;
+    socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+    zyroxAutoAnswerState.lastAnsweredId = question._id;
+    console.log(`[Zyrox][AutoAnswer] Answered blueboat question ${questionId}`);
+  }
+
+  function ensureAutoAnswerListeners() {
+    if (zyroxAutoAnswerState.listenersAttached) return true;
+    const socketManager = getSocketManager();
+    if (!socketManager) return false;
+
+    socketManager.addEventListener("deviceChanges", (event) => {
+      for (const { id, data } of event.detail || []) {
+        for (const key in data || {}) {
+          if (key === "GLOBAL_questions") {
+            try {
+              zyroxAutoAnswerState.questions = JSON.parse(data[key]);
+              zyroxAutoAnswerState.answerDeviceId = id;
+            } catch (_) {}
+          }
+          if (key.includes("_currentQuestionId")) {
+            zyroxAutoAnswerState.currentQuestionId = data[key];
+          }
+        }
+      }
+    });
+
+    socketManager.addEventListener("blueboatMessage", (event) => {
+      if (event.detail?.key !== "STATE_UPDATE") return;
+      const payload = event.detail?.data;
+      if (!payload) return;
+      if (payload.type === "GAME_QUESTIONS") zyroxAutoAnswerState.questions = payload.value || [];
+      if (payload.type === "PLAYER_QUESTION_LIST") {
+        zyroxAutoAnswerState.questionIdList = payload.value?.questionList || [];
+        zyroxAutoAnswerState.currentQuestionIndex = payload.value?.questionIndex ?? -1;
+      }
+      if (payload.type === "PLAYER_QUESTION_LIST_INDEX") {
+        zyroxAutoAnswerState.currentQuestionIndex = Number(payload.value ?? -1);
+      }
+    });
+
+    zyroxAutoAnswerState.listenersAttached = true;
+    return true;
+  }
+
+  function stopAutoAnswer() {
+    if (zyroxAutoAnswerState.intervalId) {
+      clearInterval(zyroxAutoAnswerState.intervalId);
+      zyroxAutoAnswerState.intervalId = null;
+      console.log("[Zyrox] Auto Answer stopped");
+    }
+  }
+
+  function startAutoAnswer() {
+    ensureAutoAnswerListeners();
+    stopAutoAnswer();
+    const cfg = moduleCfg("Auto Answer");
+    const speed = Math.max(100, Number(cfg.speed) || 1000);
+    zyroxAutoAnswerState.intervalId = setInterval(answerCurrentQuestion, speed);
+    console.log(`[Zyrox] Auto Answer started (${speed}ms)`);
+  }
+
+  function refreshAutoAnswerLoopIfEnabled() {
+    if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
+  }
+
   function closeConfig() {
     configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
