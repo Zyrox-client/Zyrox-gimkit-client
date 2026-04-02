@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.9
+// @version      0.8.0
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -26,7 +26,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.9";
+    const CLIENT_VERSION = "0.8.0";
     return CLIENT_VERSION;
   }
 
@@ -1323,11 +1323,27 @@
     if (bindButton) bindButton.textContent = text;
   }
 
-  function moduleCfg(name) {
-    if (!state.moduleConfig.has(name)) {
-      state.moduleConfig.set(name, { keybind: null });
+  function ensureModuleConfigStore() {
+    if (state.moduleConfig instanceof Map) return state.moduleConfig;
+
+    const recovered = new Map();
+    if (state.moduleConfig && typeof state.moduleConfig === "object") {
+      for (const [moduleName, cfg] of Object.entries(state.moduleConfig)) {
+        if (cfg && typeof cfg === "object") {
+          recovered.set(moduleName, { keybind: cfg.keybind || null });
+        }
+      }
     }
-    return state.moduleSettings.get(moduleName);
+    state.moduleConfig = recovered;
+    return state.moduleConfig;
+  }
+
+  function moduleCfg(name) {
+    const store = ensureModuleConfigStore();
+    if (!store.has(name)) {
+      store.set(name, { keybind: null });
+    }
+    return store.get(name);
   }
 
   function setBindLabel(item, moduleName) {
@@ -1366,66 +1382,6 @@
     configTitleEl.textContent = moduleName;
     configSubEl.textContent = cfg.keybind ? `Current bind: ${cfg.keybind}` : "No keybind assigned";
     setBindButtonText("Set keybind");
-
-    const moduleLayout = MENU_LAYOUT.general.groups.flatMap(group => group.modules)
-      .find(mod => typeof mod === 'object' && mod.name === moduleName);
-
-    const configBody = configMenu.querySelector(".zyrox-config-body");
-    configBody.innerHTML = `
-      <div class="zyrox-config-row">
-        <span>Keybind</span>
-        <div class="zyrox-config-actions">
-          <button class="zyrox-btn zyrox-btn-square reset-bind-btn" type="button" title="Reset keybind">↺</button>
-          <button class="zyrox-btn set-bind-btn" type="button">Set keybind</button>
-        </div>
-      </div>
-    `;
-    
-    const currentResetBindBtn = configMenu.querySelector(".reset-bind-btn");
-    const currentSetBindBtn = configMenu.querySelector(".set-bind-btn");
-
-    currentSetBindBtn.addEventListener("click", () => {
-      if (!openConfigModule) return;
-      state.listeningForBind = openConfigModule;
-      currentSetBindBtn.textContent = "Press any key...";
-    });
-
-    currentResetBindBtn.addEventListener("click", () => {
-      if (!openConfigModule) return;
-      const cfg = moduleCfg(openConfigModule);
-      cfg.keybind = null;
-      const item = state.moduleItems.get(openConfigModule);
-      if (item) setBindLabel(item, openConfigModule);
-      configSubEl.textContent = "No keybind assigned";
-      state.listeningForBind = null;
-      currentSetBindBtn.textContent = "Set keybind";
-    });
-
-    if (moduleLayout && moduleLayout.settings) {
-      for (const setting of moduleLayout.settings) {
-        const settingCard = document.createElement("div");
-        settingCard.className = "zyrox-setting-card";
-        let inputHtml = '';
-        let eventListener = null;
-
-        if (setting.type === "slider") {
-          inputHtml = `<input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${cfg[setting.id]}" />`;
-          eventListener = (event) => {
-            cfg[setting.id] = Number(event.target.value);
-          };
-        }
-
-        settingCard.innerHTML = `
-          <label>${setting.label}</label>
-          ${inputHtml}
-        `;
-        configBody.appendChild(settingCard);
-
-        if (eventListener) {
-          settingCard.querySelector(".set-module-setting").addEventListener("input", eventListener);
-        }
-      }
-    }
 
     configBackdrop.classList.remove("hidden");
     configMenu.classList.remove("hidden");
@@ -2204,7 +2160,7 @@
       return;
     }
 
-    for (const [moduleName, cfg] of state.moduleConfig) {
+    for (const [moduleName, cfg] of ensureModuleConfigStore()) {
       if (cfg.keybind && cfg.keybind === event.key) {
         toggleModule(moduleName);
       }
