@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.8
+// @version      0.6.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.8";
+    const CLIENT_VERSION = "0.6.9";
     return CLIENT_VERSION;
   }
 
@@ -91,10 +91,16 @@
     listeningForBind: null,
     listeningForMenuBind: false,
     searchAutofocus: true,
+    displayMode: "merged",
+    loosePositions: {
+      topbar: { x: 12, y: 12 },
+      general: { x: 12, y: 72 },
+      gamemode: { x: 460, y: 72 },
+    },
   };
 
   // Bumped to v2 — clears any stale saved presets (e.g. green) from v1
-  const STORAGE_KEY = "zyrox_client_settings_v2";
+  const STORAGE_KEY = "zyrox_client_settings_v3";
 
   const style = document.createElement("style");
   style.textContent = `
@@ -191,6 +197,52 @@
       align-items: center;
       gap: 8px;
     }
+
+
+    .zyrox-shell.loose-mode {
+      padding: 0;
+      width: auto !important;
+      height: auto !important;
+      min-width: 0;
+      min-height: 0;
+      border: none;
+      box-shadow: none;
+      background: transparent !important;
+      backdrop-filter: none !important;
+      overflow: visible;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-footer,
+    .zyrox-shell.loose-mode .zyrox-resize-handle {
+      display: none;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-topbar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: fit-content;
+      min-height: 38px;
+      padding: 6px 10px;
+      z-index: 4;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-section {
+      position: absolute;
+      min-width: 430px;
+      max-width: 920px;
+      padding: 9px;
+      border-radius: var(--zyx-radius-lg);
+      border: 1px solid var(--zyx-border-soft);
+      background: linear-gradient(180deg, rgba(24, 24, 30, 0.28), rgba(10, 10, 12, 0.28));
+      backdrop-filter: blur(calc(var(--zyx-shell-blur) * 0.7));
+      cursor: default;
+    }
+
+    .zyrox-shell.loose-mode .zyrox-section-label {
+      cursor: move;
+    }
+
 
     .zyrox-brand { display: flex; align-items: center; gap: 10px; color: var(--zyx-text-strong); }
 
@@ -765,6 +817,13 @@
         <div class="zyrox-settings-body">
           <div class="zyrox-subheading">Layout</div>
           <div class="zyrox-setting-card">
+            <label>Display Mode</label>
+            <div class="zyrox-settings-actions-group">
+              <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
+              <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
+            </div>
+          </div>
+          <div class="zyrox-setting-card">
             <label>UI Scale</label>
             <input type="range" class="set-scale" min="80" max="130" value="100" />
           </div>
@@ -859,6 +918,7 @@
   const radiusInput = settingsMenu.querySelector(".set-radius");
   const blurInput = settingsMenu.querySelector(".set-blur");
   const hoverShiftInput = settingsMenu.querySelector(".set-hover-shift");
+  const displayModeButtons = [...settingsMenu.querySelectorAll(".set-display-mode")];
   const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   let openConfigModule = null;
@@ -953,7 +1013,39 @@
       radius: radiusInput.value,
       blur: blurInput.value,
       hoverShift: hoverShiftInput.value,
+      displayMode: state.displayMode,
+      loosePositions: state.loosePositions,
     };
+  }
+
+  function setSectionPosition(section, pos) {
+    section.style.left = `${pos.x}px`;
+    section.style.top = `${pos.y}px`;
+  }
+
+  function setDisplayMode(mode) {
+    state.displayMode = mode === "loose" ? "loose" : "merged";
+    shell.classList.toggle("loose-mode", state.displayMode === "loose");
+
+    for (const btn of displayModeButtons) {
+      btn.classList.toggle("active", btn.dataset.displayMode === state.displayMode);
+    }
+
+    if (state.displayMode === "loose") {
+      setSectionPosition(generalSection, state.loosePositions.general);
+      setSectionPosition(gamemodeSection, state.loosePositions.gamemode);
+      topbar.style.left = `${state.loosePositions.topbar.x}px`;
+      topbar.style.top = `${state.loosePositions.topbar.y}px`;
+    } else {
+      generalSection.style.left = "";
+      generalSection.style.top = "";
+      gamemodeSection.style.left = "";
+      gamemodeSection.style.top = "";
+      topbar.style.left = "";
+      topbar.style.top = "";
+      shell.style.width = `${state.shellWidth}px`;
+      shell.style.height = `${state.shellHeight}px`;
+    }
   }
 
   function applyPreset(presetName) {
@@ -1271,6 +1363,9 @@
   radiusInput.addEventListener("input", applyAppearance);
   blurInput.addEventListener("input", applyAppearance);
   hoverShiftInput.addEventListener("input", applyAppearance);
+  displayModeButtons.forEach((btn) => {
+    btn.addEventListener("click", () => setDisplayMode(btn.dataset.displayMode || "merged"));
+  });
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
   });
@@ -1310,6 +1405,8 @@
     radiusInput.value = "14";
     blurInput.value = "10";
     hoverShiftInput.value = "2";
+    state.loosePositions = { topbar: { x: 12, y: 12 }, general: { x: 12, y: 72 }, gamemode: { x: 460, y: 72 } };
+    setDisplayMode("merged");
     const cssRoot = document.documentElement.style;
     cssRoot.removeProperty("--zyx-border");
     cssRoot.removeProperty("--zyx-text");
@@ -1445,12 +1542,21 @@
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
         assign(hoverShiftInput, "hoverShift");
+        if (saved.displayMode) state.displayMode = saved.displayMode === "loose" ? "loose" : "merged";
+        if (saved.loosePositions && typeof saved.loosePositions === "object") {
+          state.loosePositions = {
+            topbar: saved.loosePositions.topbar || state.loosePositions.topbar,
+            general: saved.loosePositions.general || state.loosePositions.general,
+            gamemode: saved.loosePositions.gamemode || state.loosePositions.gamemode,
+          };
+        }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         footer.innerHTML = `<span>Press <b>${CONFIG.toggleKey}</b> to show/hide menu</span><span>Right click modules for settings</span>`;
       }
     }
   } catch (_) {}
   applyAppearance();
+  setDisplayMode(state.displayMode);
 
   function setVisible(nextVisible) {
     state.visible = nextVisible;
@@ -1508,31 +1614,76 @@
   let dragState = null;
   let resizeState = null;
 
+  const sectionDragState = { key: null, offsetX: 0, offsetY: 0 };
+
   topbar.addEventListener("mousedown", (event) => {
     const rootBox = root.getBoundingClientRect();
-    dragState = {
-      offsetX: event.clientX - rootBox.left,
-      offsetY: event.clientY - rootBox.top,
-    };
+    if (state.displayMode === "loose") {
+      const shellBox = shell.getBoundingClientRect();
+      dragState = {
+        mode: "topbar",
+        offsetX: event.clientX - shellBox.left,
+        offsetY: event.clientY - shellBox.top,
+      };
+    } else {
+      dragState = {
+        mode: "root",
+        offsetX: event.clientX - rootBox.left,
+        offsetY: event.clientY - rootBox.top,
+      };
+    }
     event.preventDefault();
   });
 
+  [
+    [generalSection, "general"],
+    [gamemodeSection, "gamemode"],
+  ].forEach(([section, key]) => {
+    const label = section.querySelector(".zyrox-section-label");
+    label.addEventListener("mousedown", (event) => {
+      if (state.displayMode !== "loose") return;
+      const box = section.getBoundingClientRect();
+      sectionDragState.key = key;
+      sectionDragState.offsetX = event.clientX - box.left;
+      sectionDragState.offsetY = event.clientY - box.top;
+      event.preventDefault();
+      event.stopPropagation();
+    });
+  });
+
   document.addEventListener("mousemove", (event) => {
-    if (!dragState) return;
+    if (dragState?.mode === "root") {
+      const nextX = Math.max(0, event.clientX - dragState.offsetX);
+      const nextY = Math.max(0, event.clientY - dragState.offsetY);
+      root.style.left = `${nextX}px`;
+      root.style.top = `${nextY}px`;
+    }
 
-    const nextX = Math.max(0, event.clientX - dragState.offsetX);
-    const nextY = Math.max(0, event.clientY - dragState.offsetY);
+    if (dragState?.mode === "topbar") {
+      const x = Math.max(0, event.clientX - dragState.offsetX);
+      const y = Math.max(0, event.clientY - dragState.offsetY);
+      state.loosePositions.topbar = { x, y };
+      topbar.style.left = `${x}px`;
+      topbar.style.top = `${y}px`;
+    }
 
-    root.style.left = `${nextX}px`;
-    root.style.top = `${nextY}px`;
+    if (sectionDragState.key) {
+      const x = Math.max(0, event.clientX - sectionDragState.offsetX);
+      const y = Math.max(0, event.clientY - sectionDragState.offsetY);
+      state.loosePositions[sectionDragState.key] = { x, y };
+      const section = sectionDragState.key === "general" ? generalSection : gamemodeSection;
+      setSectionPosition(section, { x, y });
+    }
   });
 
   document.addEventListener("mouseup", () => {
     dragState = null;
     resizeState = null;
+    sectionDragState.key = null;
   });
 
   resizeHandle.addEventListener("mousedown", (event) => {
+    if (state.displayMode === "loose") return;
     resizeState = {
       startX: event.clientX,
       startY: event.clientY,
@@ -1544,7 +1695,7 @@
   });
 
   document.addEventListener("mousemove", (event) => {
-    if (!resizeState) return;
+    if (!resizeState || state.displayMode === "loose") return;
 
     const width = Math.max(760, resizeState.startWidth + (event.clientX - resizeState.startX));
     const height = Math.max(420, resizeState.startHeight + (event.clientY - resizeState.startY));
