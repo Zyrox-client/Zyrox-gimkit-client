@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.8.1
+// @version      0.8.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,7 +45,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.8.1";
+    const CLIENT_VERSION = "0.8.2";
     return CLIENT_VERSION;
   }
 
@@ -1339,10 +1339,16 @@
   let openConfigModule = null;
   let currentSetBindBtn = null;
   let currentResetBindBtn = null;
+  let currentBindTextEl = null;
 
   function setBindButtonText(text) {
     const bindButton = currentSetBindBtn || setBindButtonEl || configMenu.querySelector(".set-bind-btn");
     if (bindButton) bindButton.textContent = text;
+  }
+
+  function setCurrentBindText(bind) {
+    if (!currentBindTextEl) return;
+    currentBindTextEl.textContent = bind ? `Keybind: ${bind}` : "Keybind: none";
   }
 
   function getModuleLayoutConfig(moduleName) {
@@ -1386,7 +1392,8 @@
   function setBindLabel(item, moduleName) {
     const label = item.querySelector(".zyrox-bind-label");
     const bind = moduleCfg(moduleName).keybind;
-    label.textContent = bind || "-";
+    label.textContent = bind || "";
+    label.style.display = bind ? "" : "none";
   }
 
   function toggleModule(moduleName) {
@@ -1408,6 +1415,7 @@
     configMenu.classList.add("hidden");
     settingsMenu.classList.add("hidden");
     openConfigModule = null;
+    currentBindTextEl = null;
     state.listeningForBind = null;
     setBindButtonText("Set keybind");
   }
@@ -1419,7 +1427,7 @@
 
     configBody.innerHTML = `
       <div class="zyrox-config-row">
-        <span>Keybind</span>
+        <span class="zyrox-keybind-current">Keybind: ${cfg.keybind || "none"}</span>
         <div class="zyrox-config-actions">
           <button class="zyrox-btn zyrox-btn-square reset-bind-btn" type="button" title="Reset keybind">↺</button>
           <button class="zyrox-btn set-bind-btn" type="button">Set keybind</button>
@@ -1429,6 +1437,7 @@
 
     currentResetBindBtn = configMenu.querySelector(".reset-bind-btn");
     currentSetBindBtn = configMenu.querySelector(".set-bind-btn");
+    currentBindTextEl = configMenu.querySelector(".zyrox-keybind-current");
 
     if (currentSetBindBtn) {
       currentSetBindBtn.addEventListener("click", () => {
@@ -1445,7 +1454,7 @@
         activeCfg.keybind = null;
         const item = state.moduleItems.get(openConfigModule);
         if (item) setBindLabel(item, openConfigModule);
-        configSubEl.textContent = "No keybind assigned";
+        setCurrentBindText(null);
         state.listeningForBind = null;
         setBindButtonText("Set keybind");
       });
@@ -1475,8 +1484,9 @@
     }
 
     configTitleEl.textContent = moduleName;
-    configSubEl.textContent = cfg.keybind ? `Current bind: ${cfg.keybind}` : "No keybind assigned";
+    configSubEl.textContent = "Edit settings";
     setBindButtonText("Set keybind");
+    setCurrentBindText(cfg.keybind || null);
 
     configBackdrop.classList.remove("hidden");
     configMenu.classList.remove("hidden");
@@ -1840,7 +1850,7 @@
       if (!moduleName) continue;
       const item = document.createElement("li");
       item.className = "zyrox-module";
-      item.innerHTML = `<span>${moduleName}</span><span class="zyrox-bind-label">-</span>`;
+      item.innerHTML = `<span>${moduleName}</span><span class="zyrox-bind-label"></span>`;
 
       state.moduleItems.set(moduleName, item);
       state.moduleEntries.push({ name: moduleName, item, panel });
@@ -2225,7 +2235,7 @@
       cfg.keybind = event.key;
       const item = state.moduleItems.get(openConfigModule);
       if (item) setBindLabel(item, openConfigModule);
-      configSubEl.textContent = `Current bind: ${cfg.keybind}`;
+      setCurrentBindText(cfg.keybind);
       setBindButtonText("Set keybind");
       state.listeningForBind = null;
       return;
