@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.1
+// @version      0.6.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.1";
+    const CLIENT_VERSION = "0.6.2";
     return CLIENT_VERSION;
   }
 
@@ -107,6 +107,13 @@
       --zyx-icon-color: #ffdada;
       --zyx-outline-color: rgba(255, 91, 91, 0.55);
       --zyx-slider-color: #ff6b6b;
+      --zyx-panel-count-text: #ffd9d9;
+      --zyx-panel-count-border: rgba(255, 100, 100, 0.4);
+      --zyx-panel-count-bg: rgba(8, 8, 10, 0.6);
+      --zyx-settings-header-start: rgba(255, 61, 61, .23);
+      --zyx-settings-header-end: rgba(45, 12, 12, .95);
+      --zyx-settings-sidebar-bg: rgba(255,255,255,.02);
+      --zyx-settings-body-bg: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
       --zyx-shell-blur: 10px;
       --zyx-muted: #9b9bab;
       --zyx-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
@@ -168,8 +175,8 @@
     .zyrox-brand { display: flex; align-items: center; gap: 10px; color: var(--zyx-text-strong); }
 
     .zyrox-logo {
-      width: 18px;
-      height: 18px;
+      width: 24px;
+      height: 24px;
       border-radius: 6px;
       object-fit: cover;
       box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 18px rgba(255,61,61,.45);
@@ -280,9 +287,9 @@
 
     .zyrox-panel-count {
       font-size: 10px;
-      color: #ffd9d9;
-      background: rgba(8, 8, 10, 0.6);
-      border: 1px solid rgba(255, 100, 100, 0.4);
+      color: var(--zyx-panel-count-text);
+      background: var(--zyx-panel-count-bg);
+      border: 1px solid var(--zyx-panel-count-border);
       border-radius: 999px;
       padding: 3px 7px;
       line-height: 1;
@@ -406,14 +413,14 @@
       min-height: 460px;
       border-radius: 12px;
       border: 1px solid rgba(255, 79, 79, 0.45);
-      background: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
+      background: var(--zyx-settings-body-bg);
       box-shadow: var(--zyx-shadow);
       overflow: hidden;
       color: #fff;
     }
 
     .zyrox-settings.hidden { display: none !important; }
-    .zyrox-settings-header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, rgba(255, 61, 61, .23), rgba(45, 12, 12, .95)); }
+    .zyrox-settings-header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
     .zyrox-settings-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
     .zyrox-settings-sub { font-size: 12px; color: #c2c2ce; }
     .zyrox-settings-layout { display: grid; grid-template-columns: 150px 1fr; min-height: 350px; }
@@ -423,7 +430,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      background: rgba(255,255,255,.02);
+      background: var(--zyx-settings-sidebar-bg);
     }
     .zyrox-settings-tab {
       border: 1px solid rgba(255,255,255,.12);
@@ -581,6 +588,10 @@
             <input type="color" class="set-accent" value="#ff3d3d" />
           </div>
           <div class="zyrox-setting-card">
+            <label>Top Bar Color</label>
+            <input type="color" class="set-topbar-color" value="#ff4a4a" />
+          </div>
+          <div class="zyrox-setting-card">
             <label>Text Color</label>
             <input type="color" class="set-text" value="#d6d6df" />
           </div>
@@ -589,27 +600,36 @@
             <input type="color" class="set-border" value="#ff6f6f" />
           </div>
           <div class="zyrox-setting-card">
-            <label>Top Bar Color</label>
-            <input type="color" class="set-topbar-color" value="#ff4a4a" />
+            <label>Background Opacity</label>
+            <input type="range" class="set-opacity" min="20" max="100" value="45" />
           </div>
-          <div class="zyrox-subheading">UI Elements</div>
-          <div class="zyrox-setting-card">
-            <label>Icon Color</label>
-            <input type="color" class="set-icon-color" value="#ffdada" />
-          </div>
+          <div class="zyrox-subheading">Buttons & Inputs</div>
           <div class="zyrox-setting-card">
             <label>Outline Color</label>
             <input type="color" class="set-outline-color" value="#ff5b5b" />
           </div>
           <div class="zyrox-setting-card">
-            <label>Background Opacity</label>
-            <input type="range" class="set-opacity" min="20" max="100" value="45" />
-          </div>
-          <div class="zyrox-setting-card">
             <label>Slider Color</label>
             <input type="color" class="set-slider-color" value="#ff6b6b" />
           </div>
-          <div class="zyrox-subheading">Modules</div>
+          <div class="zyrox-subheading">Icons & Badges</div>
+          <div class="zyrox-setting-card">
+            <label>Icon Color</label>
+            <input type="color" class="set-icon-color" value="#ffdada" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Panel Count Text</label>
+            <input type="color" class="set-panel-count-text" value="#ffd9d9" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Panel Count Border</label>
+            <input type="color" class="set-panel-count-border" value="#ff6464" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Panel Count Background</label>
+            <input type="color" class="set-panel-count-bg" value="#08080a" />
+          </div>
+          <div class="zyrox-subheading">Panels & Modules</div>
           <div class="zyrox-setting-card">
             <label>Module Bar Gradient</label>
             <span class="zyrox-gradient-pair">
@@ -620,6 +640,22 @@
           <div class="zyrox-setting-card">
             <label>Module Bar Text</label>
             <input type="color" class="set-header-text" value="#ffffff" />
+          </div>
+          <div class="zyrox-subheading">Settings Menu</div>
+          <div class="zyrox-setting-card">
+            <label>Settings Header Gradient</label>
+            <span class="zyrox-gradient-pair">
+              <input type="color" class="set-settings-header-start" value="#ff3d3d" />
+              <input type="color" class="set-settings-header-end" value="#2d0c0c" />
+            </span>
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Settings Sidebar Tint</label>
+            <input type="color" class="set-settings-sidebar" value="#181820" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Settings Body Tint</label>
+            <input type="color" class="set-settings-body" value="#121216" />
           </div>
         </div>
       </div>
@@ -661,6 +697,9 @@
   const topbarColorInput = settingsMenu.querySelector(".set-topbar-color");
   const iconColorInput = settingsMenu.querySelector(".set-icon-color");
   const outlineColorInput = settingsMenu.querySelector(".set-outline-color");
+  const panelCountTextInput = settingsMenu.querySelector(".set-panel-count-text");
+  const panelCountBorderInput = settingsMenu.querySelector(".set-panel-count-border");
+  const panelCountBgInput = settingsMenu.querySelector(".set-panel-count-bg");
   const borderInput = settingsMenu.querySelector(".set-border");
   const textInput = settingsMenu.querySelector(".set-text");
   const opacityInput = settingsMenu.querySelector(".set-opacity");
@@ -668,6 +707,10 @@
   const headerStartInput = settingsMenu.querySelector(".set-header-start");
   const headerEndInput = settingsMenu.querySelector(".set-header-end");
   const headerTextInput = settingsMenu.querySelector(".set-header-text");
+  const settingsHeaderStartInput = settingsMenu.querySelector(".set-settings-header-start");
+  const settingsHeaderEndInput = settingsMenu.querySelector(".set-settings-header-end");
+  const settingsSidebarInput = settingsMenu.querySelector(".set-settings-sidebar");
+  const settingsBodyInput = settingsMenu.querySelector(".set-settings-body");
   const scaleInput = settingsMenu.querySelector(".set-scale");
   const radiusInput = settingsMenu.querySelector(".set-radius");
   const blurInput = settingsMenu.querySelector(".set-blur");
@@ -749,6 +792,9 @@
     const topbarColor = topbarColorInput.value;
     const iconColor = iconColorInput.value;
     const outlineColor = outlineColorInput.value;
+    const panelCountText = panelCountTextInput.value;
+    const panelCountBorder = panelCountBorderInput.value;
+    const panelCountBg = panelCountBgInput.value;
     const border = borderInput.value;
     const text = textInput.value;
     const opacity = Number(opacityInput.value) / 100;
@@ -756,6 +802,10 @@
     const headerStart = headerStartInput.value;
     const headerEnd = headerEndInput.value;
     const headerText = headerTextInput.value;
+    const settingsHeaderStart = settingsHeaderStartInput.value;
+    const settingsHeaderEnd = settingsHeaderEndInput.value;
+    const settingsSidebar = settingsSidebarInput.value;
+    const settingsBody = settingsBodyInput.value;
     const scale = Number(scaleInput.value) / 100;
     const radius = Number(radiusInput.value);
     const blur = Number(blurInput.value);
@@ -766,9 +816,16 @@
     cssRoot.setProperty("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
     cssRoot.setProperty("--zyx-icon-color", iconColor);
     cssRoot.setProperty("--zyx-outline-color", `${outlineColor}cc`);
+    cssRoot.setProperty("--zyx-panel-count-text", panelCountText);
+    cssRoot.setProperty("--zyx-panel-count-border", toRgba(panelCountBorder, 0.45));
+    cssRoot.setProperty("--zyx-panel-count-bg", toRgba(panelCountBg, 0.6));
     cssRoot.setProperty("--zyx-header-bg-start", toRgba(headerStart, 0.24));
     cssRoot.setProperty("--zyx-header-bg-end", toRgba(headerEnd, 0.92));
     cssRoot.setProperty("--zyx-header-text", headerText);
+    cssRoot.setProperty("--zyx-settings-header-start", toRgba(settingsHeaderStart, 0.3));
+    cssRoot.setProperty("--zyx-settings-header-end", toRgba(settingsHeaderEnd, 0.95));
+    cssRoot.setProperty("--zyx-settings-sidebar-bg", toRgba(settingsSidebar, 0.22));
+    cssRoot.setProperty("--zyx-settings-body-bg", `linear-gradient(180deg, ${toRgba(settingsBody, 0.97)}, rgba(8, 8, 10, 0.97))`);
     cssRoot.setProperty("--zyx-slider-color", sliderColor);
     cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
     cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
@@ -907,6 +964,9 @@
   topbarColorInput.addEventListener("input", applyAppearance);
   iconColorInput.addEventListener("input", applyAppearance);
   outlineColorInput.addEventListener("input", applyAppearance);
+  panelCountTextInput.addEventListener("input", applyAppearance);
+  panelCountBorderInput.addEventListener("input", applyAppearance);
+  panelCountBgInput.addEventListener("input", applyAppearance);
   borderInput.addEventListener("input", applyAppearance);
   textInput.addEventListener("input", applyAppearance);
   opacityInput.addEventListener("input", applyAppearance);
@@ -914,6 +974,10 @@
   headerStartInput.addEventListener("input", applyAppearance);
   headerEndInput.addEventListener("input", applyAppearance);
   headerTextInput.addEventListener("input", applyAppearance);
+  settingsHeaderStartInput.addEventListener("input", applyAppearance);
+  settingsHeaderEndInput.addEventListener("input", applyAppearance);
+  settingsSidebarInput.addEventListener("input", applyAppearance);
+  settingsBodyInput.addEventListener("input", applyAppearance);
   scaleInput.addEventListener("input", applyAppearance);
   radiusInput.addEventListener("input", applyAppearance);
   blurInput.addEventListener("input", applyAppearance);
@@ -923,6 +987,9 @@
     topbarColorInput.value = "#ff4a4a";
     iconColorInput.value = "#ffdada";
     outlineColorInput.value = "#ff5b5b";
+    panelCountTextInput.value = "#ffd9d9";
+    panelCountBorderInput.value = "#ff6464";
+    panelCountBgInput.value = "#08080a";
     borderInput.value = "#ff6f6f";
     textInput.value = "#d6d6df";
     opacityInput.value = "45";
@@ -930,6 +997,10 @@
     headerStartInput.value = "#ff4a4a";
     headerEndInput.value = "#3c1212";
     headerTextInput.value = "#ffffff";
+    settingsHeaderStartInput.value = "#ff3d3d";
+    settingsHeaderEndInput.value = "#2d0c0c";
+    settingsSidebarInput.value = "#181820";
+    settingsBodyInput.value = "#121216";
     scaleInput.value = "100";
     radiusInput.value = "14";
     blurInput.value = "10";
@@ -940,9 +1011,16 @@
     cssRoot.removeProperty("--zyx-topbar-bg-end");
     cssRoot.removeProperty("--zyx-icon-color");
     cssRoot.removeProperty("--zyx-outline-color");
+    cssRoot.removeProperty("--zyx-panel-count-text");
+    cssRoot.removeProperty("--zyx-panel-count-border");
+    cssRoot.removeProperty("--zyx-panel-count-bg");
     cssRoot.removeProperty("--zyx-header-bg-start");
     cssRoot.removeProperty("--zyx-header-bg-end");
     cssRoot.removeProperty("--zyx-header-text");
+    cssRoot.removeProperty("--zyx-settings-header-start");
+    cssRoot.removeProperty("--zyx-settings-header-end");
+    cssRoot.removeProperty("--zyx-settings-sidebar-bg");
+    cssRoot.removeProperty("--zyx-settings-body-bg");
     cssRoot.removeProperty("--zyx-slider-color");
     cssRoot.removeProperty("--zyx-radius-xl");
     cssRoot.removeProperty("--zyx-radius-lg");
