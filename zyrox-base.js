@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.6
+// @version      0.6.7
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.6";
+    const CLIENT_VERSION = "0.6.7";
     return CLIENT_VERSION;
   }
 
@@ -92,7 +92,9 @@
     listeningForMenuBind: false,
     searchAutofocus: true,
   };
-  const STORAGE_KEY = "zyrox_client_settings_v1";
+
+  // Bumped to v2 — clears any stale saved presets (e.g. green) from v1
+  const STORAGE_KEY = "zyrox_client_settings_v2";
 
   const style = document.createElement("style");
   style.textContent = `
@@ -136,6 +138,9 @@
       --zyx-radius-lg: 12px;
       --zyx-radius-md: 10px;
       --zyx-font: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      /* FIX: button accent colours are now CSS variables, updated by applyAppearance() */
+      --zyx-btn-bg: rgba(255, 61, 61, 0.12);
+      --zyx-btn-hover-bg: rgba(255, 61, 61, 0.2);
     }
 
     .zyrox-root {
@@ -276,8 +281,9 @@
       max-height: 38vh;
     }
 
+    /* FIX: was hardcoded rgba(255, 61, 61, 0.3) — now follows theme */
     .zyrox-panels::-webkit-scrollbar { width: 8px; height: 8px; }
-    .zyrox-panels::-webkit-scrollbar-thumb { background: rgba(255, 61, 61, 0.3); border-radius: 999px; }
+    .zyrox-panels::-webkit-scrollbar-thumb { background: var(--zyx-btn-hover-bg); border-radius: 999px; }
 
     .zyrox-panel {
       width: 212px;
@@ -376,6 +382,7 @@
     }
 
     .zyrox-config.hidden { display: none !important; }
+    /* FIX: config header now uses settings-header vars so it follows the theme */
     .zyrox-config-header { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
     .zyrox-config-title { color: var(--zyx-settings-text); font-size: 14px; font-weight: 700; margin-bottom: 3px; }
     .zyrox-config-sub { color: var(--zyx-settings-subtext); font-size: 12px; }
@@ -383,9 +390,10 @@
     .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--zyx-settings-text); font-size:14px; }
     .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
 
+    /* FIX: was hardcoded rgba(255, 61, 61, ...) — now reads CSS variables set by applyAppearance() */
     .zyrox-btn {
       border: 1px solid var(--zyx-outline-color);
-      background: rgba(255, 61, 61, 0.12);
+      background: var(--zyx-btn-bg);
       color: var(--zyx-settings-text);
       border-radius: 8px;
       padding: 7px 10px;
@@ -393,7 +401,7 @@
       cursor: pointer;
     }
 
-    .zyrox-btn:hover { background: rgba(255, 61, 61, 0.2); color: #fff; }
+    .zyrox-btn:hover { background: var(--zyx-btn-hover-bg); color: #fff; }
 
     .zyrox-btn-square {
       width: 33px;
@@ -475,7 +483,7 @@
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
     .zyrox-preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
     .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
-    .zyrox-preset-btn:hover { background: rgba(255, 61, 61, 0.15); }
+    .zyrox-preset-btn:hover { background: var(--zyx-btn-hover-bg); }
     .zyrox-subheading {
       grid-column: 1 / -1;
       font-size: 11px;
@@ -940,6 +948,7 @@
           settingsHeaderStart: "#8f8f8f", settingsHeaderEnd: "#1d1d1d",
         };
       }
+      // Default (red)
       return {
         accent: "#ff3d3d", shellStart: "#ff3d3d", shellEnd: "#000000", topbar: "#ff4a4a", border: "#ff6f6f",
         outline: "#ff5b5b", text: "#d6d6df", muted: "#9b9bab", soft: "#ffbdbd", search: "#ffe6e6", icon: "#ffdada",
@@ -1060,6 +1069,10 @@
     shell.style.background = `linear-gradient(150deg, ${toRgba(shellBgStart, 0.22)}, ${toRgba(shellBgEnd, opacity.toFixed(2))})`;
     cssRoot.setProperty("--zyx-shell-blur", `${blur}px`);
     shell.style.backdropFilter = `blur(var(--zyx-shell-blur)) saturate(115%)`;
+
+    // FIX: derive button accent background from outlineColor so buttons always match the theme
+    cssRoot.setProperty("--zyx-btn-bg", toRgba(outlineColor, 0.12));
+    cssRoot.setProperty("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
   }
 
   function applySearchFilter() {
@@ -1296,6 +1309,8 @@
     cssRoot.removeProperty("--zyx-radius-md");
     cssRoot.removeProperty("--zyx-hover-shift");
     cssRoot.removeProperty("--zyx-shell-blur");
+    cssRoot.removeProperty("--zyx-btn-bg");
+    cssRoot.removeProperty("--zyx-btn-hover-bg");
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
