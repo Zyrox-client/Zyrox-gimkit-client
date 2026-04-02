@@ -493,6 +493,24 @@
       margin-top: -2px;
       margin-bottom: -4px;
     }
+    .zyrox-about-content {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--zyx-settings-subtext);
+      line-height: 1.45;
+      user-select: text;
+    }
+    .zyrox-about-content b {
+      color: var(--zyx-settings-text);
+      font-weight: 700;
+    }
+    .zyrox-about-source-btn {
+      align-self: flex-start;
+      text-decoration: none;
+      margin-top: 4px;
+    }
     .zyrox-settings-actions { display:flex; justify-content:space-between; gap:8px; padding: 0 14px 14px; }
     .zyrox-settings-actions-group { display:flex; gap:8px; }
     .zyrox-close-btn {
@@ -601,6 +619,7 @@
         <button class="zyrox-settings-tab active" type="button" data-tab="controls">Controls</button>
         <button class="zyrox-settings-tab" type="button" data-tab="theme">Theme</button>
         <button class="zyrox-settings-tab" type="button" data-tab="appearance">Appearance</button>
+        <button class="zyrox-settings-tab" type="button" data-tab="about">About</button>
       </div>
       <div class="zyrox-settings-pane" data-pane="controls">
         <div class="zyrox-settings-body">
@@ -761,6 +780,24 @@
           <div class="zyrox-setting-card">
             <label>Module Hover Shift</label>
             <input type="range" class="set-hover-shift" min="0" max="6" value="2" />
+          </div>
+        </div>
+      </div>
+      <div class="zyrox-settings-pane hidden" data-pane="about">
+        <div class="zyrox-settings-body">
+          <div class="zyrox-subheading">Client Info</div>
+          <div class="zyrox-setting-card">
+            <div class="zyrox-about-content">
+              <div><b>Zyrox Client</b> is a custom userscript UI shell for Gimkit with module toggles, keybinds, and theming controls.</div>
+              <div>This tab is intentionally informational only and does not include configurable settings.</div>
+              <div><b>Version:</b> ${CONFIG.version}</div>
+              <a
+                class="zyrox-btn zyrox-about-source-btn"
+                href="https://github.com/Bob-alt-828100/zyrox-gimkit-client"
+                target="_blank"
+                rel="noopener noreferrer"
+              >View Source Code</a>
+            </div>
           </div>
         </div>
       </div>
