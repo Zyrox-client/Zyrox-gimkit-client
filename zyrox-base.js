@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.8
+// @version      0.7.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -15,12 +15,18 @@
 (() => {
   "use strict";
 
+  // Some userscript runtimes execute bundled code that expects a global `Module`
+  // constructor (e.g. `new Module(...)`). Provide a minimal callable fallback.
+  if (typeof globalThis.Module === "undefined") {
+    globalThis.Module = function Module() {};
+  }
+
   if (window.__ZYROX_UI_MOUNTED__) return;
   window.__ZYROX_UI_MOUNTED__ = true;
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.7";
+    const CLIENT_VERSION = "0.7.9";
     return CLIENT_VERSION;
   }
 
@@ -1265,6 +1271,8 @@
   const configCloseBtn = configMenu.querySelector(".config-close-btn");
   const settingsTabs = [...settingsMenu.querySelectorAll(".zyrox-settings-tab")];
   const settingsPanes = [...settingsMenu.querySelectorAll(".zyrox-settings-pane")];
+  const resetBindBtn = configMenu.querySelector(".zyrox-btn-square");
+  const setBindButtonEl = configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
   const settingsMenuKeyBtn = settingsMenu.querySelector(".settings-menu-key");
   const settingsMenuKeyResetBtn = settingsMenu.querySelector(".settings-menu-key-reset");
   const settingsTopCloseBtn = settingsMenu.querySelector(".settings-close-top");
@@ -1310,17 +1318,14 @@
   const panelCollapseButtons = new Map();
   let openConfigModule = null;
 
-  function moduleCfg(moduleName) {
-    if (!state.moduleSettings.has(moduleName)) {
-      const moduleLayout = MENU_LAYOUT.general.groups.flatMap(group => group.modules)
-        .find(mod => typeof mod === 'object' && mod.name === moduleName);
-      const settings = {};
-      if (moduleLayout && moduleLayout.settings) {
-        for (const setting of moduleLayout.settings) {
-          settings[setting.id] = setting.defaultValue;
-        }
-      }
-      state.moduleSettings.set(moduleName, { keybind: null, ...settings });
+  function setBindButtonText(text) {
+    const bindButton = setBindButtonEl || configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
+    if (bindButton) bindButton.textContent = text;
+  }
+
+  function moduleCfg(name) {
+    if (!state.moduleConfig.has(name)) {
+      state.moduleConfig.set(name, { keybind: null });
     }
     return state.moduleSettings.get(moduleName);
   }
@@ -1351,7 +1356,7 @@
     settingsMenu.classList.add("hidden");
     openConfigModule = null;
     state.listeningForBind = null;
-    setBindBtn.textContent = "Set keybind";
+    setBindButtonText("Set keybind");
   }
 
   function openConfig(moduleName) {
@@ -1360,7 +1365,7 @@
 
     configTitleEl.textContent = moduleName;
     configSubEl.textContent = cfg.keybind ? `Current bind: ${cfg.keybind}` : "No keybind assigned";
-    setBindBtn.textContent = "Set keybind";
+    setBindButtonText("Set keybind");
 
     const moduleLayout = MENU_LAYOUT.general.groups.flatMap(group => group.modules)
       .find(mod => typeof mod === 'object' && mod.name === moduleName);
@@ -1817,6 +1822,13 @@
     return panel;
   }
 
+  if (setBindButtonEl) {
+    setBindButtonEl.addEventListener("click", () => {
+      if (!openConfigModule) return;
+      state.listeningForBind = openConfigModule;
+      setBindButtonText("Press any key...");
+    });
+  }
 
   settingsMenuKeyBtn.addEventListener("click", () => {
     state.listeningForMenuBind = true;
@@ -1847,7 +1859,16 @@
     });
   });
 
-
+  resetBindBtn.addEventListener("click", () => {
+    if (!openConfigModule) return;
+    const cfg = moduleCfg(openConfigModule);
+    cfg.keybind = null;
+    const item = state.moduleItems.get(openConfigModule);
+    if (item) setBindLabel(item, openConfigModule);
+    configSubEl.textContent = "No keybind assigned";
+    state.listeningForBind = null;
+    setBindButtonText("Set keybind");
+  });
 
   searchInput.addEventListener("keydown", (event) => {
     event.stopPropagation();
@@ -2172,7 +2193,7 @@
       const item = state.moduleItems.get(openConfigModule);
       if (item) setBindLabel(item, openConfigModule);
       configSubEl.textContent = `Current bind: ${cfg.keybind}`;
-      setBindBtn.textContent = "Set keybind";
+      setBindButtonText("Set keybind");
       state.listeningForBind = null;
       return;
     }
