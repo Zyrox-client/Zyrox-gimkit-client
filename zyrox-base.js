@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.6
+// @version      0.7.7
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.6";
+    const CLIENT_VERSION = "0.7.7";
     return CLIENT_VERSION;
   }
 
@@ -879,9 +879,9 @@
           <div class="zyrox-subheading">Client Info</div>
           <div class="zyrox-setting-card">
             <div class="zyrox-about-content">
-              <div><b>Zyrox Client</b> is a custom userscript UI shell for Gimkit with module toggles, keybinds, and theming controls.</div>
-              <div>This tab is intentionally informational only and does not include configurable settings.</div>
-              <div><b>Version:</b> ${CONFIG.version}</div>
+              <div><b>Zyrox Client</b> is a custom opensource userscript hacked client for Gimkit with module toggles, keybinds, and theming controls.</div>
+              <div>We are not responsible for any bans, account issues, data loss, or damages that may result from using this client. Use it at your own risk.</div>
+              <div>Version: ${CONFIG.version}</div>
               <a
                 class="zyrox-btn zyrox-about-source-btn"
                 href="https://github.com/Bob-alt-828100/zyrox-gimkit-client"
