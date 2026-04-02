@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.3
+// @version      0.7.4
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.3";
+    const CLIENT_VERSION = "0.7.4";
     return CLIENT_VERSION;
   }
 
@@ -393,7 +393,7 @@
       background: linear-gradient(90deg, var(--zyx-header-bg-start), var(--zyx-header-bg-end));
     }
 
-    .zyrox-panel-count {
+    .zyrox-panel-collapse-btn {
       font-size: 10px;
       color: var(--zyx-panel-count-text);
       background: var(--zyx-panel-count-bg);
@@ -401,6 +401,11 @@
       border-radius: 999px;
       padding: 3px 7px;
       line-height: 1;
+      cursor: pointer;
+    }
+
+    .zyrox-panel-collapse-btn.collapsed {
+      opacity: 0.62;
     }
 
     .zyrox-module-list { margin: 0; padding: 7px; list-style: none; display: flex; flex-direction: column; gap: 5px; }
@@ -564,7 +569,16 @@
     .zyrox-settings-pane.hidden { display: none !important; }
     .zyrox-setting-card { border: 1px solid var(--zyx-settings-card-border); border-radius: 10px; padding: 8px 10px; background: var(--zyx-settings-card-bg); display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .zyrox-setting-card label { display:block; font-size: 12px; color: var(--zyx-settings-text); margin: 0; }
-    .zyrox-setting-card input[type='color'] { width: 52px; height: 30px; border: none; background: transparent; cursor: pointer; }
+    .zyrox-setting-card input[type='color'] {
+      width: 52px;
+      height: 30px;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+      overflow: hidden;
+      padding: 0;
+    }
     .zyrox-setting-card input[type='range'] { width: 190px; accent-color: var(--zyx-slider-color); }
     .zyrox-setting-card input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--zyx-checkmark-color); }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
@@ -959,6 +973,7 @@
   const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   const panelByName = new Map();
+  const panelCollapseButtons = new Map();
   let openConfigModule = null;
 
   function moduleCfg(name) {
@@ -1066,13 +1081,18 @@
     if (!list) return;
     state.collapsedPanels[panelName] = collapsed;
     list.style.display = collapsed ? "none" : "";
+    const button = panelCollapseButtons.get(panelName);
+    if (button) {
+      button.textContent = collapsed ? "Expand" : "Collapse";
+      button.classList.toggle("collapsed", collapsed);
+    }
   }
 
   function syncCollapseButtons() {
-    const buttons = [...collapseRow.querySelectorAll(".zyrox-collapse-btn")];
-    for (const button of buttons) {
-      const name = button.textContent;
-      button.classList.toggle("inactive", !!state.collapsedPanels[name]);
+    for (const [panelName, button] of panelCollapseButtons.entries()) {
+      const collapsed = !!state.collapsedPanels[panelName];
+      button.textContent = collapsed ? "Expand" : "Collapse";
+      button.classList.toggle("collapsed", collapsed);
     }
   }
 
@@ -1319,7 +1339,6 @@
       }
 
       panel.style.display = visibleCount > 0 ? "" : "none";
-      meta.countEl.textContent = `${visibleCount}`;
     }
   }
 
@@ -1334,12 +1353,18 @@
     const title = document.createElement("span");
     title.textContent = name;
 
-    const count = document.createElement("span");
-    count.className = "zyrox-panel-count";
-    count.textContent = `${modules.length}`;
+    const collapseButton = document.createElement("button");
+    collapseButton.type = "button";
+    collapseButton.className = "zyrox-panel-collapse-btn";
+    collapseButton.textContent = "Collapse";
+    collapseButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextCollapsed = !state.collapsedPanels[name];
+      setPanelCollapsed(name, nextCollapsed);
+    });
 
     header.appendChild(title);
-    header.appendChild(count);
+    header.appendChild(collapseButton);
 
     const list = document.createElement("ul");
     list.className = "zyrox-module-list";
@@ -1369,7 +1394,8 @@
     panel.appendChild(header);
     panel.appendChild(list);
     panelByName.set(name, panel);
-    state.modulePanels.set(panel, { countEl: count, modules: [...modules] });
+    panelCollapseButtons.set(name, collapseButton);
+    state.modulePanels.set(panel, { modules: [...modules] });
     return panel;
   }
 
