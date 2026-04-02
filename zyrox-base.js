@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.0
+// @version      0.7.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.0";
+    const CLIENT_VERSION = "0.7.1";
     return CLIENT_VERSION;
   }
 
@@ -1673,6 +1673,11 @@
   const panelDragState = { panelName: null, offsetX: 0, offsetY: 0 };
 
   topbar.addEventListener("mousedown", (event) => {
+    const interactiveTarget = event.target instanceof Element
+      ? event.target.closest("input, button")
+      : null;
+    if (interactiveTarget) return;
+
     const rootBox = root.getBoundingClientRect();
     if (state.displayMode === "loose") {
       const box = topbar.getBoundingClientRect();
