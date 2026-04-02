@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.8.4
+// @version      0.8.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,7 +45,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.8.4";
+    const CLIENT_VERSION = "0.8.5";
     return CLIENT_VERSION;
   }
 
@@ -1422,14 +1422,32 @@
     questionIdList: [],
     currentQuestionIndex: -1,
     lastAnsweredId: null,
+    lastDebugAt: 0,
   };
 
   function getSocketManager() {
     if (autoAnswerState.socketManager) return autoAnswerState.socketManager;
-    const sm = globalThis.socketManager;
-    if (!sm || typeof sm.sendMessage !== "function" || typeof sm.addEventListener !== "function") return null;
-    autoAnswerState.socketManager = sm;
-    return sm;
+    const direct = globalThis.socketManager;
+    if (direct && typeof direct.sendMessage === "function" && typeof direct.addEventListener === "function") {
+      autoAnswerState.socketManager = direct;
+      console.log("[Zyrox][AutoAnswer] Found socketManager on window.socketManager");
+      return direct;
+    }
+
+    for (const key of Object.getOwnPropertyNames(globalThis)) {
+      let candidate;
+      try {
+        candidate = globalThis[key];
+      } catch (_) {
+        continue;
+      }
+      if (candidate && typeof candidate.sendMessage === "function" && typeof candidate.addEventListener === "function") {
+        autoAnswerState.socketManager = candidate;
+        console.log(`[Zyrox][AutoAnswer] Found socket manager candidate on window.${key}`);
+        return candidate;
+      }
+    }
+    return null;
   }
 
   function getTransportType(socketManager) {
@@ -1513,7 +1531,13 @@
     const socketManager = getSocketManager();
     if (!socketManager) {
       const domQuestion = findCurrentQuestionFromDom();
-      tryAnswerViaDom(domQuestion);
+      const answered = tryAnswerViaDom(domQuestion);
+      if (!answered) {
+        if (Date.now() - autoAnswerState.lastDebugAt > 3000) {
+          console.log("[Zyrox][AutoAnswer] No socket manager and no DOM match yet.");
+          autoAnswerState.lastDebugAt = Date.now();
+        }
+      }
       return;
     }
 
@@ -1531,7 +1555,64 @@
         data: { answer },
       });
       autoAnswerState.lastAnsweredId = question._id;
+      console.log(`[Zyrox][AutoAnswer] Answered colyseus question ${question._id}`);
       return;
+    }
+
+    const questionId = autoAnswerState.questionIdList[autoAnswerState.currentQuestionIndex];
+    if (!questionId) return;
+    const question = autoAnswerState.questions.find((q) => q?._id == questionId);
+    const answer = pickAnswerPayload(question);
+    if (!answer) return;
+    socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+    autoAnswerState.lastAnsweredId = question._id;
+    console.log(`[Zyrox][AutoAnswer] Answered blueboat question ${questionId}`);
+  }
+
+  function ensureAutoAnswerListeners() {
+    if (autoAnswerState.listenersAttached) return true;
+    const socketManager = getSocketManager();
+    if (!socketManager) return false;
+
+    socketManager.addEventListener("deviceChanges", (event) => {
+      for (const { id, data } of event.detail || []) {
+        for (const key in data || {}) {
+          if (key === "GLOBAL_questions") {
+            try {
+              autoAnswerState.questions = JSON.parse(data[key]);
+              autoAnswerState.answerDeviceId = id;
+            } catch (_) {}
+          }
+          if (key.includes("_currentQuestionId")) {
+            autoAnswerState.currentQuestionId = data[key];
+          }
+        }
+      }
+    });
+
+    socketManager.addEventListener("blueboatMessage", (event) => {
+      if (event.detail?.key !== "STATE_UPDATE") return;
+      const payload = event.detail?.data;
+      if (!payload) return;
+      if (payload.type === "GAME_QUESTIONS") autoAnswerState.questions = payload.value || [];
+      if (payload.type === "PLAYER_QUESTION_LIST") {
+        autoAnswerState.questionIdList = payload.value?.questionList || [];
+        autoAnswerState.currentQuestionIndex = payload.value?.questionIndex ?? -1;
+      }
+      if (payload.type === "PLAYER_QUESTION_LIST_INDEX") {
+        autoAnswerState.currentQuestionIndex = Number(payload.value ?? -1);
+      }
+    });
+
+    autoAnswerState.listenersAttached = true;
+    return true;
+  }
+
+  function stopAutoAnswer() {
+    if (autoAnswerState.intervalId) {
+      clearInterval(autoAnswerState.intervalId);
+      autoAnswerState.intervalId = null;
+      console.log("[Zyrox] Auto Answer stopped");
     }
 
     const questionId = autoAnswerState.questionIdList[autoAnswerState.currentQuestionIndex];
@@ -1604,6 +1685,19 @@
     const cfg = moduleCfg("Auto Answer");
     const speed = Math.max(100, Number(cfg.speed) || 1000);
     autoAnswerState.intervalId = setInterval(answerCurrentQuestion, speed);
+  }
+
+  function refreshAutoAnswerLoopIfEnabled() {
+    if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
+  }
+
+  function startAutoAnswer() {
+    ensureAutoAnswerListeners();
+    stopAutoAnswer();
+    const cfg = moduleCfg("Auto Answer");
+    const speed = Math.max(100, Number(cfg.speed) || 1000);
+    autoAnswerState.intervalId = setInterval(answerCurrentQuestion, speed);
+    console.log(`[Zyrox] Auto Answer started (${speed}ms)`);
   }
 
   function refreshAutoAnswerLoopIfEnabled() {
