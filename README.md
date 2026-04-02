@@ -1,4 +1,4 @@
-# zyrox-gimkit-client
+# zyrox gimkit hacked client
 <h2> A hack/utility client for [gimkit](https://www.gimkit.com/)</h2>
 
 
