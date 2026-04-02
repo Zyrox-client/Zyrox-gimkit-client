@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.9.1
+// @version      0.9.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,7 +45,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.9.1";
+    const CLIENT_VERSION = "0.9.3";
     return CLIENT_VERSION;
   }
 
@@ -257,13 +257,19 @@
         case 192: return null;
         case 194: return false;
         case 195: return true;
+        case 196: { const n = view.getUint8(offset); offset += 1; const b = buffer.slice(offset, offset + n); offset += n; return b; }
+        case 197: { const n = view.getUint16(offset); offset += 2; const b = buffer.slice(offset, offset + n); offset += n; return b; }
+        case 198: { const n = view.getUint32(offset); offset += 4; const b = buffer.slice(offset, offset + n); offset += n; return b; }
+        case 202: { const v = view.getFloat32(offset); offset += 4; return v; }
         case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
         case 204: { const v = view.getUint8(offset); offset += 1; return v; }
         case 205: { const v = view.getUint16(offset); offset += 2; return v; }
         case 206: { const v = view.getUint32(offset); offset += 4; return v; }
+        case 207: { const hi = view.getUint32(offset); const lo = view.getUint32(offset + 4); offset += 8; return (hi * Math.pow(2, 32)) + lo; }
         case 208: { const v = view.getInt8(offset); offset += 1; return v; }
         case 209: { const v = view.getInt16(offset); offset += 2; return v; }
         case 210: { const v = view.getInt32(offset); offset += 4; return v; }
+        case 211: { const hi = view.getInt32(offset); const lo = view.getUint32(offset + 4); offset += 8; return (hi * Math.pow(2, 32)) + lo; }
         case 217: { const n = view.getUint8(offset); offset += 1; return readString(n); }
         case 218: { const n = view.getUint16(offset); offset += 2; return readString(n); }
         case 219: { const n = view.getUint32(offset); offset += 4; return readString(n); }
@@ -456,7 +462,9 @@
     }
     registerSocket(socket) {
       this.socket = socket;
-      if (window.Phaser) {
+      const socketUrl = String(socket?.url || "");
+      const looksLikeColyseus = socketUrl.includes("gimkitconnect.com") && !socketUrl.includes("/socket.io/");
+      if (window.Phaser || looksLikeColyseus) {
         this.transportType = "colyseus";
         this.addEventListener("colyseusMessage", (e) => {
           if (e.detail.type !== "DEVICES_STATES_CHANGES") return;
@@ -466,6 +474,18 @@
         this.transportType = "blueboat";
       }
       socket.addEventListener("message", (e) => {
+        const firstByte = (() => {
+          try {
+            return new Uint8Array(e.data)[0];
+          } catch (_) {
+            return null;
+          }
+        })();
+        if (this.transportType === "unknown" && firstByte != null) {
+          if (Object.values(colyseusProtocol).includes(firstByte)) this.transportType = "colyseus";
+          else this.transportType = "blueboat";
+        }
+
         let decoded;
         if (this.transportType === "colyseus") {
           decoded = this.decodeColyseus(e);
