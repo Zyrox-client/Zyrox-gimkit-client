@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox Client (UI Base)
 // @namespace    https://github.com/zyrox
-// @version      0.5.1
+// @version      0.5.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -19,8 +19,10 @@
 
   const CONFIG = {
     toggleKey: "\\",
+    defaultToggleKey: "\\",
     title: "Zyrox",
     subtitle: "Client",
+    version: "0.5.0",
   };
 
   const MENU_LAYOUT = {
@@ -170,6 +172,17 @@
     }
 
     .zyrox-keybind-btn {
+      font-size: 11px;
+      color: #ffd6d6;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 91, 91, 0.55);
+      border-radius: 8px;
+      padding: 4px 8px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .zyrox-settings-btn {
       font-size: 11px;
       color: #ffd6d6;
       background: rgba(0, 0, 0, 0.35);
@@ -362,6 +375,29 @@
 
     .zyrox-config-backdrop.hidden { display: none !important; }
 
+    .zyrox-settings {
+      position: relative;
+      z-index: 2147483649;
+      width: min(640px, 90vw);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 79, 79, 0.45);
+      background: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
+      box-shadow: var(--zyx-shadow);
+      overflow: hidden;
+      color: #fff;
+    }
+
+    .zyrox-settings.hidden { display: none !important; }
+    .zyrox-settings-header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, rgba(255, 61, 61, .23), rgba(45, 12, 12, .95)); }
+    .zyrox-settings-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .zyrox-settings-sub { font-size: 12px; color: #c2c2ce; }
+    .zyrox-settings-body { padding: 14px; display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
+    .zyrox-setting-card { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.03); }
+    .zyrox-setting-card label { display:block; font-size: 12px; margin-bottom: 8px; color: #ffe5e5; }
+    .zyrox-setting-card input[type='color'] { width: 100%; height: 34px; border: none; background: transparent; cursor: pointer; }
+    .zyrox-setting-card input[type='range'] { width: 100%; }
+    .zyrox-settings-actions { display:flex; justify-content:flex-end; gap:8px; padding: 0 14px 14px; }
+
     .zyrox-resize-handle {
       position: absolute;
       right: 2px;
@@ -395,12 +431,16 @@
     <div class="zyrox-topbar-right">
       <input class="zyrox-search" type="text" placeholder="Search utilities..." autocomplete="off" />
       <button class="zyrox-keybind-btn" type="button" title="Change menu toggle key">Menu Key: ${CONFIG.toggleKey}</button>
-      <span class="zyrox-chip">v0.5</span>
+      <button class="zyrox-btn zyrox-btn-square zyrox-menu-key-reset" type="button" title="Reset menu key">↺</button>
+      <button class="zyrox-settings-btn" type="button" title="Open client settings">Settings</button>
+      <span class="zyrox-chip">v${CONFIG.version}</span>
     </div>
   `;
 
   const searchInput = topbar.querySelector(".zyrox-search");
   const menuBindBtn = topbar.querySelector(".zyrox-keybind-btn");
+  const menuKeyResetBtn = topbar.querySelector(".zyrox-menu-key-reset");
+  const settingsBtn = topbar.querySelector(".zyrox-settings-btn");
 
   const generalSection = document.createElement("section");
   generalSection.className = "zyrox-section";
@@ -439,10 +479,48 @@
   configBackdrop.className = "zyrox-config-backdrop hidden";
   configBackdrop.appendChild(configMenu);
 
+  const settingsMenu = document.createElement("div");
+  settingsMenu.className = "zyrox-settings hidden";
+  settingsMenu.innerHTML = `
+    <div class="zyrox-settings-header">
+      <div class="zyrox-settings-title">Client Settings</div>
+      <div class="zyrox-settings-sub">Customize colors and appearance</div>
+    </div>
+    <div class="zyrox-settings-body">
+      <div class="zyrox-setting-card">
+        <label>Accent Color</label>
+        <input type="color" class="set-accent" value="#ff3d3d" />
+      </div>
+      <div class="zyrox-setting-card">
+        <label>Panel Border</label>
+        <input type="color" class="set-border" value="#ff6f6f" />
+      </div>
+      <div class="zyrox-setting-card">
+        <label>Text Color</label>
+        <input type="color" class="set-text" value="#d6d6df" />
+      </div>
+      <div class="zyrox-setting-card">
+        <label>Background Opacity</label>
+        <input type="range" class="set-opacity" min="20" max="100" value="45" />
+      </div>
+    </div>
+    <div class="zyrox-settings-actions">
+      <button class="zyrox-btn settings-reset" type="button">Reset Appearance</button>
+      <button class="zyrox-btn settings-close" type="button">Close</button>
+    </div>
+  `;
+  configBackdrop.appendChild(settingsMenu);
+
   const configTitleEl = configMenu.querySelector(".zyrox-config-title");
   const configSubEl = configMenu.querySelector(".zyrox-config-sub");
   const resetBindBtn = configMenu.querySelector(".zyrox-btn-square");
   const setBindBtn = configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
+  const accentInput = settingsMenu.querySelector(".set-accent");
+  const borderInput = settingsMenu.querySelector(".set-border");
+  const textInput = settingsMenu.querySelector(".set-text");
+  const opacityInput = settingsMenu.querySelector(".set-opacity");
+  const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
+  const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   let openConfigModule = null;
 
   function moduleCfg(name) {
@@ -474,6 +552,7 @@
   function closeConfig() {
     configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
+    settingsMenu.classList.add("hidden");
     openConfigModule = null;
     state.listeningForBind = null;
     setBindBtn.textContent = "Set keybind";
@@ -489,6 +568,23 @@
 
     configBackdrop.classList.remove("hidden");
     configMenu.classList.remove("hidden");
+    settingsMenu.classList.add("hidden");
+  }
+
+  function openSettings() {
+    configBackdrop.classList.remove("hidden");
+    settingsMenu.classList.remove("hidden");
+    configMenu.classList.add("hidden");
+  }
+
+  function applyAppearance() {
+    const accent = accentInput.value;
+    const border = borderInput.value;
+    const text = textInput.value;
+    const opacity = Number(opacityInput.value) / 100;
+    shell.style.setProperty("--zyx-border", `${border}99`);
+    shell.style.setProperty("--zyx-text", text);
+    shell.style.background = `linear-gradient(150deg, ${accent}22, rgba(0, 0, 0, ${opacity.toFixed(2)}))`;
   }
 
   function applySearchFilter() {
@@ -571,6 +667,17 @@
     searchInput.blur();
   });
 
+  menuKeyResetBtn.addEventListener("click", () => {
+    CONFIG.toggleKey = CONFIG.defaultToggleKey;
+    menuBindBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
+    footer.innerHTML = `<span>Press <b>${CONFIG.toggleKey}</b> to show/hide menu</span><span>Right click modules for settings</span>`;
+    state.listeningForMenuBind = false;
+  });
+
+  settingsBtn.addEventListener("click", () => {
+    openSettings();
+  });
+
   resetBindBtn.addEventListener("click", () => {
     if (!openConfigModule) return;
     const cfg = moduleCfg(openConfigModule);
@@ -593,6 +700,25 @@
   searchInput.addEventListener("input", () => {
     state.searchQuery = searchInput.value;
     applySearchFilter();
+  });
+
+  accentInput.addEventListener("input", applyAppearance);
+  borderInput.addEventListener("input", applyAppearance);
+  textInput.addEventListener("input", applyAppearance);
+  opacityInput.addEventListener("input", applyAppearance);
+
+  settingsResetBtn.addEventListener("click", () => {
+    accentInput.value = "#ff3d3d";
+    borderInput.value = "#ff6f6f";
+    textInput.value = "#d6d6df";
+    opacityInput.value = "45";
+    shell.style.removeProperty("--zyx-border");
+    shell.style.removeProperty("--zyx-text");
+    shell.style.background = "";
+  });
+
+  settingsCloseBtn.addEventListener("click", () => {
+    closeConfig();
   });
 
   const generalPanels = document.createElement("div");
