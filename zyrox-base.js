@@ -1,13 +1,14 @@
 // ==UserScript==
-// @name         Zyrox Client
+// @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.0
+// @version      0.6.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-idle
 // @updateURL    https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/zyrox-base.js
 // @downloadURL  https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/zyrox-base.js
+// @icon         https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/images/logo.png
 // @grant        none
 // ==/UserScript==
 
@@ -19,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.0";
+    const CLIENT_VERSION = "0.6.1";
     return CLIENT_VERSION;
   }
 
@@ -29,6 +30,7 @@
     title: "Zyrox",
     subtitle: "Client",
     version: readUserscriptVersion(),
+    logoUrl: "https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/images/logo.png",
   };
 
   const MENU_LAYOUT = {
@@ -103,6 +105,7 @@
       --zyx-topbar-bg-start: rgba(255, 62, 62, 0.22);
       --zyx-topbar-bg-end: rgba(32, 10, 10, 0.9);
       --zyx-icon-color: #ffdada;
+      --zyx-outline-color: rgba(255, 91, 91, 0.55);
       --zyx-slider-color: #ff6b6b;
       --zyx-shell-blur: 10px;
       --zyx-muted: #9b9bab;
@@ -168,7 +171,7 @@
       width: 18px;
       height: 18px;
       border-radius: 6px;
-      background: radial-gradient(circle at 30% 30%, #ff8b8b 0%, #ff3d3d 45%, #c31818 100%);
+      object-fit: cover;
       box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 18px rgba(255,61,61,.45);
       outline: 1px solid var(--zyx-icon-color);
     }
@@ -180,7 +183,7 @@
       font-size: 10px;
       color: #ffd6d6;
       background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255, 91, 91, 0.55);
+      border: 1px solid var(--zyx-outline-color);
       border-radius: 999px;
       padding: 4px 8px;
       line-height: 1;
@@ -190,7 +193,7 @@
       font-size: 11px;
       color: var(--zyx-icon-color);
       background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255, 91, 91, 0.55);
+      border: 1px solid var(--zyx-outline-color);
       border-radius: 8px;
       padding: 4px 8px;
       line-height: 1;
@@ -204,9 +207,9 @@
       align-items: center;
       justify-content: center;
       font-size: 15px;
-      color: #ffd6d6;
+      color: var(--zyx-icon-color);
       background: rgba(0, 0, 0, 0.35);
-      border: 1px solid rgba(255, 91, 91, 0.55);
+      border: 1px solid var(--zyx-outline-color);
       border-radius: 8px;
       line-height: 1;
       cursor: pointer;
@@ -217,7 +220,7 @@
       width: 190px;
       height: 28px;
       border-radius: 8px;
-      border: 1px solid rgba(255, 108, 108, 0.45);
+      border: 1px solid var(--zyx-outline-color);
       background: rgba(10, 8, 8, 0.72);
       color: #ffe6e6;
       padding: 0 10px;
@@ -359,7 +362,7 @@
     .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
 
     .zyrox-btn {
-      border: 1px solid rgba(255, 94, 94, 0.5);
+      border: 1px solid var(--zyx-outline-color);
       background: rgba(255, 61, 61, 0.12);
       color: #ffdada;
       border-radius: 8px;
@@ -461,7 +464,7 @@
       width: 24px;
       height: 24px;
       border-radius: 6px;
-      border: 1px solid rgba(255, 95, 95, 0.4);
+      border: 1px solid var(--zyx-outline-color);
       background: rgba(0, 0, 0, 0.25);
       color: var(--zyx-icon-color);
       cursor: pointer;
@@ -493,7 +496,7 @@
   topbar.className = "zyrox-topbar";
   topbar.innerHTML = `
     <div class="zyrox-brand">
-      <span class="zyrox-logo"></span>
+      <img class="zyrox-logo" src="${CONFIG.logoUrl}" alt="Zyrox logo" />
       <div>
         <div class="title">${CONFIG.title}</div>
         <div class="subtitle">${CONFIG.subtitle}</div>
@@ -595,6 +598,10 @@
             <input type="color" class="set-icon-color" value="#ffdada" />
           </div>
           <div class="zyrox-setting-card">
+            <label>Outline Color</label>
+            <input type="color" class="set-outline-color" value="#ff5b5b" />
+          </div>
+          <div class="zyrox-setting-card">
             <label>Background Opacity</label>
             <input type="range" class="set-opacity" min="20" max="100" value="45" />
           </div>
@@ -653,6 +660,7 @@
   const accentInput = settingsMenu.querySelector(".set-accent");
   const topbarColorInput = settingsMenu.querySelector(".set-topbar-color");
   const iconColorInput = settingsMenu.querySelector(".set-icon-color");
+  const outlineColorInput = settingsMenu.querySelector(".set-outline-color");
   const borderInput = settingsMenu.querySelector(".set-border");
   const textInput = settingsMenu.querySelector(".set-text");
   const opacityInput = settingsMenu.querySelector(".set-opacity");
@@ -740,6 +748,7 @@
     const accent = accentInput.value;
     const topbarColor = topbarColorInput.value;
     const iconColor = iconColorInput.value;
+    const outlineColor = outlineColorInput.value;
     const border = borderInput.value;
     const text = textInput.value;
     const opacity = Number(opacityInput.value) / 100;
@@ -756,6 +765,7 @@
     cssRoot.setProperty("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
     cssRoot.setProperty("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
     cssRoot.setProperty("--zyx-icon-color", iconColor);
+    cssRoot.setProperty("--zyx-outline-color", `${outlineColor}cc`);
     cssRoot.setProperty("--zyx-header-bg-start", toRgba(headerStart, 0.24));
     cssRoot.setProperty("--zyx-header-bg-end", toRgba(headerEnd, 0.92));
     cssRoot.setProperty("--zyx-header-text", headerText);
@@ -896,6 +906,7 @@
   accentInput.addEventListener("input", applyAppearance);
   topbarColorInput.addEventListener("input", applyAppearance);
   iconColorInput.addEventListener("input", applyAppearance);
+  outlineColorInput.addEventListener("input", applyAppearance);
   borderInput.addEventListener("input", applyAppearance);
   textInput.addEventListener("input", applyAppearance);
   opacityInput.addEventListener("input", applyAppearance);
@@ -911,6 +922,7 @@
     accentInput.value = "#ff3d3d";
     topbarColorInput.value = "#ff4a4a";
     iconColorInput.value = "#ffdada";
+    outlineColorInput.value = "#ff5b5b";
     borderInput.value = "#ff6f6f";
     textInput.value = "#d6d6df";
     opacityInput.value = "45";
@@ -927,6 +939,7 @@
     cssRoot.removeProperty("--zyx-topbar-bg-start");
     cssRoot.removeProperty("--zyx-topbar-bg-end");
     cssRoot.removeProperty("--zyx-icon-color");
+    cssRoot.removeProperty("--zyx-outline-color");
     cssRoot.removeProperty("--zyx-header-bg-start");
     cssRoot.removeProperty("--zyx-header-bg-end");
     cssRoot.removeProperty("--zyx-header-text");
