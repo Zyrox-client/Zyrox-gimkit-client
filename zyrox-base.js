@@ -1,11 +1,13 @@
 // ==UserScript==
 // @name         Zyrox Client (UI Base)
 // @namespace    https://github.com/zyrox
-// @version      0.4.0
+// @version      0.5.0
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/zyrox-base.js
+// @downloadURL  https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/zyrox-base.js
 // @grant        none
 // ==/UserScript==
 
@@ -294,8 +296,8 @@
 
     .zyrox-config {
       position: relative;
-      z-index: 2147483647;
-      min-width: 290px;
+      z-index: 2147483649;
+      min-width: 340px;
       border-radius: 11px;
       border: 1px solid rgba(255, 79, 79, 0.45);
       background: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
@@ -304,11 +306,11 @@
     }
 
     .zyrox-config.hidden { display: none !important; }
-    .zyrox-config-header { padding: 9px 11px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, rgba(255, 61, 61, .23), rgba(45, 12, 12, .95)); }
-    .zyrox-config-title { color: #fff; font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-    .zyrox-config-sub { color: #b8b8c2; font-size: 10px; }
-    .zyrox-config-body { padding: 10px; }
-    .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:#d8d8df; font-size:12px; }
+    .zyrox-config-header { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, rgba(255, 61, 61, .23), rgba(45, 12, 12, .95)); }
+    .zyrox-config-title { color: #fff; font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+    .zyrox-config-sub { color: #b8b8c2; font-size: 12px; }
+    .zyrox-config-body { padding: 13px; }
+    .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:#d8d8df; font-size:14px; }
     .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
 
     .zyrox-btn {
@@ -316,16 +318,16 @@
       background: rgba(255, 61, 61, 0.12);
       color: #ffdada;
       border-radius: 8px;
-      padding: 6px 8px;
-      font-size: 11px;
+      padding: 7px 10px;
+      font-size: 12px;
       cursor: pointer;
     }
 
     .zyrox-btn:hover { background: rgba(255, 61, 61, 0.2); color: #fff; }
 
     .zyrox-btn-square {
-      width: 29px;
-      height: 29px;
+      width: 33px;
+      height: 33px;
       padding: 0;
       display: inline-flex;
       align-items: center;
@@ -337,7 +339,7 @@
     .zyrox-config-backdrop {
       position: fixed;
       inset: 0;
-      z-index: 2147483646;
+      z-index: 2147483648;
       background: rgba(0, 0, 0, 0.26);
       backdrop-filter: blur(4px);
       display: flex;
@@ -379,7 +381,7 @@
     </div>
     <div class="zyrox-topbar-right">
       <input class="zyrox-search" type="text" placeholder="Search utilities..." autocomplete="off" />
-      <span class="zyrox-chip">v0.4</span>
+      <span class="zyrox-chip">v0.5</span>
     </div>
   `;
 
