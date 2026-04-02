@@ -170,6 +170,7 @@
       border-radius: 6px;
       background: radial-gradient(circle at 30% 30%, #ff8b8b 0%, #ff3d3d 45%, #c31818 100%);
       box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 18px rgba(255,61,61,.45);
+      outline: 1px solid var(--zyx-icon-color);
     }
 
     .zyrox-brand .title { font-size: 13px; font-weight: 700; line-height: 1; }
@@ -442,6 +443,7 @@
     .zyrox-setting-card label { display:block; font-size: 12px; color: #ffe5e5; margin: 0; }
     .zyrox-setting-card input[type='color'] { width: 52px; height: 30px; border: none; background: transparent; cursor: pointer; }
     .zyrox-setting-card input[type='range'] { width: 190px; accent-color: var(--zyx-slider-color); }
+    .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
     .zyrox-subheading {
       grid-column: 1 / -1;
       font-size: 11px;
@@ -587,6 +589,7 @@
             <label>Top Bar Color</label>
             <input type="color" class="set-topbar-color" value="#ff4a4a" />
           </div>
+          <div class="zyrox-subheading">UI Elements</div>
           <div class="zyrox-setting-card">
             <label>Icon Color</label>
             <input type="color" class="set-icon-color" value="#ffdada" />
@@ -601,12 +604,11 @@
           </div>
           <div class="zyrox-subheading">Modules</div>
           <div class="zyrox-setting-card">
-            <label>Module Bar Gradient Start</label>
-            <input type="color" class="set-header-start" value="#ff4a4a" />
-          </div>
-          <div class="zyrox-setting-card">
-            <label>Module Bar Gradient End</label>
-            <input type="color" class="set-header-end" value="#3c1212" />
+            <label>Module Bar Gradient</label>
+            <span class="zyrox-gradient-pair">
+              <input type="color" class="set-header-start" value="#ff4a4a" />
+              <input type="color" class="set-header-end" value="#3c1212" />
+            </span>
           </div>
           <div class="zyrox-setting-card">
             <label>Module Bar Text</label>
@@ -748,22 +750,23 @@
     const scale = Number(scaleInput.value) / 100;
     const radius = Number(radiusInput.value);
     const blur = Number(blurInput.value);
-    shell.style.setProperty("--zyx-border", `${border}99`);
-    shell.style.setProperty("--zyx-text", text);
-    shell.style.setProperty("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
-    shell.style.setProperty("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
-    shell.style.setProperty("--zyx-icon-color", iconColor);
-    shell.style.setProperty("--zyx-header-bg-start", toRgba(headerStart, 0.24));
-    shell.style.setProperty("--zyx-header-bg-end", toRgba(headerEnd, 0.92));
-    shell.style.setProperty("--zyx-header-text", headerText);
-    shell.style.setProperty("--zyx-slider-color", sliderColor);
-    shell.style.setProperty("--zyx-radius-xl", `${radius}px`);
-    shell.style.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
-    shell.style.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
+    const cssRoot = document.documentElement.style;
+    cssRoot.setProperty("--zyx-border", `${border}99`);
+    cssRoot.setProperty("--zyx-text", text);
+    cssRoot.setProperty("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
+    cssRoot.setProperty("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
+    cssRoot.setProperty("--zyx-icon-color", iconColor);
+    cssRoot.setProperty("--zyx-header-bg-start", toRgba(headerStart, 0.24));
+    cssRoot.setProperty("--zyx-header-bg-end", toRgba(headerEnd, 0.92));
+    cssRoot.setProperty("--zyx-header-text", headerText);
+    cssRoot.setProperty("--zyx-slider-color", sliderColor);
+    cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
+    cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
+    cssRoot.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
     shell.style.transform = `scale(${scale.toFixed(2)})`;
     shell.style.transformOrigin = "top left";
     shell.style.background = `linear-gradient(150deg, ${accent}22, rgba(0, 0, 0, ${opacity.toFixed(2)}))`;
-    shell.style.setProperty("--zyx-shell-blur", `${blur}px`);
+    cssRoot.setProperty("--zyx-shell-blur", `${blur}px`);
     shell.style.backdropFilter = `blur(var(--zyx-shell-blur)) saturate(115%)`;
   }
 
@@ -918,19 +921,20 @@
     scaleInput.value = "100";
     radiusInput.value = "14";
     blurInput.value = "10";
-    shell.style.removeProperty("--zyx-border");
-    shell.style.removeProperty("--zyx-text");
-    shell.style.removeProperty("--zyx-topbar-bg-start");
-    shell.style.removeProperty("--zyx-topbar-bg-end");
-    shell.style.removeProperty("--zyx-icon-color");
-    shell.style.removeProperty("--zyx-header-bg-start");
-    shell.style.removeProperty("--zyx-header-bg-end");
-    shell.style.removeProperty("--zyx-header-text");
-    shell.style.removeProperty("--zyx-slider-color");
-    shell.style.removeProperty("--zyx-radius-xl");
-    shell.style.removeProperty("--zyx-radius-lg");
-    shell.style.removeProperty("--zyx-radius-md");
-    shell.style.removeProperty("--zyx-shell-blur");
+    const cssRoot = document.documentElement.style;
+    cssRoot.removeProperty("--zyx-border");
+    cssRoot.removeProperty("--zyx-text");
+    cssRoot.removeProperty("--zyx-topbar-bg-start");
+    cssRoot.removeProperty("--zyx-topbar-bg-end");
+    cssRoot.removeProperty("--zyx-icon-color");
+    cssRoot.removeProperty("--zyx-header-bg-start");
+    cssRoot.removeProperty("--zyx-header-bg-end");
+    cssRoot.removeProperty("--zyx-header-text");
+    cssRoot.removeProperty("--zyx-slider-color");
+    cssRoot.removeProperty("--zyx-radius-xl");
+    cssRoot.removeProperty("--zyx-radius-lg");
+    cssRoot.removeProperty("--zyx-radius-md");
+    cssRoot.removeProperty("--zyx-shell-blur");
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
