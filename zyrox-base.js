@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.4
+// @version      0.6.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.4";
+    const CLIENT_VERSION = "0.6.5";
     return CLIENT_VERSION;
   }
 
@@ -122,6 +122,7 @@
       --zyx-settings-card-border: rgba(255,255,255,.08);
       --zyx-accent-soft: #ffbdbd;
       --zyx-search-text: #ffe6e6;
+      --zyx-checkmark-color: #ff6b6b;
       --zyx-hover-shift: 2px;
       --zyx-shell-blur: 10px;
       --zyx-muted: #9b9bab;
@@ -465,6 +466,7 @@
     .zyrox-setting-card label { display:block; font-size: 12px; color: var(--zyx-settings-text); margin: 0; }
     .zyrox-setting-card input[type='color'] { width: 52px; height: 30px; border: none; background: transparent; cursor: pointer; }
     .zyrox-setting-card input[type='range'] { width: 190px; accent-color: var(--zyx-slider-color); }
+    .zyrox-setting-card input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--zyx-checkmark-color); }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
     .zyrox-preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
     .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
@@ -608,6 +610,7 @@
             <button type="button" class="zyrox-preset-btn" data-preset="default">Default</button>
             <button type="button" class="zyrox-preset-btn" data-preset="green">Green</button>
             <button type="button" class="zyrox-preset-btn" data-preset="ice">Ice</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="grayscale">Greyscale</button>
           </div>
           <div class="zyrox-subheading">Main Window</div>
           <div class="zyrox-setting-card">
@@ -645,6 +648,10 @@
           <div class="zyrox-setting-card">
             <label>Slider Color</label>
             <input type="color" class="set-slider-color" value="#ff6b6b" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Checkmark Color</label>
+            <input type="color" class="set-checkmark-color" value="#ff6b6b" />
           </div>
           <div class="zyrox-subheading">Typography</div>
           <div class="zyrox-setting-card">
@@ -783,6 +790,7 @@
   const textInput = settingsMenu.querySelector(".set-text");
   const opacityInput = settingsMenu.querySelector(".set-opacity");
   const sliderColorInput = settingsMenu.querySelector(".set-slider-color");
+  const checkmarkColorInput = settingsMenu.querySelector(".set-checkmark-color");
   const mutedTextInput = settingsMenu.querySelector(".set-muted-text");
   const accentSoftInput = settingsMenu.querySelector(".set-accent-soft");
   const searchTextInput = settingsMenu.querySelector(".set-search-text");
@@ -876,6 +884,7 @@
       text: textInput.value,
       opacity: opacityInput.value,
       sliderColor: sliderColorInput.value,
+      checkmarkColor: checkmarkColorInput.value,
       mutedText: mutedTextInput.value,
       accentSoft: accentSoftInput.value,
       searchText: searchTextInput.value,
@@ -898,34 +907,58 @@
   }
 
   function applyPreset(presetName) {
-    if (presetName === "green") {
-      accentInput.value = "#2dff75";
-      shellBgStartInput.value = "#2dff75";
-      topbarColorInput.value = "#35d96d";
-      borderInput.value = "#5dff9a";
-      outlineColorInput.value = "#37d878";
-      headerStartInput.value = "#2dff75";
-      headerEndInput.value = "#0f2f1b";
-      sliderColorInput.value = "#2dff75";
-    } else if (presetName === "ice") {
-      accentInput.value = "#6cd8ff";
-      shellBgStartInput.value = "#6cd8ff";
-      topbarColorInput.value = "#58bff1";
-      borderInput.value = "#8ae4ff";
-      outlineColorInput.value = "#6fbce8";
-      headerStartInput.value = "#6cd8ff";
-      headerEndInput.value = "#133042";
-      sliderColorInput.value = "#7bdfff";
-    } else {
-      accentInput.value = "#ff3d3d";
-      shellBgStartInput.value = "#ff3d3d";
-      topbarColorInput.value = "#ff4a4a";
-      borderInput.value = "#ff6f6f";
-      outlineColorInput.value = "#ff5b5b";
-      headerStartInput.value = "#ff4a4a";
-      headerEndInput.value = "#3c1212";
-      sliderColorInput.value = "#ff6b6b";
-    }
+    const preset = (() => {
+      if (presetName === "green") {
+        return {
+          accent: "#2dff75", shellStart: "#2dff75", shellEnd: "#03130a", topbar: "#35d96d", border: "#5dff9a",
+          outline: "#37d878", text: "#d7ffe6", muted: "#88b79b", soft: "#a8ffd0", search: "#e6fff0", icon: "#d7ffe9",
+          panelText: "#d9ffe8", panelBorder: "#5fff99", panelBg: "#04110a", slider: "#2dff75", checkmark: "#2dff75",
+          headerStart: "#2dff75", headerEnd: "#0f2f1b", headerText: "#f0fff4",
+        };
+      }
+      if (presetName === "ice") {
+        return {
+          accent: "#6cd8ff", shellStart: "#6cd8ff", shellEnd: "#07131a", topbar: "#58bff1", border: "#8ae4ff",
+          outline: "#6fbce8", text: "#d7edff", muted: "#8ea7bd", soft: "#b8e5ff", search: "#e7f5ff", icon: "#dff3ff",
+          panelText: "#e1f4ff", panelBorder: "#8fd7ff", panelBg: "#071019", slider: "#7bdfff", checkmark: "#7bdfff",
+          headerStart: "#6cd8ff", headerEnd: "#133042", headerText: "#f4fbff",
+        };
+      }
+      if (presetName === "grayscale") {
+        return {
+          accent: "#d3d3d3", shellStart: "#7a7a7a", shellEnd: "#0a0a0a", topbar: "#8d8d8d", border: "#b1b1b1",
+          outline: "#9a9a9a", text: "#dddddd", muted: "#9a9a9a", soft: "#c9c9c9", search: "#f1f1f1", icon: "#f5f5f5",
+          panelText: "#efefef", panelBorder: "#a0a0a0", panelBg: "#0f0f0f", slider: "#c4c4c4", checkmark: "#d0d0d0",
+          headerStart: "#8f8f8f", headerEnd: "#1d1d1d", headerText: "#ffffff",
+        };
+      }
+      return {
+        accent: "#ff3d3d", shellStart: "#ff3d3d", shellEnd: "#000000", topbar: "#ff4a4a", border: "#ff6f6f",
+        outline: "#ff5b5b", text: "#d6d6df", muted: "#9b9bab", soft: "#ffbdbd", search: "#ffe6e6", icon: "#ffdada",
+        panelText: "#ffd9d9", panelBorder: "#ff6464", panelBg: "#08080a", slider: "#ff6b6b", checkmark: "#ff6b6b",
+        headerStart: "#ff4a4a", headerEnd: "#3c1212", headerText: "#ffffff",
+      };
+    })();
+
+    accentInput.value = preset.accent;
+    shellBgStartInput.value = preset.shellStart;
+    shellBgEndInput.value = preset.shellEnd;
+    topbarColorInput.value = preset.topbar;
+    borderInput.value = preset.border;
+    outlineColorInput.value = preset.outline;
+    textInput.value = preset.text;
+    mutedTextInput.value = preset.muted;
+    accentSoftInput.value = preset.soft;
+    searchTextInput.value = preset.search;
+    iconColorInput.value = preset.icon;
+    panelCountTextInput.value = preset.panelText;
+    panelCountBorderInput.value = preset.panelBorder;
+    panelCountBgInput.value = preset.panelBg;
+    sliderColorInput.value = preset.slider;
+    checkmarkColorInput.value = preset.checkmark;
+    headerStartInput.value = preset.headerStart;
+    headerEndInput.value = preset.headerEnd;
+    headerTextInput.value = preset.headerText;
     applyAppearance();
   }
 
@@ -957,6 +990,7 @@
     const text = textInput.value;
     const opacity = Number(opacityInput.value) / 100;
     const sliderColor = sliderColorInput.value;
+    const checkmarkColor = checkmarkColorInput.value;
     const mutedText = mutedTextInput.value;
     const accentSoft = accentSoftInput.value;
     const searchText = searchTextInput.value;
@@ -1000,6 +1034,7 @@
     cssRoot.setProperty("--zyx-settings-card-border", toRgba(settingsCardBorder, 0.18));
     cssRoot.setProperty("--zyx-settings-card-bg", toRgba(settingsCardBg, 0.05));
     cssRoot.setProperty("--zyx-slider-color", sliderColor);
+    cssRoot.setProperty("--zyx-checkmark-color", checkmarkColor);
     cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
     cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
     cssRoot.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
@@ -1151,6 +1186,7 @@
   textInput.addEventListener("input", applyAppearance);
   opacityInput.addEventListener("input", applyAppearance);
   sliderColorInput.addEventListener("input", applyAppearance);
+  checkmarkColorInput.addEventListener("input", applyAppearance);
   mutedTextInput.addEventListener("input", applyAppearance);
   accentSoftInput.addEventListener("input", applyAppearance);
   searchTextInput.addEventListener("input", applyAppearance);
@@ -1187,6 +1223,7 @@
     textInput.value = "#d6d6df";
     opacityInput.value = "45";
     sliderColorInput.value = "#ff6b6b";
+    checkmarkColorInput.value = "#ff6b6b";
     mutedTextInput.value = "#9b9bab";
     accentSoftInput.value = "#ffbdbd";
     searchTextInput.value = "#ffe6e6";
@@ -1232,6 +1269,7 @@
     cssRoot.removeProperty("--zyx-settings-card-border");
     cssRoot.removeProperty("--zyx-settings-card-bg");
     cssRoot.removeProperty("--zyx-slider-color");
+    cssRoot.removeProperty("--zyx-checkmark-color");
     cssRoot.removeProperty("--zyx-radius-xl");
     cssRoot.removeProperty("--zyx-radius-lg");
     cssRoot.removeProperty("--zyx-radius-md");
@@ -1315,6 +1353,7 @@
         assign(textInput, "text");
         assign(opacityInput, "opacity");
         assign(sliderColorInput, "sliderColor");
+        assign(checkmarkColorInput, "checkmarkColor");
         assign(mutedTextInput, "mutedText");
         assign(accentSoftInput, "accentSoft");
         assign(searchTextInput, "searchText");
