@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.4
+// @version      0.7.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.4";
+    const CLIENT_VERSION = "0.7.5";
     return CLIENT_VERSION;
   }
 
@@ -199,31 +199,6 @@
       align-items: center;
       gap: 8px;
     }
-
-    .zyrox-collapse-row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-      max-width: 520px;
-    }
-
-    .zyrox-collapse-btn {
-      border: 1px solid var(--zyx-outline-color);
-      background: rgba(0, 0, 0, 0.32);
-      color: var(--zyx-settings-text);
-      border-radius: 7px;
-      padding: 3px 7px;
-      font-size: 10px;
-      cursor: pointer;
-      line-height: 1.1;
-    }
-
-    .zyrox-collapse-btn.inactive {
-      opacity: 0.55;
-      border-color: var(--zyx-border-soft);
-    }
-
 
     .zyrox-shell.loose-mode {
       padding: 0;
@@ -1083,7 +1058,9 @@
     list.style.display = collapsed ? "none" : "";
     const button = panelCollapseButtons.get(panelName);
     if (button) {
-      button.textContent = collapsed ? "Expand" : "Collapse";
+      button.textContent = collapsed ? "▸" : "▾";
+      button.title = collapsed ? "Expand category" : "Collapse category";
+      button.setAttribute("aria-label", button.title);
       button.classList.toggle("collapsed", collapsed);
     }
   }
@@ -1091,7 +1068,9 @@
   function syncCollapseButtons() {
     for (const [panelName, button] of panelCollapseButtons.entries()) {
       const collapsed = !!state.collapsedPanels[panelName];
-      button.textContent = collapsed ? "Expand" : "Collapse";
+      button.textContent = collapsed ? "▸" : "▾";
+      button.title = collapsed ? "Expand category" : "Collapse category";
+      button.setAttribute("aria-label", button.title);
       button.classList.toggle("collapsed", collapsed);
     }
   }
@@ -1356,7 +1335,9 @@
     const collapseButton = document.createElement("button");
     collapseButton.type = "button";
     collapseButton.className = "zyrox-panel-collapse-btn";
-    collapseButton.textContent = "Collapse";
+    collapseButton.textContent = "▾";
+    collapseButton.title = "Collapse category";
+    collapseButton.setAttribute("aria-label", "Collapse category");
     collapseButton.addEventListener("click", (event) => {
       event.stopPropagation();
       const nextCollapsed = !state.collapsedPanels[name];
