@@ -15,6 +15,12 @@
 (() => {
   "use strict";
 
+  // Some userscript runtimes execute bundled code that expects a global `Module`
+  // constructor (e.g. `new Module(...)`). Provide a minimal callable fallback.
+  if (typeof globalThis.Module === "undefined") {
+    globalThis.Module = function Module() {};
+  }
+
   if (window.__ZYROX_UI_MOUNTED__) return;
   window.__ZYROX_UI_MOUNTED__ = true;
 
@@ -911,7 +917,7 @@
   const settingsTabs = [...settingsMenu.querySelectorAll(".zyrox-settings-tab")];
   const settingsPanes = [...settingsMenu.querySelectorAll(".zyrox-settings-pane")];
   const resetBindBtn = configMenu.querySelector(".zyrox-btn-square");
-  const setBindBtn = configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
+  const setBindButtonEl = configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
   const settingsMenuKeyBtn = settingsMenu.querySelector(".settings-menu-key");
   const settingsMenuKeyResetBtn = settingsMenu.querySelector(".settings-menu-key-reset");
   const settingsTopCloseBtn = settingsMenu.querySelector(".settings-close-top");
@@ -957,11 +963,32 @@
   const panelCollapseButtons = new Map();
   let openConfigModule = null;
 
-  function moduleCfg(name) {
-    if (!state.moduleConfig.has(name)) {
-      state.moduleConfig.set(name, { keybind: null });
+  function setBindButtonText(text) {
+    const bindButton = setBindButtonEl || configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
+    if (bindButton) bindButton.textContent = text;
+  }
+
+  function ensureModuleConfigStore() {
+    if (state.moduleConfig instanceof Map) return state.moduleConfig;
+
+    const recovered = new Map();
+    if (state.moduleConfig && typeof state.moduleConfig === "object") {
+      for (const [moduleName, cfg] of Object.entries(state.moduleConfig)) {
+        if (cfg && typeof cfg === "object") {
+          recovered.set(moduleName, { keybind: cfg.keybind || null });
+        }
+      }
     }
-    return state.moduleConfig.get(name);
+    state.moduleConfig = recovered;
+    return state.moduleConfig;
+  }
+
+  function moduleCfg(name) {
+    const store = ensureModuleConfigStore();
+    if (!store.has(name)) {
+      store.set(name, { keybind: null });
+    }
+    return store.get(name);
   }
 
   function setBindLabel(item, moduleName) {
@@ -989,7 +1016,7 @@
     settingsMenu.classList.add("hidden");
     openConfigModule = null;
     state.listeningForBind = null;
-    setBindBtn.textContent = "Set keybind";
+    setBindButtonText("Set keybind");
   }
 
   function openConfig(moduleName) {
@@ -998,7 +1025,7 @@
 
     configTitleEl.textContent = moduleName;
     configSubEl.textContent = cfg.keybind ? `Current bind: ${cfg.keybind}` : "No keybind assigned";
-    setBindBtn.textContent = "Set keybind";
+    setBindButtonText("Set keybind");
 
     configBackdrop.classList.remove("hidden");
     configMenu.classList.remove("hidden");
@@ -1386,11 +1413,13 @@
     return panel;
   }
 
-  setBindBtn.addEventListener("click", () => {
-    if (!openConfigModule) return;
-    state.listeningForBind = openConfigModule;
-    setBindBtn.textContent = "Press any key...";
-  });
+  if (setBindButtonEl) {
+    setBindButtonEl.addEventListener("click", () => {
+      if (!openConfigModule) return;
+      state.listeningForBind = openConfigModule;
+      setBindButtonText("Press any key...");
+    });
+  }
 
   settingsMenuKeyBtn.addEventListener("click", () => {
     state.listeningForMenuBind = true;
@@ -1429,7 +1458,7 @@
     if (item) setBindLabel(item, openConfigModule);
     configSubEl.textContent = "No keybind assigned";
     state.listeningForBind = null;
-    setBindBtn.textContent = "Set keybind";
+    setBindButtonText("Set keybind");
   });
 
   searchInput.addEventListener("keydown", (event) => {
@@ -1742,7 +1771,7 @@
       const item = state.moduleItems.get(openConfigModule);
       if (item) setBindLabel(item, openConfigModule);
       configSubEl.textContent = `Current bind: ${cfg.keybind}`;
-      setBindBtn.textContent = "Set keybind";
+      setBindButtonText("Set keybind");
       state.listeningForBind = null;
       return;
     }
@@ -1753,7 +1782,7 @@
       return;
     }
 
-    for (const [moduleName, cfg] of state.moduleConfig) {
+    for (const [moduleName, cfg] of ensureModuleConfigStore()) {
       if (cfg.keybind && cfg.keybind === event.key) {
         toggleModule(moduleName);
       }
