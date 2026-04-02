@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.7
+// @version      0.7.8
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -15,12 +15,37 @@
 (() => {
   "use strict";
 
+  // Some userscript runtimes execute bundled code that expects a global `Module`
+  // with `enable/disable` methods. Provide a minimal compatible fallback.
+  if (typeof globalThis.Module === "undefined") {
+    globalThis.Module = class Module {
+      constructor(name = "Module", options = {}) {
+        this.name = name;
+        this.enabled = false;
+        this.onEnable = typeof options.onEnable === "function" ? options.onEnable : () => {};
+        this.onDisable = typeof options.onDisable === "function" ? options.onDisable : () => {};
+      }
+
+      enable() {
+        if (this.enabled) return;
+        this.enabled = true;
+        this.onEnable();
+      }
+
+      disable() {
+        if (!this.enabled) return;
+        this.enabled = false;
+        this.onDisable();
+      }
+    };
+  }
+
   if (window.__ZYROX_UI_MOUNTED__) return;
   window.__ZYROX_UI_MOUNTED__ = true;
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.7";
+    const CLIENT_VERSION = "0.7.8";
     return CLIENT_VERSION;
   }
 
@@ -39,7 +64,18 @@
       groups: [
         {
           name: "Core",
-          modules: ["Auto Answer", "Answer Streak", "Question Preview", "Skip Animation", "Instant Continue"],
+          modules: [
+            {
+              name: "Auto Answer",
+              settings: [
+                { id: "speed", label: "Answer Delay (ms)", type: "slider", min: 100, max: 3000, step: 50, default: 1000 },
+              ],
+            },
+            "Answer Streak",
+            "Question Preview",
+            "Skip Animation",
+            "Instant Continue",
+          ],
         },
         {
           name: "Visual",
@@ -910,8 +946,9 @@
   const configCloseBtn = configMenu.querySelector(".config-close-btn");
   const settingsTabs = [...settingsMenu.querySelectorAll(".zyrox-settings-tab")];
   const settingsPanes = [...settingsMenu.querySelectorAll(".zyrox-settings-pane")];
-  const resetBindBtn = configMenu.querySelector(".zyrox-btn-square");
-  const setBindBtn = configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
+  const configBody = configMenu.querySelector(".zyrox-config-body");
+  // Backward-compat alias for legacy code paths that still reference this identifier.
+  const setBindButtonEl = configMenu.querySelector(".set-bind-btn");
   const settingsMenuKeyBtn = settingsMenu.querySelector(".settings-menu-key");
   const settingsMenuKeyResetBtn = settingsMenu.querySelector(".settings-menu-key-reset");
   const settingsTopCloseBtn = settingsMenu.querySelector(".settings-close-top");
@@ -956,18 +993,63 @@
   const panelByName = new Map();
   const panelCollapseButtons = new Map();
   let openConfigModule = null;
+  let currentSetBindBtn = null;
+  let currentResetBindBtn = null;
+  let currentBindTextEl = null;
+
+  function setBindButtonText(text) {
+    const bindButton = currentSetBindBtn || setBindButtonEl || configMenu.querySelector(".set-bind-btn");
+    if (bindButton) bindButton.textContent = text;
+  }
+
+  function setCurrentBindText(bind) {
+    if (!currentBindTextEl) return;
+    currentBindTextEl.textContent = bind ? `Keybind: ${bind}` : "Keybind: none";
+  }
+
+  function getModuleLayoutConfig(moduleName) {
+    const allGroups = [...MENU_LAYOUT.general.groups, ...MENU_LAYOUT.gamemodeSpecific.groups];
+    const found = allGroups
+      .flatMap((group) => group.modules || [])
+      .find((mod) => typeof mod === "object" && mod && mod.name === moduleName);
+    return found || null;
+  }
+
+  function ensureModuleConfigStore() {
+    if (state.moduleConfig instanceof Map) return state.moduleConfig;
+
+    const recovered = new Map();
+    if (state.moduleConfig && typeof state.moduleConfig === "object") {
+      for (const [moduleName, cfg] of Object.entries(state.moduleConfig)) {
+        if (cfg && typeof cfg === "object") {
+          recovered.set(moduleName, { keybind: cfg.keybind || null });
+        }
+      }
+    }
+    state.moduleConfig = recovered;
+    return state.moduleConfig;
+  }
 
   function moduleCfg(name) {
-    if (!state.moduleConfig.has(name)) {
-      state.moduleConfig.set(name, { keybind: null });
+    const store = ensureModuleConfigStore();
+    if (!store.has(name)) {
+      const layout = getModuleLayoutConfig(name);
+      const settings = {};
+      if (layout && Array.isArray(layout.settings)) {
+        for (const setting of layout.settings) {
+          settings[setting.id] = setting.default ?? setting.min ?? 0;
+        }
+      }
+      store.set(name, { keybind: null, ...settings });
     }
-    return state.moduleConfig.get(name);
+    return store.get(name);
   }
 
   function setBindLabel(item, moduleName) {
     const label = item.querySelector(".zyrox-bind-label");
     const bind = moduleCfg(moduleName).keybind;
-    label.textContent = bind || "-";
+    label.textContent = bind || "";
+    label.style.display = bind ? "" : "none";
   }
 
   function toggleModule(moduleName) {
@@ -977,10 +1059,307 @@
     if (state.enabledModules.has(moduleName)) {
       state.enabledModules.delete(moduleName);
       item.classList.remove("active");
+      if (moduleName === "Auto Answer") stopAutoAnswer();
     } else {
       state.enabledModules.add(moduleName);
       item.classList.add("active");
+      if (moduleName === "Auto Answer") startAutoAnswer();
     }
+  }
+
+  var zyroxAutoAnswerState = globalThis.__ZYROX_AUTOANSWER_STATE__ || {
+    intervalId: null,
+    listenersAttached: false,
+    socketManager: null,
+    questions: [],
+    answerDeviceId: null,
+    currentQuestionId: null,
+    questionIdList: [],
+    currentQuestionIndex: -1,
+    lastAnsweredId: null,
+    lastDebugAt: 0,
+  };
+  globalThis.__ZYROX_AUTOANSWER_STATE__ = zyroxAutoAnswerState;
+
+  function getSocketManager() {
+    if (zyroxAutoAnswerState.socketManager) return zyroxAutoAnswerState.socketManager;
+    const direct = globalThis.socketManager;
+    if (direct && typeof direct.sendMessage === "function" && typeof direct.addEventListener === "function") {
+      zyroxAutoAnswerState.socketManager = direct;
+      console.log("[Zyrox][AutoAnswer] Found socketManager on window.socketManager");
+      return direct;
+    }
+
+    for (const key of Object.getOwnPropertyNames(globalThis)) {
+      let candidate;
+      try {
+        candidate = globalThis[key];
+      } catch (_) {
+        continue;
+      }
+      if (candidate && typeof candidate.sendMessage === "function" && typeof candidate.addEventListener === "function") {
+        zyroxAutoAnswerState.socketManager = candidate;
+        console.log(`[Zyrox][AutoAnswer] Found socket manager candidate on window.${key}`);
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  function getTransportType(socketManager) {
+    const raw = socketManager?.transportType;
+    if (typeof raw === "string") return raw;
+    if (raw && typeof raw.get === "function") {
+      try {
+        return raw.get();
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function pickAnswerPayload(question) {
+    if (!question || !Array.isArray(question.answers) || question.answers.length === 0) return null;
+    if (question.type === "text") return question.answers[0]?.text ?? null;
+    return question.answers.find((a) => a && a.correct)?._id ?? null;
+  }
+
+  function normalizeText(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function findQuestionBankInObject(root, depth = 0) {
+    if (!root || typeof root !== "object" || depth > 8) return null;
+    if (Array.isArray(root)) {
+      if (root.length && root.every((q) => q && typeof q === "object" && "_id" in q && Array.isArray(q.answers))) {
+        return root;
+      }
+      for (const item of root) {
+        const found = findQuestionBankInObject(item, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const value of Object.values(root)) {
+      const found = findQuestionBankInObject(value, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  function refreshQuestionsFromStoresFallback() {
+    try {
+      const fromStores = findQuestionBankInObject(globalThis.stores);
+      if (fromStores && fromStores.length) {
+        zyroxAutoAnswerState.questions = fromStores;
+        if (Date.now() - zyroxAutoAnswerState.lastDebugAt > 5000) {
+          console.log(`[Zyrox][AutoAnswer] Loaded ${fromStores.length} questions from stores fallback.`);
+          zyroxAutoAnswerState.lastDebugAt = Date.now();
+        }
+      }
+    } catch (_) {}
+  }
+
+  function deepFindValueByKey(root, keyMatcher, depth = 0) {
+    if (!root || typeof root !== "object" || depth > 6) return null;
+    if (Array.isArray(root)) {
+      for (const item of root) {
+        const found = deepFindValueByKey(item, keyMatcher, depth + 1);
+        if (found !== null) return found;
+      }
+      return null;
+    }
+    for (const [key, value] of Object.entries(root)) {
+      if (keyMatcher(key, value)) return value;
+      const found = deepFindValueByKey(value, keyMatcher, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+
+  function refreshQuestionsFromPhaserFallback() {
+    const devices = globalThis.stores?.phaser?.scene?.worldManager?.devices?.allDevices;
+    if (!Array.isArray(devices) || !devices.length) return;
+
+    for (const device of devices) {
+      const globalQuestionsRaw = deepFindValueByKey(device, (key) => key === "GLOBAL_questions");
+      if (typeof globalQuestionsRaw === "string") {
+        try {
+          const parsed = JSON.parse(globalQuestionsRaw);
+          if (Array.isArray(parsed) && parsed.length) {
+            zyroxAutoAnswerState.questions = parsed;
+            zyroxAutoAnswerState.answerDeviceId = device?.id ?? zyroxAutoAnswerState.answerDeviceId;
+          }
+        } catch (_) {}
+      }
+      const currentQuestionId = deepFindValueByKey(device, (key) => key.includes("_currentQuestionId"));
+      if (currentQuestionId) zyroxAutoAnswerState.currentQuestionId = currentQuestionId;
+    }
+  }
+
+  function findPhaserRoomSender() {
+    const scene = globalThis.stores?.phaser?.scene;
+    if (!scene) return null;
+    const roomCandidate = deepFindValueByKey(
+      scene,
+      (_, value) => value && typeof value.send === "function" && typeof value === "object"
+    );
+    return roomCandidate || null;
+  }
+
+  function getQuestionPrompt(question) {
+    return question?.text ?? question?.question ?? question?.prompt ?? question?.title ?? "";
+  }
+
+  function findCurrentQuestionFromDom() {
+    const questionTextEl = document.querySelector(
+      "[data-testid='question-text'], [class*='question'][class*='text'], .question, .Question-text, h1, h2"
+    );
+    const questionText = normalizeText(questionTextEl?.textContent);
+    if (!questionText) return null;
+    return zyroxAutoAnswerState.questions.find((q) => normalizeText(getQuestionPrompt(q)) === questionText) || null;
+  }
+
+  function tryAnswerViaDom(question) {
+    if (!question || !Array.isArray(question.answers)) return false;
+    if (zyroxAutoAnswerState.lastAnsweredId === question._id) return false;
+
+    const correct = question.answers.find((a) => a && a.correct);
+    if (!correct) return false;
+
+    const correctText = normalizeText(correct.text ?? correct.answer ?? correct.value);
+    if (!correctText) return false;
+
+    const clickable = [...document.querySelectorAll(
+      "button, [role='button'], .option, [class*='option'], [class*='answer'], [data-testid*='answer']"
+    )].filter((el) => normalizeText(el.textContent) === correctText);
+
+    if (!clickable.length) return false;
+    clickable[0].click();
+    zyroxAutoAnswerState.lastAnsweredId = question._id;
+    return true;
+  }
+
+  function answerCurrentQuestion() {
+    refreshQuestionsFromStoresFallback();
+    refreshQuestionsFromPhaserFallback();
+
+    const socketManager = getSocketManager();
+    if (!socketManager) {
+      if (globalThis.Phaser && zyroxAutoAnswerState.currentQuestionId && zyroxAutoAnswerState.answerDeviceId) {
+        const question = zyroxAutoAnswerState.questions.find((q) => q?._id == zyroxAutoAnswerState.currentQuestionId);
+        const answer = pickAnswerPayload(question);
+        const roomSender = findPhaserRoomSender();
+        if (answer && roomSender) {
+          roomSender.send("MESSAGE_FOR_DEVICE", {
+            key: "answered",
+            deviceId: zyroxAutoAnswerState.answerDeviceId,
+            data: { answer },
+          });
+          zyroxAutoAnswerState.lastAnsweredId = question?._id || null;
+          console.log(`[Zyrox][AutoAnswer] Answered via Phaser room sender: ${question?._id}`);
+          return;
+        }
+      }
+
+      const domQuestion = findCurrentQuestionFromDom();
+      const answered = tryAnswerViaDom(domQuestion);
+      if (!answered) {
+        if (Date.now() - zyroxAutoAnswerState.lastDebugAt > 3000) {
+          console.log("[Zyrox][AutoAnswer] No socket manager and no DOM match yet.", {
+            questionCount: zyroxAutoAnswerState.questions.length,
+          });
+          zyroxAutoAnswerState.lastDebugAt = Date.now();
+        }
+      }
+      return;
+    }
+
+    const transportType = getTransportType(socketManager);
+
+    if (transportType === "colyseus") {
+      if (!zyroxAutoAnswerState.currentQuestionId || !zyroxAutoAnswerState.answerDeviceId) return;
+      const question = zyroxAutoAnswerState.questions.find((q) => q?._id == zyroxAutoAnswerState.currentQuestionId);
+      const answer = pickAnswerPayload(question);
+      if (!answer) return;
+
+      socketManager.sendMessage("MESSAGE_FOR_DEVICE", {
+        key: "answered",
+        deviceId: zyroxAutoAnswerState.answerDeviceId,
+        data: { answer },
+      });
+      zyroxAutoAnswerState.lastAnsweredId = question._id;
+      console.log(`[Zyrox][AutoAnswer] Answered colyseus question ${question._id}`);
+      return;
+    }
+
+    const questionId = zyroxAutoAnswerState.questionIdList[zyroxAutoAnswerState.currentQuestionIndex];
+    if (!questionId) return;
+    const question = zyroxAutoAnswerState.questions.find((q) => q?._id == questionId);
+    const answer = pickAnswerPayload(question);
+    if (!answer) return;
+    socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+    zyroxAutoAnswerState.lastAnsweredId = question._id;
+    console.log(`[Zyrox][AutoAnswer] Answered blueboat question ${questionId}`);
+  }
+
+  function ensureAutoAnswerListeners() {
+    if (zyroxAutoAnswerState.listenersAttached) return true;
+    const socketManager = getSocketManager();
+    if (!socketManager) return false;
+
+    socketManager.addEventListener("deviceChanges", (event) => {
+      for (const { id, data } of event.detail || []) {
+        for (const key in data || {}) {
+          if (key === "GLOBAL_questions") {
+            try {
+              zyroxAutoAnswerState.questions = JSON.parse(data[key]);
+              zyroxAutoAnswerState.answerDeviceId = id;
+            } catch (_) {}
+          }
+          if (key.includes("_currentQuestionId")) {
+            zyroxAutoAnswerState.currentQuestionId = data[key];
+          }
+        }
+      }
+    });
+
+    socketManager.addEventListener("blueboatMessage", (event) => {
+      if (event.detail?.key !== "STATE_UPDATE") return;
+      const payload = event.detail?.data;
+      if (!payload) return;
+      if (payload.type === "GAME_QUESTIONS") zyroxAutoAnswerState.questions = payload.value || [];
+      if (payload.type === "PLAYER_QUESTION_LIST") {
+        zyroxAutoAnswerState.questionIdList = payload.value?.questionList || [];
+        zyroxAutoAnswerState.currentQuestionIndex = payload.value?.questionIndex ?? -1;
+      }
+      if (payload.type === "PLAYER_QUESTION_LIST_INDEX") {
+        zyroxAutoAnswerState.currentQuestionIndex = Number(payload.value ?? -1);
+      }
+    });
+
+    zyroxAutoAnswerState.listenersAttached = true;
+    return true;
+  }
+
+  function stopAutoAnswer() {
+    if (zyroxAutoAnswerState.intervalId) {
+      clearInterval(zyroxAutoAnswerState.intervalId);
+      zyroxAutoAnswerState.intervalId = null;
+      console.log("[Zyrox] Auto Answer stopped");
+    }
+  }
+
+  function startAutoAnswer() {
+    ensureAutoAnswerListeners();
+    stopAutoAnswer();
+    const cfg = moduleCfg("Auto Answer");
+    const speed = Math.max(100, Number(cfg.speed) || 1000);
+    zyroxAutoAnswerState.intervalId = setInterval(answerCurrentQuestion, speed);
+    console.log(`[Zyrox] Auto Answer started (${speed}ms)`);
+  }
+
+  function refreshAutoAnswerLoopIfEnabled() {
+    if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
   }
 
   function closeConfig() {
@@ -988,17 +1367,81 @@
     configMenu.classList.add("hidden");
     settingsMenu.classList.add("hidden");
     openConfigModule = null;
+    currentBindTextEl = null;
     state.listeningForBind = null;
-    setBindBtn.textContent = "Set keybind";
+    setBindButtonText("Set keybind");
   }
 
   function openConfig(moduleName) {
     openConfigModule = moduleName;
     const cfg = moduleCfg(moduleName);
+    const moduleLayout = getModuleLayoutConfig(moduleName);
+
+    configBody.innerHTML = `
+      <div class="zyrox-config-row">
+        <span class="zyrox-keybind-current">Keybind: ${cfg.keybind || "none"}</span>
+        <div class="zyrox-config-actions">
+          <button class="zyrox-btn zyrox-btn-square reset-bind-btn" type="button" title="Reset keybind">↺</button>
+          <button class="zyrox-btn set-bind-btn" type="button">Set keybind</button>
+        </div>
+      </div>
+    `;
+
+    currentResetBindBtn = configMenu.querySelector(".reset-bind-btn");
+    currentSetBindBtn = configMenu.querySelector(".set-bind-btn");
+    currentBindTextEl = configMenu.querySelector(".zyrox-keybind-current");
+
+    if (currentSetBindBtn) {
+      currentSetBindBtn.addEventListener("click", () => {
+        if (!openConfigModule) return;
+        state.listeningForBind = openConfigModule;
+        setBindButtonText("Press any key...");
+      });
+    }
+
+    if (currentResetBindBtn) {
+      currentResetBindBtn.addEventListener("click", () => {
+        if (!openConfigModule) return;
+        const activeCfg = moduleCfg(openConfigModule);
+        activeCfg.keybind = null;
+        const item = state.moduleItems.get(openConfigModule);
+        if (item) setBindLabel(item, openConfigModule);
+        setCurrentBindText(null);
+        state.listeningForBind = null;
+        setBindButtonText("Set keybind");
+      });
+    }
+
+    if (moduleLayout && Array.isArray(moduleLayout.settings)) {
+      for (const setting of moduleLayout.settings) {
+        const settingCard = document.createElement("div");
+        settingCard.className = "zyrox-setting-card";
+
+        if (setting.type === "slider") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? setting.min ?? 0;
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${cfg[setting.id]}" />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting");
+          if (settingInput) {
+            settingInput.addEventListener("input", (event) => {
+              cfg[setting.id] = Number(event.target.value);
+              if (moduleName === "Auto Answer" && setting.id === "speed") {
+                refreshAutoAnswerLoopIfEnabled();
+              }
+            });
+          }
+        }
+
+        if (settingCard.innerHTML.trim()) configBody.appendChild(settingCard);
+      }
+    }
 
     configTitleEl.textContent = moduleName;
-    configSubEl.textContent = cfg.keybind ? `Current bind: ${cfg.keybind}` : "No keybind assigned";
-    setBindBtn.textContent = "Set keybind";
+    configSubEl.textContent = "Edit settings";
+    setBindButtonText("Set keybind");
+    setCurrentBindText(cfg.keybind || null);
 
     configBackdrop.classList.remove("hidden");
     configMenu.classList.remove("hidden");
@@ -1356,10 +1799,12 @@
     const list = document.createElement("ul");
     list.className = "zyrox-module-list";
 
-    for (const moduleName of modules) {
+    for (const moduleDef of modules) {
+      const moduleName = typeof moduleDef === "string" ? moduleDef : moduleDef?.name;
+      if (!moduleName) continue;
       const item = document.createElement("li");
       item.className = "zyrox-module";
-      item.innerHTML = `<span>${moduleName}</span><span class="zyrox-bind-label">-</span>`;
+      item.innerHTML = `<span>${moduleName}</span><span class="zyrox-bind-label"></span>`;
 
       state.moduleItems.set(moduleName, item);
       state.moduleEntries.push({ name: moduleName, item, panel });
@@ -1385,12 +1830,6 @@
     state.modulePanels.set(panel, { modules: [...modules] });
     return panel;
   }
-
-  setBindBtn.addEventListener("click", () => {
-    if (!openConfigModule) return;
-    state.listeningForBind = openConfigModule;
-    setBindBtn.textContent = "Press any key...";
-  });
 
   settingsMenuKeyBtn.addEventListener("click", () => {
     state.listeningForMenuBind = true;
@@ -1419,17 +1858,6 @@
       for (const t of settingsTabs) t.classList.toggle("active", t === tab);
       for (const pane of settingsPanes) pane.classList.toggle("hidden", pane.dataset.pane !== target);
     });
-  });
-
-  resetBindBtn.addEventListener("click", () => {
-    if (!openConfigModule) return;
-    const cfg = moduleCfg(openConfigModule);
-    cfg.keybind = null;
-    const item = state.moduleItems.get(openConfigModule);
-    if (item) setBindLabel(item, openConfigModule);
-    configSubEl.textContent = "No keybind assigned";
-    state.listeningForBind = null;
-    setBindBtn.textContent = "Set keybind";
   });
 
   searchInput.addEventListener("keydown", (event) => {
@@ -1741,8 +2169,8 @@
       cfg.keybind = event.key;
       const item = state.moduleItems.get(openConfigModule);
       if (item) setBindLabel(item, openConfigModule);
-      configSubEl.textContent = `Current bind: ${cfg.keybind}`;
-      setBindBtn.textContent = "Set keybind";
+      setCurrentBindText(cfg.keybind);
+      setBindButtonText("Set keybind");
       state.listeningForBind = null;
       return;
     }
@@ -1753,7 +2181,7 @@
       return;
     }
 
-    for (const [moduleName, cfg] of state.moduleConfig) {
+    for (const [moduleName, cfg] of ensureModuleConfigStore()) {
       if (cfg.keybind && cfg.keybind === event.key) {
         toggleModule(moduleName);
       }
