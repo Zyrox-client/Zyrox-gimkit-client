@@ -13,5 +13,5 @@ A hacked client for `gimkit.com/join`.
 4. Press `\` to show/hide the menu (or change/reset Menu Key in Settings).
 5. The search bar in the top bar auto-focuses when the menu opens and filters utilities live.
 6. Right-click a utility to open its centered config menu (with blurred background), set a keybind, or reset it with the square button.
-7. Use the top-bar Settings button to customize colors/appearance and menu toggle key.
+7. Use the top-bar ⚙ settings button to customize categorized options (controls, theme, and appearance).
 8. Drag the bottom-right corner to resize the menu.

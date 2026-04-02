@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox Client
 // @namespace    https://github.com/zyrox
-// @version      0.5.3
+// @version      0.5.4
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -18,12 +18,9 @@
   window.__ZYROX_UI_MOUNTED__ = true;
 
   function readUserscriptVersion() {
-    try {
-      const src = document.currentScript?.textContent || "";
-      const match = src.match(/@version\\s+([^\\n]+)/);
-      if (match) return match[1].trim();
-    } catch {}
-    return "0.5.2";
+    // Update this variable whenever you bump @version above.
+    const CLIENT_VERSION = "0.5.4";
+    return CLIENT_VERSION;
   }
 
   const CONFIG = {
@@ -192,14 +189,19 @@
     }
 
     .zyrox-settings-btn {
-      font-size: 11px;
+      width: 30px;
+      height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
       color: #ffd6d6;
       background: rgba(0, 0, 0, 0.35);
       border: 1px solid rgba(255, 91, 91, 0.55);
       border-radius: 8px;
-      padding: 4px 8px;
       line-height: 1;
       cursor: pointer;
+      padding: 0;
     }
 
     .zyrox-search {
@@ -401,6 +403,14 @@
     .zyrox-settings-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
     .zyrox-settings-sub { font-size: 12px; color: #c2c2ce; }
     .zyrox-settings-body { padding: 14px; display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
+    .zyrox-setting-category {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      color: #ffb9b9;
+      margin-top: 2px;
+    }
     .zyrox-setting-card { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.03); }
     .zyrox-setting-card label { display:block; font-size: 12px; margin-bottom: 8px; color: #ffe5e5; }
     .zyrox-setting-card input[type='color'] { width: 100%; height: 34px; border: none; background: transparent; cursor: pointer; }
@@ -453,7 +463,7 @@
     </div>
     <div class="zyrox-topbar-right">
       <input class="zyrox-search" type="text" placeholder="Search utilities..." autocomplete="off" />
-      <button class="zyrox-settings-btn" type="button" title="Open client settings">Settings</button>
+      <button class="zyrox-settings-btn" type="button" title="Open client settings">⚙</button>
       <span class="zyrox-chip">v${CONFIG.version}</span>
     </div>
   `;
@@ -508,11 +518,17 @@
     </div>
     <button class="zyrox-close-btn settings-close-top" type="button" title="Close">✕</button>
     <div class="zyrox-settings-body">
+      <div class="zyrox-setting-category">Controls</div>
       <div class="zyrox-setting-card">
         <label>Menu Toggle Key</label>
         <button class="zyrox-keybind-btn settings-menu-key" type="button">Menu Key: ${CONFIG.toggleKey}</button>
         <button class="zyrox-btn zyrox-btn-square settings-menu-key-reset" type="button" title="Reset menu key">↺</button>
       </div>
+      <div class="zyrox-setting-card">
+        <label>UI Scale</label>
+        <input type="range" class="set-scale" min="80" max="130" value="100" />
+      </div>
+      <div class="zyrox-setting-category">Theme</div>
       <div class="zyrox-setting-card">
         <label>Accent Color</label>
         <input type="color" class="set-accent" value="#ff3d3d" />
@@ -528,6 +544,15 @@
       <div class="zyrox-setting-card">
         <label>Background Opacity</label>
         <input type="range" class="set-opacity" min="20" max="100" value="45" />
+      </div>
+      <div class="zyrox-setting-category">Appearance</div>
+      <div class="zyrox-setting-card">
+        <label>Corner Radius</label>
+        <input type="range" class="set-radius" min="6" max="20" value="14" />
+      </div>
+      <div class="zyrox-setting-card">
+        <label>Panel Blur</label>
+        <input type="range" class="set-blur" min="0" max="16" value="10" />
       </div>
     </div>
     <div class="zyrox-settings-actions">
@@ -549,6 +574,9 @@
   const borderInput = settingsMenu.querySelector(".set-border");
   const textInput = settingsMenu.querySelector(".set-text");
   const opacityInput = settingsMenu.querySelector(".set-opacity");
+  const scaleInput = settingsMenu.querySelector(".set-scale");
+  const radiusInput = settingsMenu.querySelector(".set-radius");
+  const blurInput = settingsMenu.querySelector(".set-blur");
   const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   let openConfigModule = null;
@@ -612,9 +640,16 @@
     const border = borderInput.value;
     const text = textInput.value;
     const opacity = Number(opacityInput.value) / 100;
+    const scale = Number(scaleInput.value) / 100;
+    const radius = Number(radiusInput.value);
+    const blur = Number(blurInput.value);
     shell.style.setProperty("--zyx-border", `${border}99`);
     shell.style.setProperty("--zyx-text", text);
+    shell.style.setProperty("--zyx-radius-xl", `${radius}px`);
+    shell.style.transform = `scale(${scale.toFixed(2)})`;
+    shell.style.transformOrigin = "top left";
     shell.style.background = `linear-gradient(150deg, ${accent}22, rgba(0, 0, 0, ${opacity.toFixed(2)}))`;
+    shell.style.backdropFilter = `blur(${blur}px) saturate(115%)`;
   }
 
   function applySearchFilter() {
@@ -736,15 +771,24 @@
   borderInput.addEventListener("input", applyAppearance);
   textInput.addEventListener("input", applyAppearance);
   opacityInput.addEventListener("input", applyAppearance);
+  scaleInput.addEventListener("input", applyAppearance);
+  radiusInput.addEventListener("input", applyAppearance);
+  blurInput.addEventListener("input", applyAppearance);
 
   settingsResetBtn.addEventListener("click", () => {
     accentInput.value = "#ff3d3d";
     borderInput.value = "#ff6f6f";
     textInput.value = "#d6d6df";
     opacityInput.value = "45";
+    scaleInput.value = "100";
+    radiusInput.value = "14";
+    blurInput.value = "10";
     shell.style.removeProperty("--zyx-border");
     shell.style.removeProperty("--zyx-text");
+    shell.style.removeProperty("--zyx-radius-xl");
     shell.style.background = "";
+    shell.style.transform = "";
+    shell.style.backdropFilter = "";
   });
 
   settingsCloseBtn.addEventListener("click", () => {
