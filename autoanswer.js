@@ -1,220 +1,263 @@
 // ==UserScript==
 // @name         Gimkit Auto Answer (No UI)
-// @description  Auto answer only (no menu/modules UI). Core answering logic copied from example.js.
+// @description  Auto answer only (page-context). Includes internal colyseus socket hook when page socketManager is unavailable.
 // @namespace    https://www.github.com/TheLazySquid/GimkitCheat/
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
-// @version      1.0.0
+// @version      1.3.0
 // @grant        none
 // ==/UserScript==
 
-(() => {
+(function () {
   "use strict";
 
-  const LOG_PREFIX = "[AutoAnswer]";
-  const ANSWER_INTERVAL_MS = 150;
+  function pageMain() {
+    const LOG = "[AutoAnswer][page]";
+    const TICK = 1000;
 
-  const state = {
-    socketManager: null,
-    questions: [],
-    answerDeviceId: null,
-    currentQuestionId: null,
-    questionIdList: [],
-    currentQuestionIndex: -1,
-    playerId: null,
-    enabled: true,
-    intervalId: null,
-    listenersAttached: false,
-  };
+    const colyseusProtocol = { ROOM_DATA: 13 };
 
-  const log = (...args) => console.log(LOG_PREFIX, ...args);
-  const warn = (...args) => console.warn(LOG_PREFIX, ...args);
-
-  function captureCurrentQuestionKey(key, value) {
-    const match = /^PLAYER_(.+?)_currentQuestionId$/.exec(String(key));
-    if (!match) return false;
-    if (!state.playerId) state.playerId = match[1];
-    state.currentQuestionId = value;
-    return true;
-  }
-
-  function getSocketManager() {
-    if (state.socketManager) return state.socketManager;
-
-    const direct = globalThis.socketManager;
-    if (
-      direct &&
-      typeof direct.sendMessage === "function" &&
-      typeof direct.addEventListener === "function"
-    ) {
-      state.socketManager = direct;
-      attachListeners();
-      return state.socketManager;
+    function msgpackEncode(value) {
+      const bytes = [];
+      const deferred = [];
+      const write = (input) => {
+        const type = typeof input;
+        if (type === "string") {
+          let len = 0;
+          for (let i = 0; i < input.length; i++) {
+            const code = input.charCodeAt(i);
+            if (code < 128) len++; else if (code < 2048) len += 2; else if (code < 55296 || code > 57343) len += 3; else { i++; len += 4; }
+          }
+          if (len < 32) bytes.push(160 | len); else if (len < 256) bytes.push(217, len); else bytes.push(218, len >> 8, len & 255);
+          deferred.push({ type: "string", value: input, offset: bytes.length });
+          bytes.length += len;
+          return;
+        }
+        if (type === "number") {
+          if (Number.isInteger(input) && input >= 0 && input < 128) { bytes.push(input); return; }
+          if (Number.isInteger(input) && input >= 0 && input < 65536) { bytes.push(205, input >> 8, input & 255); return; }
+          bytes.push(203); deferred.push({ type: "float64", value: input, offset: bytes.length }); bytes.length += 8; return;
+        }
+        if (type === "boolean") { bytes.push(input ? 195 : 194); return; }
+        if (input == null) { bytes.push(192); return; }
+        if (Array.isArray(input)) {
+          const len = input.length;
+          if (len < 16) bytes.push(144 | len); else bytes.push(220, len >> 8, len & 255);
+          for (const item of input) write(item);
+          return;
+        }
+        const keys = Object.keys(input);
+        const len = keys.length;
+        if (len < 16) bytes.push(128 | len); else bytes.push(222, len >> 8, len & 255);
+        for (const key of keys) { write(key); write(input[key]); }
+      };
+      write(value);
+      const view = new DataView(new ArrayBuffer(bytes.length));
+      for (let i = 0; i < bytes.length; i++) view.setUint8(i, bytes[i] & 255);
+      for (const part of deferred) {
+        if (part.type === "float64") { view.setFloat64(part.offset, part.value); continue; }
+        let offset = part.offset;
+        const s = part.value;
+        for (let i = 0; i < s.length; i++) {
+          let code = s.charCodeAt(i);
+          if (code < 128) view.setUint8(offset++, code);
+          else if (code < 2048) { view.setUint8(offset++, 192 | (code >> 6)); view.setUint8(offset++, 128 | (code & 63)); }
+          else { view.setUint8(offset++, 224 | (code >> 12)); view.setUint8(offset++, 128 | ((code >> 6) & 63)); view.setUint8(offset++, 128 | (code & 63)); }
+        }
+      }
+      return view.buffer;
     }
 
-    for (const candidate of Object.values(globalThis)) {
-      if (!candidate || typeof candidate !== "object") continue;
-      if (
-        typeof candidate.sendMessage === "function" &&
-        typeof candidate.addEventListener === "function" &&
-        ("transportType" in candidate || "socket" in candidate)
-      ) {
-        state.socketManager = candidate;
-        log("Found socket manager via global scan");
-        attachListeners();
-        return state.socketManager;
+    function msgpackDecode(buffer, startOffset = 0) {
+      const view = new DataView(buffer);
+      let offset = startOffset;
+      const readString = (len) => {
+        let out = "";
+        const end = offset + len;
+        while (offset < end) {
+          const byte = view.getUint8(offset++);
+          if ((byte & 0x80) === 0) out += String.fromCharCode(byte);
+          else if ((byte & 0xe0) === 0xc0) out += String.fromCharCode(((byte & 0x1f) << 6) | (view.getUint8(offset++) & 0x3f));
+          else out += String.fromCharCode(((byte & 0x0f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f));
+        }
+        return out;
+      };
+      const read = () => {
+        const token = view.getUint8(offset++);
+        if (token < 0x80) return token;
+        if (token < 0x90) { const size = token & 0x0f; const map = {}; for (let i = 0; i < size; i++) map[read()] = read(); return map; }
+        if (token < 0xa0) { const size = token & 0x0f; const arr = new Array(size); for (let i = 0; i < size; i++) arr[i] = read(); return arr; }
+        if (token < 0xc0) return readString(token & 0x1f);
+        if (token > 0xdf) return token - 256;
+        switch (token) {
+          case 192: return null;
+          case 194: return false;
+          case 195: return true;
+          case 202: { const n = view.getFloat32(offset); offset += 4; return n; }
+          case 203: { const n = view.getFloat64(offset); offset += 8; return n; }
+          case 204: { const n = view.getUint8(offset); offset += 1; return n; }
+          case 205: { const n = view.getUint16(offset); offset += 2; return n; }
+          case 206: { const n = view.getUint32(offset); offset += 4; return n; }
+          case 208: { const n = view.getInt8(offset); offset += 1; return n; }
+          case 209: { const n = view.getInt16(offset); offset += 2; return n; }
+          case 210: { const n = view.getInt32(offset); offset += 4; return n; }
+          case 217: { const len = view.getUint8(offset); offset += 1; return readString(len); }
+          case 218: { const len = view.getUint16(offset); offset += 2; return readString(len); }
+          case 220: { const size = view.getUint16(offset); offset += 2; const arr = new Array(size); for (let i = 0; i < size; i++) arr[i] = read(); return arr; }
+          case 222: { const size = view.getUint16(offset); offset += 2; const map = {}; for (let i = 0; i < size; i++) map[read()] = read(); return map; }
+          default: return null;
+        }
+      };
+      const value = read();
+      return { value, offset };
+    }
+
+    function parseChangePacket(packet) {
+      const out = [];
+      for (const change of packet?.changes || []) {
+        const data = {};
+        const keys = change[1].map((index) => packet.values[index]);
+        for (let i = 0; i < keys.length; i++) data[keys[i]] = change[2][i];
+        out.push({ id: change[0], data });
+      }
+      return out;
+    }
+
+    class LocalSocketManager extends EventTarget {
+      constructor() {
+        super();
+        this.socket = null;
+        this.transportType = "unknown";
+        this.playerId = null;
+        this.install();
+      }
+      install() {
+        const manager = this;
+        const NativeWebSocket = window.WebSocket;
+        window.WebSocket = class extends NativeWebSocket {
+          constructor(url, protocols) {
+            super(url, protocols);
+            if (String(url || "").includes("gimkitconnect.com")) manager.registerSocket(this);
+          }
+          send(data) {
+            super.send(data);
+          }
+        };
+      }
+      registerSocket(socket) {
+        this.socket = socket;
+        this.transportType = "colyseus";
+        console.log(LOG, "Registered WebSocket", socket.url);
+
+        socket.addEventListener("message", (e) => {
+          const decoded = this.decodeColyseus(e.data);
+          if (!decoded) return;
+          this.dispatchEvent(new CustomEvent("colyseusMessage", { detail: decoded }));
+          if (decoded.type === "AUTH_ID") {
+            this.playerId = decoded.message;
+            console.log(LOG, "Got player id", this.playerId);
+          }
+          if (decoded.type === "DEVICES_STATES_CHANGES") {
+            const parsed = parseChangePacket(decoded.message);
+            this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parsed }));
+          }
+        });
+      }
+      decodeColyseus(data) {
+        const bytes = new Uint8Array(data);
+        if (bytes[0] !== colyseusProtocol.ROOM_DATA) return null;
+        const first = msgpackDecode(data, 1);
+        if (!first) return null;
+        let message;
+        if (bytes.byteLength > first.offset) {
+          const second = msgpackDecode(data, first.offset);
+          message = second?.value;
+        }
+        return { type: first.value, message };
+      }
+      sendMessage(channel, payload) {
+        if (!this.socket) return;
+        const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
+        const a = new Uint8Array(msgpackEncode(channel));
+        const b = new Uint8Array(msgpackEncode(payload));
+        const packet = new Uint8Array(header.length + a.length + b.length);
+        packet.set(header, 0);
+        packet.set(a, header.length);
+        packet.set(b, header.length + a.length);
+        this.socket.send(packet);
       }
     }
 
-    return null;
-  }
+    const socketManager = window.socketManager || new LocalSocketManager();
+    window.socketManager = socketManager;
 
-  function attachListeners() {
-    if (state.listenersAttached || !state.socketManager) return;
+    const state = {
+      questions: [],
+      answerDeviceId: null,
+      currentQuestionId: null,
+      questionIdList: [],
+      currentQuestionIndex: -1,
+    };
 
-    state.socketManager.addEventListener("deviceChanges", (event) => {
+    function answerQuestion() {
+      if (socketManager.transportType === "colyseus") {
+        if (state.currentQuestionId == null || state.answerDeviceId == null) return;
+        const question = state.questions.find((q) => q._id == state.currentQuestionId);
+        if (!question) return;
+        const packet = { key: "answered", deviceId: state.answerDeviceId, data: {} };
+        if (question.type == "text") packet.data.answer = question.answers[0].text;
+        else packet.data.answer = question.answers.find((a) => a.correct)?._id;
+        if (!packet.data.answer) return;
+        socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
+        console.log(LOG, "Answered colyseus", state.currentQuestionId);
+      } else {
+        const questionId = state.questionIdList[state.currentQuestionIndex];
+        const question = state.questions.find((q) => q._id == questionId);
+        if (!question) return;
+        const answer = question.type == "mc" ? question.answers.find((a) => a.correct)?._id : question.answers[0]?.text;
+        if (!answer) return;
+        socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+        console.log(LOG, "Answered blueboat", questionId);
+      }
+    }
+
+    socketManager.addEventListener("deviceChanges", (event) => {
       for (const { id, data } of event.detail || []) {
         for (const key in data || {}) {
           if (key === "GLOBAL_questions") {
-            try {
-              state.questions = JSON.parse(data[key]);
-              state.answerDeviceId = id;
-              log("Got questions", state.questions.length);
-              answerQuestion();
-            } catch (error) {
-              warn("Failed to parse GLOBAL_questions", error);
-            }
+            state.questions = JSON.parse(data[key]);
+            state.answerDeviceId = id;
+            console.log(LOG, "Got questions", state.questions.length);
           }
-
-          if (captureCurrentQuestionKey(key, data[key])) {
-            answerQuestion();
+          if (socketManager.playerId && key === `PLAYER_${socketManager.playerId}_currentQuestionId`) {
+            state.currentQuestionId = data[key];
           }
         }
       }
     });
 
-    state.socketManager.addEventListener("colyseusMessage", (event) => {
-      if (event.detail?.type === "AUTH_ID") {
-        state.playerId = event.detail?.message ?? state.playerId;
-        log("Got player id:", state.playerId);
-      }
-    });
-
-    state.socketManager.addEventListener("blueboatMessage", (event) => {
+    socketManager.addEventListener("blueboatMessage", (event) => {
       if (event.detail?.key !== "STATE_UPDATE") return;
-
       switch (event.detail.data.type) {
         case "GAME_QUESTIONS":
           state.questions = event.detail.data.value;
-          log("Got questions", state.questions.length);
-          answerQuestion();
           break;
         case "PLAYER_QUESTION_LIST":
           state.questionIdList = event.detail.data.value.questionList;
           state.currentQuestionIndex = event.detail.data.value.questionIndex;
-          answerQuestion();
           break;
         case "PLAYER_QUESTION_LIST_INDEX":
           state.currentQuestionIndex = event.detail.data.value;
-          answerQuestion();
           break;
       }
     });
 
-    state.listenersAttached = true;
-    log("Listeners attached");
+    setInterval(answerQuestion, TICK);
+    console.log(LOG, "Started auto-answer", { transportType: socketManager.transportType });
   }
 
-  // 1:1 answering behavior from example.js (colyseus + blueboat branches)
-  function answerQuestion() {
-    if (!state.enabled) return;
-
-    const socketManager = getSocketManager();
-    if (!socketManager) return;
-
-    if (socketManager.transportType === "colyseus") {
-      if (state.currentQuestionId == null) return;
-
-      // find the correct question
-      const question = state.questions.find((q) => q._id == state.currentQuestionId);
-      if (!question) return;
-
-      const packet = {
-        key: "answered",
-        deviceId: state.answerDeviceId,
-        data: {},
-      };
-
-      // create a packet to send to the server
-      if (question.type == "text") {
-        packet.data.answer = question.answers[0].text;
-      } else {
-        const correctAnswerId = question.answers.find((a) => a.correct)._id;
-        packet.data.answer = correctAnswerId;
-      }
-
-      socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
-      log("Answered colyseus", state.currentQuestionId);
-    } else {
-      const questionId = state.questionIdList[state.currentQuestionIndex];
-      const question = state.questions.find((q) => q._id == questionId);
-      if (!question) return;
-
-      let answer;
-      if (question.type == "mc") {
-        answer = question.answers.find((a) => a.correct)._id;
-      } else {
-        answer = question.answers[0].text;
-      }
-
-      socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
-      log("Answered blueboat", questionId);
-    }
-  }
-
-  function installSocketManagerSetterTrap() {
-    const existing = globalThis.socketManager;
-    if (existing) {
-      state.socketManager = existing;
-      attachListeners();
-    }
-
-    let tracked = existing;
-
-    try {
-      Object.defineProperty(globalThis, "socketManager", {
-        configurable: true,
-        enumerable: true,
-        get() {
-          return tracked;
-        },
-        set(value) {
-          tracked = value;
-          state.socketManager = value;
-          log("socketManager assigned");
-          attachListeners();
-        },
-      });
-    } catch (error) {
-      warn("Could not install socketManager trap", error);
-    }
-  }
-
-  function start() {
-    installSocketManagerSetterTrap();
-    getSocketManager();
-
-    if (state.intervalId) clearInterval(state.intervalId);
-    state.intervalId = setInterval(answerQuestion, ANSWER_INTERVAL_MS);
-    log("Auto-answer started");
-  }
-
-  // Alt + A toggle (debug convenience)
-  document.addEventListener("keydown", (event) => {
-    if (!event.altKey || event.key.toLowerCase() !== "a") return;
-    state.enabled = !state.enabled;
-    log(`Auto-answer ${state.enabled ? "enabled" : "disabled"}`);
-  });
-
-  start();
+  const el = document.createElement("script");
+  el.textContent = `;(${pageMain.toString()})();`;
+  (document.head || document.documentElement).appendChild(el);
+  el.remove();
 })();
