@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.7.7
+// @version      0.8.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,7 +45,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.7.7";
+    const CLIENT_VERSION = "0.8.3";
     return CLIENT_VERSION;
   }
 
@@ -57,6 +57,349 @@
     version: readUserscriptVersion(),
     logoUrl: "https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/images/logo.png",
   };
+
+  // --- Core Utilities & Networking (Extracted from Gimkit Cheat) ---
+
+  const colyseusProtocol = {
+    HANDSHAKE: 9,
+    JOIN_ROOM: 10,
+    ERROR: 11,
+    LEAVE_ROOM: 12,
+    ROOM_DATA: 13,
+    ROOM_STATE: 14,
+    ROOM_STATE_PATCH: 15,
+    ROOM_DATA_SCHEMA: 16,
+    ROOM_DATA_BYTES: 17,
+  };
+
+  function utf8Read(view, offset) {
+    const length = view[offset++];
+    let string = "";
+    for (let i = offset, end = offset + length; i < end; i++) {
+      const byte = view[i];
+      if ((byte & 0x80) === 0x00) {
+        string += String.fromCharCode(byte);
+      } else if ((byte & 0xe0) === 0xc0) {
+        string += String.fromCharCode(((byte & 0x1f) << 6) | (view[++i] & 0x3f));
+      } else if ((byte & 0xf0) === 0xe0) {
+        string += String.fromCharCode(((byte & 0x0f) << 12) | ((view[++i] & 0x3f) << 6) | ((view[++i] & 0x3f) << 0));
+      }
+    }
+    return string;
+  }
+
+  function parseChangePacket(packet) {
+    const returnVar = [];
+    for (const change of packet.changes) {
+      const data = {};
+      const keys = change[1].map((index) => packet.values[index]);
+      for (let i = 0; i < keys.length; i++) {
+        data[keys[i]] = change[2][i];
+      }
+      returnVar.push({ id: change[0], data });
+    }
+    return returnVar;
+  }
+
+  // Simplified msgpack-like encoding/decoding for Blueboat
+  const blueboat = (() => {
+    function encode(t, e, s) {
+      let o = Array.isArray(t) ? { type: 2, data: t, options: { compress: !0 }, nsp: "/" } : { type: 2, data: ["blueboat_SEND_MESSAGE", { room: s, key: t, data: e }], options: { compress: !0 }, nsp: "/" };
+      return (function(t) {
+        let e = [], i = [], s = function t(e, n, i) {
+          let s = typeof i, o = 0, r = 0, a = 0, c = 0, l = 0, u = 0;
+          if ("string" === s) {
+            l = (function(t) {
+              let e = 0, n = 0, i = 0, s = t.length;
+              for (i = 0; i < s; i++) (e = t.charCodeAt(i)) < 128 ? n += 1 : e < 2048 ? n += 2 : e < 55296 || 57344 <= e ? n += 3 : (i++, n += 4);
+              return n;
+            })(i);
+            if (l < 32) e.push(160 | l), u = 1;
+            else if (l < 256) e.push(217, l), u = 2;
+            else if (l < 65536) e.push(218, l >> 8, l), u = 3;
+            else e.push(219, l >> 24, l >> 16, l >> 8, l), u = 5;
+            return n.push({ h: i, u: l, t: e.length }), u + l;
+          }
+          if ("number" === s) {
+            if (Math.floor(i) === i && isFinite(i)) {
+              if (i >= 0) {
+                if (i < 128) return e.push(i), 1;
+                if (i < 256) return e.push(204, i), 2;
+                if (i < 65536) return e.push(205, i >> 8, i), 3;
+                if (i < 4294967296) return e.push(206, i >> 24, i >> 16, i >> 8, i), 5;
+                a = i / Math.pow(2, 32) >> 0; c = i >>> 0; e.push(207, a >> 24, a >> 16, a >> 8, a, c >> 24, c >> 16, c >> 8, c); return 9;
+              } else {
+                if (i >= -32) return e.push(i), 1;
+                if (i >= -128) return e.push(208, i), 2;
+                if (i >= -32768) return e.push(209, i >> 8, i), 3;
+                if (i >= -2147483648) return e.push(210, i >> 24, i >> 16, i >> 8, i), 5;
+                a = Math.floor(i / Math.pow(2, 32)); c = i >>> 0; e.push(211, a >> 24, a >> 16, a >> 8, a, c >> 24, c >> 16, c >> 8, c); return 9;
+              }
+            } else {
+              e.push(203); n.push({ o: i, u: 8, t: e.length }); return 9;
+            }
+          }
+          if ("object" === s) {
+            if (null === i) return e.push(192), 1;
+            if (Array.isArray(i)) {
+              l = i.length;
+              if (l < 16) e.push(144 | l), u = 1;
+              else if (l < 65536) e.push(220, l >> 8, l), u = 3;
+              else e.push(221, l >> 24, l >> 16, l >> 8, l), u = 5;
+              for (o = 0; o < l; o++) u += t(e, n, i[o]);
+              return u;
+            }
+            let d = [], f = "", p = Object.keys(i);
+            for (o = 0, r = p.length; o < r; o++) "function" != typeof i[f = p[o]] && d.push(f);
+            l = d.length;
+            if (l < 16) e.push(128 | l), u = 1;
+            else if (l < 65536) e.push(222, l >> 8, l), u = 3;
+            else e.push(223, l >> 24, l >> 16, l >> 8, l), u = 5;
+            for (o = 0; o < l; o++) u += t(e, n, f = d[o]), u += t(e, n, i[f]);
+            return u;
+          }
+          if ("boolean" === s) return e.push(i ? 195 : 194), 1;
+          return 0;
+        }(e, i, t);
+        let o = new ArrayBuffer(s), r = new DataView(o), a = 0, c = 0, l = -1;
+        if (i.length > 0) l = i[0].t;
+        for (let u, h = 0, d = 0, f = 0, p = e.length; f < p; f++) {
+          r.setUint8(c + f, e[f]);
+          if (f + 1 === l) {
+            u = i[a]; h = u.u; d = c + l;
+            if (u.l) { let g = new Uint8Array(u.l); for (let E = 0; E < h; E++) r.setUint8(d + E, g[E]); }
+            else if (u.h) { (function(t, e, n) { for (let i = 0, s = 0, o = n.length; s < o; s++) (i = n.charCodeAt(s)) < 128 ? t.setUint8(e++, i) : (i < 2048 ? t.setUint8(e++, 192 | i >> 6) : (i < 55296 || 57344 <= i ? t.setUint8(e++, 224 | i >> 12) : (s++, i = 65536 + ((1023 & i) << 10 | 1023 & n.charCodeAt(s)), t.setUint8(e++, 240 | i >> 18), t.setUint8(e++, 128 | i >> 12 & 63)), t.setUint8(e++, 128 | i >> 6 & 63)), t.setUint8(e++, 128 | 63 & i)); })(r, d, u.h); }
+            else if (void 0 !== u.o) r.setFloat64(d, u.o);
+            c += h; if (i[++a]) l = i[a].t;
+          }
+        }
+        let y = Array.from(new Uint8Array(o)); y.unshift(4); return new Uint8Array(y).buffer;
+      })(o);
+    }
+
+    function decode(packet) {
+      function e(t) {
+        this.t = 0;
+        if (t instanceof ArrayBuffer) { this.i = t; this.s = new DataView(this.i); }
+        else { if (!ArrayBuffer.isView(t)) return null; this.i = t.buffer; this.s = new DataView(this.i, t.byteOffset, t.byteLength); }
+      }
+      e.prototype.g = function(t) { let e = new Array(t); for (let n = 0; n < t; n++) e[n] = this.v(); return e; };
+      e.prototype.M = function(t) { let e = {}; for (let n = 0; n < t; n++) e[this.v()] = this.v(); return e; };
+      e.prototype.h = function(t) {
+        let e = (function(t, e, n) {
+          let i = "", s = 0, o = e, r = e + n;
+          for (; o < r; o++) {
+            let a = t.getUint8(o);
+            if (0 != (128 & a)) {
+              if (192 != (224 & a)) {
+                if (224 != (240 & a)) {
+                  s = (7 & a) << 18 | (63 & t.getUint8(++o)) << 12 | (63 & t.getUint8(++o)) << 6 | (63 & t.getUint8(++o)) << 0;
+                  if (65536 <= s) { s -= 65536; i += String.fromCharCode(55296 + (s >>> 10), 56320 + (1023 & s)); }
+                  else i += String.fromCharCode(s);
+                } else i += String.fromCharCode((15 & a) << 12 | (63 & t.getUint8(++o)) << 6 | (63 & t.getUint8(++o)) << 0);
+              } else i += String.fromCharCode((31 & a) << 6 | 63 & t.getUint8(++o));
+            } else i += String.fromCharCode(a);
+          }
+          return i;
+        })(this.s, this.t, t);
+        this.t += t; return e;
+      };
+      e.prototype.l = function(t) { let e = this.i.slice(this.t, this.t + t); this.t += t; return e; };
+      e.prototype.v = function() {
+        if (!this.s) return null;
+        let t, e = this.s.getUint8(this.t++), n = 0, i = 0, s = 0, o = 0;
+        if (e < 192) return e < 128 ? e : e < 144 ? this.M(15 & e) : e < 160 ? this.g(15 & e) : this.h(31 & e);
+        if (223 < e) return -1 * (255 - e + 1);
+        switch (e) {
+          case 192: return null;
+          case 194: return !1;
+          case 195: return !0;
+          case 196: n = this.s.getUint8(this.t); this.t += 1; return this.l(n);
+          case 197: n = this.s.getUint16(this.t); this.t += 2; return this.l(n);
+          case 198: n = this.s.getUint32(this.t); this.t += 4; return this.l(n);
+          case 202: t = this.s.getFloat32(this.t); this.t += 4; return t;
+          case 203: t = this.s.getFloat64(this.t); this.t += 8; return t;
+          case 204: t = this.s.getUint8(this.t); this.t += 1; return t;
+          case 205: t = this.s.getUint16(this.t); this.t += 2; return t;
+          case 206: t = this.s.getUint32(this.t); this.t += 4; return t;
+          case 207: s = this.s.getUint32(this.t) * Math.pow(2, 32); o = this.s.getUint32(this.t + 4); this.t += 8; return s + o;
+          case 208: t = this.s.getInt8(this.t); this.t += 1; return t;
+          case 209: t = this.s.getInt16(this.t); this.t += 2; return t;
+          case 210: t = this.s.getInt32(this.t); this.t += 4; return t;
+          case 211: s = this.s.getInt32(this.t) * Math.pow(2, 32); o = this.s.getUint32(this.t + 4); this.t += 8; return s + o;
+          case 217: n = this.s.getUint8(this.t); this.t += 1; return this.h(n);
+          case 218: n = this.s.getUint16(this.t); this.t += 2; return this.h(n);
+          case 219: n = this.s.getUint32(this.t); this.t += 4; return this.h(n);
+          case 220: n = this.s.getUint16(this.t); this.t += 2; return this.g(n);
+          case 221: n = this.s.getUint32(this.t); this.t += 4; return this.g(n);
+          case 222: n = this.s.getUint16(this.t); this.t += 2; this.M(n); break;
+          case 223: n = this.s.getUint32(this.t); this.t += 4; this.M(n); break;
+        }
+        return null;
+      };
+      let q = (function(t) { let n = new e(t = t.slice(1)), i = n.v(); if (n.t === t.byteLength) return i; return null; })(packet);
+      return q?.data?.[1];
+    }
+    return { encode, decode };
+  })();
+
+  class SocketManager extends EventTarget {
+    constructor() {
+      super();
+      this.socket = null;
+      this.transportType = "unknown";
+      this.blueboatRoomId = null;
+      this.setup();
+    }
+    setup() {
+      const manager = this;
+      class NewWebSocket extends WebSocket {
+        constructor(url, params) {
+          super(url, params);
+          if (!manager.socket) manager.registerSocket(this);
+        }
+        send(data) {
+          manager.onSend(data);
+          super.send(data);
+        }
+      }
+      const nativeXMLSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function() {
+        this.addEventListener("load", () => {
+          if (!this.responseURL.endsWith("/matchmaker/join")) return;
+          try {
+            const response = JSON.parse(this.responseText);
+            manager.blueboatRoomId = response.roomId;
+          } catch (_) {}
+        });
+        nativeXMLSend.apply(this, arguments);
+      };
+      window.WebSocket = NewWebSocket;
+    }
+    registerSocket(socket) {
+      this.socket = socket;
+      if (window.Phaser) {
+        this.transportType = "colyseus";
+        this.addEventListener("colyseusMessage", (e) => {
+          if (e.detail.type !== "DEVICES_STATES_CHANGES") return;
+          this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
+        });
+      } else {
+        this.transportType = "blueboat";
+      }
+      socket.addEventListener("message", (e) => {
+        let decoded;
+        if (this.transportType === "colyseus") {
+          decoded = this.decodeColyseus(e);
+          if (decoded) this.dispatchEvent(new CustomEvent("colyseusMessage", { detail: decoded }));
+        } else {
+          decoded = blueboat.decode(e.data);
+          if (decoded) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: decoded }));
+        }
+      });
+    }
+    onSend(data) {
+      if (this.transportType === "blueboat" && !this.blueboatRoomId) {
+        const decoded = blueboat.decode(data);
+        if (decoded?.roomId) this.blueboatRoomId = decoded.roomId;
+        if (decoded?.room) this.blueboatRoomId = decoded.room;
+      }
+    }
+    sendMessage(channel, data) {
+      if (!this.socket) return;
+      if (!this.blueboatRoomId && this.transportType === "blueboat") return;
+      let encoded;
+      if (this.transportType === "colyseus") {
+        // Colyseus encoding is more complex, might need more from example.js if we use it
+        // For now, only Blueboat is fully implemented for Auto Answer
+      } else {
+        encoded = blueboat.encode(channel, data, this.blueboatRoomId);
+        this.socket.send(encoded);
+      }
+    }
+    decodeColyseus(event) {
+      const bytes = Array.from(new Uint8Array(event.data));
+      const code = bytes[0];
+      if (code === colyseusProtocol.ROOM_DATA) {
+        const it = { offset: 1 };
+        // Simplified decoding for colyseus
+        return { type: "ROOM_DATA", message: bytes.slice(1) };
+      }
+      return null;
+    }
+  }
+
+  const socketManager = new SocketManager();
+
+  let currentQuestions = [];
+  let currentAnswerDeviceId = null;
+  let currentQuestionId = null;
+  let currentQuestionIdList = [];
+  let currentQuestionIndex = -1;
+  let answerInterval = null;
+
+  const autoAnswerModule = new Module("Auto Answer", {
+    onEnable: () => {
+      console.log("Auto Answer enabled");
+      const cfg = moduleCfg("Auto Answer");
+      answerInterval = setInterval(() => {
+        // Actual auto-answer logic will go here
+        if (currentQuestionId && currentQuestions.length > 0 && currentAnswerDeviceId) {
+          const question = currentQuestions.find(q => q._id === currentQuestionId);
+          if (question) {
+            let answer;
+            if (question.type === 'text') {
+              answer = question.answers[0].text;
+            } else {
+              const correctAnswer = question.answers.find(a => a.correct);
+              answer = correctAnswer ? correctAnswer._id : question.answers[0]?._id;
+            }
+            if (answer) {
+              socketManager.sendMessage("MESSAGE_FOR_DEVICE", { key: "answered", deviceId: currentAnswerDeviceId, data: { answer } });
+            }
+          }
+        }
+      }, cfg.speed || 1000);
+    },
+    onDisable: () => {
+      console.log("Auto Answer disabled");
+      clearInterval(answerInterval);
+      answerInterval = null;
+    },
+  });
+
+  socketManager.addEventListener("deviceChanges", event => {
+    for (const { id, data } of event.detail) {
+      for (const key in data) {
+        if (key === "GLOBAL_questions") {
+          currentQuestions = JSON.parse(data[key]);
+          currentAnswerDeviceId = id;
+        }
+        if (key === `PLAYER_${socketManager.playerId}_currentQuestionId`) {
+          currentQuestionId = data[key];
+        }
+      }
+    }
+  });
+
+  socketManager.addEventListener("blueboatMessage", event => {
+    if (event.detail?.key !== "STATE_UPDATE") return;
+
+    switch (event.detail.data.type) {
+      case "GAME_QUESTIONS":
+        currentQuestions = event.detail.data.value;
+        break;
+      case "PLAYER_QUESTION_LIST":
+        currentQuestionIdList = event.detail.data.value.questionList;
+        currentQuestionIndex = event.detail.data.value.questionIndex;
+        break;
+      case "PLAYER_QUESTION_LIST_INDEX":
+        currentQuestionIndex = event.detail.data.value;
+        break;
+    }
+  });
+
+  // --- End of Core Utilities ---
 
   const MENU_LAYOUT = {
     general: {
@@ -123,7 +466,7 @@
     moduleItems: new Map(),
     modulePanels: new Map(),
     moduleEntries: [],
-    moduleConfig: new Map(),
+    moduleSettings: new Map(),
     collapsedPanels: {},
     listeningForBind: null,
     listeningForMenuBind: false,
@@ -135,6 +478,7 @@
     },
     loosePanelPositions: {},
     mergedRootPosition: { left: 20, top: 28 },
+    modules: new Map(),
   };
 
   // Bumped to v3 — includes display-mode and loose layout position persistence
@@ -1054,14 +1398,15 @@
 
   function toggleModule(moduleName) {
     const item = state.moduleItems.get(moduleName);
-    if (!item) return;
+    const moduleInstance = state.modules.get(moduleName);
+    if (!item || !moduleInstance) return;
 
-    if (state.enabledModules.has(moduleName)) {
-      state.enabledModules.delete(moduleName);
+    if (moduleInstance.enabled) {
+      moduleInstance.disable();
       item.classList.remove("active");
       if (moduleName === "Auto Answer") stopAutoAnswer();
     } else {
-      state.enabledModules.add(moduleName);
+      moduleInstance.enable();
       item.classList.add("active");
       if (moduleName === "Auto Answer") startAutoAnswer();
     }
@@ -1317,6 +1662,7 @@
       loosePositions: state.loosePositions,
       loosePanelPositions: state.loosePanelPositions,
       collapsedPanels: state.collapsedPanels,
+      moduleSettings: Array.from(state.moduleSettings.entries()), // Convert Map to array for serialization
     };
   }
 
@@ -1630,6 +1976,13 @@
 
       state.moduleItems.set(moduleName, item);
       state.moduleEntries.push({ name: moduleName, item, panel });
+
+      const moduleInstance = new Module(moduleName, {
+        onEnable: () => console.log(`${moduleName} enabled`),
+        onDisable: () => console.log(`${moduleName} disabled`),
+      });
+      state.modules.set(moduleName, moduleInstance);
+
       moduleCfg(moduleName);
       setBindLabel(item, moduleName);
 
@@ -1939,11 +2292,24 @@
         if (saved.collapsedPanels && typeof saved.collapsedPanels === "object") {
           state.collapsedPanels = saved.collapsedPanels;
         }
+        if (saved.moduleSettings && Array.isArray(saved.moduleSettings)) {
+          state.moduleSettings = new Map(saved.moduleSettings);
+        }
+        // Apply module settings to active modules
+        for (const [moduleName, settings] of state.moduleSettings.entries()) {
+          const moduleInstance = state.modules.get(moduleName);
+          if (moduleInstance) {
+            // Assuming moduleInstance has a method to apply settings or settings are directly accessible
+            // For now, we'll just set the keybind, and other settings can be accessed directly from moduleCfg(moduleName)
+            moduleInstance.keybind = settings.keybind;
+          }
+        }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         footer.innerHTML = `<span>Press <b>${CONFIG.toggleKey}</b> to show/hide menu</span><span>Right click modules for settings</span>`;
       }
     }
   } catch (_) {}
+
   for (const panelName of panelByName.keys()) {
     setPanelCollapsed(panelName, !!state.collapsedPanels[panelName]);
   }
