@@ -194,14 +194,17 @@
 
     .zyrox-panels {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       align-items: flex-start;
-      overflow-x: auto;
+      align-content: flex-start;
+      overflow: auto;
       max-width: 100%;
       padding-bottom: 2px;
+      max-height: 38vh;
     }
 
-    .zyrox-panels::-webkit-scrollbar { height: 8px; }
+    .zyrox-panels::-webkit-scrollbar { width: 8px; height: 8px; }
     .zyrox-panels::-webkit-scrollbar-thumb { background: rgba(255, 61, 61, 0.3); border-radius: 999px; }
 
     .zyrox-panel {
@@ -290,9 +293,9 @@
     }
 
     .zyrox-config {
-      position: fixed;
+      position: relative;
       z-index: 2147483647;
-      min-width: 220px;
+      min-width: 290px;
       border-radius: 11px;
       border: 1px solid rgba(255, 79, 79, 0.45);
       background: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
@@ -306,6 +309,7 @@
     .zyrox-config-sub { color: #b8b8c2; font-size: 10px; }
     .zyrox-config-body { padding: 10px; }
     .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:#d8d8df; font-size:12px; }
+    .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
 
     .zyrox-btn {
       border: 1px solid rgba(255, 94, 94, 0.5);
@@ -318,6 +322,30 @@
     }
 
     .zyrox-btn:hover { background: rgba(255, 61, 61, 0.2); color: #fff; }
+
+    .zyrox-btn-square {
+      width: 29px;
+      height: 29px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .zyrox-config-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483646;
+      background: rgba(0, 0, 0, 0.26);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .zyrox-config-backdrop.hidden { display: none !important; }
 
     .zyrox-resize-handle {
       position: absolute;
@@ -382,14 +410,22 @@
     <div class="zyrox-config-body">
       <div class="zyrox-config-row">
         <span>Keybind</span>
-        <button class="zyrox-btn" type="button">Set keybind</button>
+        <div class="zyrox-config-actions">
+          <button class="zyrox-btn zyrox-btn-square" type="button" title="Reset keybind">□</button>
+          <button class="zyrox-btn" type="button">Set keybind</button>
+        </div>
       </div>
     </div>
   `;
 
+  const configBackdrop = document.createElement("div");
+  configBackdrop.className = "zyrox-config-backdrop hidden";
+  configBackdrop.appendChild(configMenu);
+
   const configTitleEl = configMenu.querySelector(".zyrox-config-title");
   const configSubEl = configMenu.querySelector(".zyrox-config-sub");
-  const setBindBtn = configMenu.querySelector(".zyrox-btn");
+  const resetBindBtn = configMenu.querySelector(".zyrox-btn-square");
+  const setBindBtn = configMenu.querySelector(".zyrox-btn:not(.zyrox-btn-square)");
   let openConfigModule = null;
 
   function moduleCfg(name) {
@@ -419,13 +455,14 @@
   }
 
   function closeConfig() {
+    configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
     openConfigModule = null;
     state.listeningForBind = null;
     setBindBtn.textContent = "Set keybind";
   }
 
-  function openConfig(moduleName, x, y) {
+  function openConfig(moduleName) {
     openConfigModule = moduleName;
     const cfg = moduleCfg(moduleName);
 
@@ -433,8 +470,7 @@
     configSubEl.textContent = cfg.keybind ? `Current bind: ${cfg.keybind}` : "No keybind assigned";
     setBindBtn.textContent = "Set keybind";
 
-    configMenu.style.left = `${x}px`;
-    configMenu.style.top = `${y}px`;
+    configBackdrop.classList.remove("hidden");
     configMenu.classList.remove("hidden");
   }
 
@@ -494,7 +530,7 @@
 
       item.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        openConfig(moduleName, event.clientX + 6, event.clientY + 6);
+        openConfig(moduleName);
       });
 
       list.appendChild(item);
@@ -510,6 +546,17 @@
     if (!openConfigModule) return;
     state.listeningForBind = openConfigModule;
     setBindBtn.textContent = "Press any key...";
+  });
+
+  resetBindBtn.addEventListener("click", () => {
+    if (!openConfigModule) return;
+    const cfg = moduleCfg(openConfigModule);
+    cfg.keybind = null;
+    const item = state.moduleItems.get(openConfigModule);
+    if (item) setBindLabel(item, openConfigModule);
+    configSubEl.textContent = "No keybind assigned";
+    state.listeningForBind = null;
+    setBindBtn.textContent = "Set keybind";
   });
 
   searchInput.addEventListener("keydown", (event) => {
@@ -549,7 +596,7 @@
 
   document.head.appendChild(style);
   document.body.appendChild(root);
-  document.body.appendChild(configMenu);
+  document.body.appendChild(configBackdrop);
 
   function setVisible(nextVisible) {
     state.visible = nextVisible;
@@ -594,7 +641,7 @@
   });
 
   document.addEventListener("mousedown", (event) => {
-    if (!configMenu.classList.contains("hidden") && !configMenu.contains(event.target)) {
+    if (!configBackdrop.classList.contains("hidden") && !configMenu.contains(event.target)) {
       closeConfig();
     }
   });
