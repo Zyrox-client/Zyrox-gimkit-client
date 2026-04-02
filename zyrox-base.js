@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.6.5
+// @version      0.6.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -20,7 +20,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.6.5";
+    const CLIENT_VERSION = "0.6.6";
     return CLIENT_VERSION;
   }
 
@@ -123,6 +123,11 @@
       --zyx-accent-soft: #ffbdbd;
       --zyx-search-text: #ffe6e6;
       --zyx-checkmark-color: #ff6b6b;
+      --zyx-module-hover-bg: rgba(30, 30, 36, 0.9);
+      --zyx-module-hover-border: rgba(255, 255, 255, 0.14);
+      --zyx-module-active-start: rgba(255, 61, 61, 0.32);
+      --zyx-module-active-end: rgba(40, 10, 10, 0.8);
+      --zyx-module-active-border: rgba(255, 61, 61, 0.52);
       --zyx-hover-shift: 2px;
       --zyx-shell-blur: 10px;
       --zyx-muted: #9b9bab;
@@ -185,10 +190,10 @@
     .zyrox-brand { display: flex; align-items: center; gap: 10px; color: var(--zyx-text-strong); }
 
     .zyrox-logo {
-      width: 24px;
-      height: 24px;
+      width: 30px;
+      height: 30px;
       border-radius: 6px;
-      object-fit: cover;
+      object-fit: contain;
       box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 18px rgba(255,61,61,.45);
       outline: 1px solid var(--zyx-icon-color);
     }
@@ -326,16 +331,16 @@
     }
 
     .zyrox-module:hover {
-      background: rgba(30, 30, 36, 0.9);
-      border-color: rgba(255, 255, 255, 0.14);
+      background: var(--zyx-module-hover-bg);
+      border-color: var(--zyx-module-hover-border);
       color: var(--zyx-settings-text);
       transform: translateX(var(--zyx-hover-shift));
     }
 
     .zyrox-module.active {
       color: #fff;
-      background: linear-gradient(90deg, rgba(255, 61, 61, 0.32), rgba(40, 10, 10, 0.8));
-      border-color: rgba(255, 61, 61, 0.52);
+      background: linear-gradient(90deg, var(--zyx-module-active-start), var(--zyx-module-active-end));
+      border-color: var(--zyx-module-active-border);
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
     }
 
@@ -914,6 +919,7 @@
           outline: "#37d878", text: "#d7ffe6", muted: "#88b79b", soft: "#a8ffd0", search: "#e6fff0", icon: "#d7ffe9",
           panelText: "#d9ffe8", panelBorder: "#5fff99", panelBg: "#04110a", slider: "#2dff75", checkmark: "#2dff75",
           headerStart: "#2dff75", headerEnd: "#0f2f1b", headerText: "#f0fff4",
+          settingsHeaderStart: "#2dff75", settingsHeaderEnd: "#0f2f1b",
         };
       }
       if (presetName === "ice") {
@@ -922,6 +928,7 @@
           outline: "#6fbce8", text: "#d7edff", muted: "#8ea7bd", soft: "#b8e5ff", search: "#e7f5ff", icon: "#dff3ff",
           panelText: "#e1f4ff", panelBorder: "#8fd7ff", panelBg: "#071019", slider: "#7bdfff", checkmark: "#7bdfff",
           headerStart: "#6cd8ff", headerEnd: "#133042", headerText: "#f4fbff",
+          settingsHeaderStart: "#6cd8ff", settingsHeaderEnd: "#133042",
         };
       }
       if (presetName === "grayscale") {
@@ -930,6 +937,7 @@
           outline: "#9a9a9a", text: "#dddddd", muted: "#9a9a9a", soft: "#c9c9c9", search: "#f1f1f1", icon: "#f5f5f5",
           panelText: "#efefef", panelBorder: "#a0a0a0", panelBg: "#0f0f0f", slider: "#c4c4c4", checkmark: "#d0d0d0",
           headerStart: "#8f8f8f", headerEnd: "#1d1d1d", headerText: "#ffffff",
+          settingsHeaderStart: "#8f8f8f", settingsHeaderEnd: "#1d1d1d",
         };
       }
       return {
@@ -937,6 +945,7 @@
         outline: "#ff5b5b", text: "#d6d6df", muted: "#9b9bab", soft: "#ffbdbd", search: "#ffe6e6", icon: "#ffdada",
         panelText: "#ffd9d9", panelBorder: "#ff6464", panelBg: "#08080a", slider: "#ff6b6b", checkmark: "#ff6b6b",
         headerStart: "#ff4a4a", headerEnd: "#3c1212", headerText: "#ffffff",
+        settingsHeaderStart: "#ff3d3d", settingsHeaderEnd: "#2d0c0c",
       };
     })();
 
@@ -959,6 +968,8 @@
     headerStartInput.value = preset.headerStart;
     headerEndInput.value = preset.headerEnd;
     headerTextInput.value = preset.headerText;
+    settingsHeaderStartInput.value = preset.settingsHeaderStart;
+    settingsHeaderEndInput.value = preset.settingsHeaderEnd;
     applyAppearance();
   }
 
@@ -1017,6 +1028,11 @@
     cssRoot.setProperty("--zyx-search-text", searchText);
     cssRoot.setProperty("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
     cssRoot.setProperty("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
+    cssRoot.setProperty("--zyx-module-hover-bg", toRgba(topbarColor, 0.16));
+    cssRoot.setProperty("--zyx-module-hover-border", toRgba(topbarColor, 0.4));
+    cssRoot.setProperty("--zyx-module-active-start", toRgba(headerStart, 0.35));
+    cssRoot.setProperty("--zyx-module-active-end", toRgba(headerEnd, 0.82));
+    cssRoot.setProperty("--zyx-module-active-border", toRgba(headerStart, 0.55));
     cssRoot.setProperty("--zyx-icon-color", iconColor);
     cssRoot.setProperty("--zyx-outline-color", `${outlineColor}cc`);
     cssRoot.setProperty("--zyx-panel-count-text", panelCountText);
@@ -1252,6 +1268,11 @@
     cssRoot.removeProperty("--zyx-search-text");
     cssRoot.removeProperty("--zyx-topbar-bg-start");
     cssRoot.removeProperty("--zyx-topbar-bg-end");
+    cssRoot.removeProperty("--zyx-module-hover-bg");
+    cssRoot.removeProperty("--zyx-module-hover-border");
+    cssRoot.removeProperty("--zyx-module-active-start");
+    cssRoot.removeProperty("--zyx-module-active-end");
+    cssRoot.removeProperty("--zyx-module-active-border");
     cssRoot.removeProperty("--zyx-icon-color");
     cssRoot.removeProperty("--zyx-outline-color");
     cssRoot.removeProperty("--zyx-panel-count-text");
