@@ -101,6 +101,183 @@
     return returnVar;
   }
 
+  function msgpackEncode(value) {
+    const bytes = [];
+    const deferred = [];
+    const write = (input) => {
+      const type = typeof input;
+      if (type === "string") {
+        let len = 0;
+        for (let i = 0; i < input.length; i++) {
+          const code = input.charCodeAt(i);
+          if (code < 128) len++;
+          else if (code < 2048) len += 2;
+          else if (code < 55296 || code > 57343) len += 3;
+          else {
+            i++;
+            len += 4;
+          }
+        }
+        if (len < 32) bytes.push(160 | len);
+        else if (len < 256) bytes.push(217, len);
+        else if (len < 65536) bytes.push(218, len >> 8, len & 255);
+        else bytes.push(219, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+        deferred.push({ type: "string", value: input, offset: bytes.length });
+        bytes.length += len;
+        return;
+      }
+      if (type === "number") {
+        if (Number.isInteger(input) && Number.isFinite(input)) {
+          if (input >= 0) {
+            if (input < 128) bytes.push(input);
+            else if (input < 256) bytes.push(204, input);
+            else if (input < 65536) bytes.push(205, input >> 8, input & 255);
+            else if (input < 4294967296) bytes.push(206, input >> 24, (input >> 16) & 255, (input >> 8) & 255, input & 255);
+            else {
+              const hi = Math.floor(input / Math.pow(2, 32));
+              const lo = input >>> 0;
+              bytes.push(207, hi >> 24, (hi >> 16) & 255, (hi >> 8) & 255, hi & 255, lo >> 24, (lo >> 16) & 255, (lo >> 8) & 255, lo & 255);
+            }
+          } else if (input >= -32) bytes.push(input);
+          else if (input >= -128) bytes.push(208, input & 255);
+          else if (input >= -32768) bytes.push(209, (input >> 8) & 255, input & 255);
+          else if (input >= -2147483648) bytes.push(210, (input >> 24) & 255, (input >> 16) & 255, (input >> 8) & 255, input & 255);
+          else {
+            const hi = Math.floor(input / Math.pow(2, 32));
+            const lo = input >>> 0;
+            bytes.push(211, hi >> 24, (hi >> 16) & 255, (hi >> 8) & 255, hi & 255, lo >> 24, (lo >> 16) & 255, (lo >> 8) & 255, lo & 255);
+          }
+          return;
+        }
+        bytes.push(203);
+        deferred.push({ type: "float64", value: input, offset: bytes.length });
+        bytes.length += 8;
+        return;
+      }
+      if (type === "boolean") {
+        bytes.push(input ? 195 : 194);
+        return;
+      }
+      if (input == null) {
+        bytes.push(192);
+        return;
+      }
+      if (Array.isArray(input)) {
+        const len = input.length;
+        if (len < 16) bytes.push(144 | len);
+        else if (len < 65536) bytes.push(220, len >> 8, len & 255);
+        else bytes.push(221, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+        for (const item of input) write(item);
+        return;
+      }
+      const keys = Object.keys(input).filter((k) => typeof input[k] !== "function");
+      const len = keys.length;
+      if (len < 16) bytes.push(128 | len);
+      else if (len < 65536) bytes.push(222, len >> 8, len & 255);
+      else bytes.push(223, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+      for (const key of keys) {
+        write(key);
+        write(input[key]);
+      }
+    };
+
+    write(value);
+    const view = new DataView(new ArrayBuffer(bytes.length));
+    for (let i = 0; i < bytes.length; i++) view.setUint8(i, bytes[i] & 255);
+
+    for (const part of deferred) {
+      if (part.type === "float64") {
+        view.setFloat64(part.offset, part.value);
+        continue;
+      }
+      let offset = part.offset;
+      const value = part.value;
+      for (let i = 0; i < value.length; i++) {
+        let code = value.charCodeAt(i);
+        if (code < 128) view.setUint8(offset++, code);
+        else if (code < 2048) {
+          view.setUint8(offset++, 192 | (code >> 6));
+          view.setUint8(offset++, 128 | (code & 63));
+        } else if (code < 55296 || code > 57343) {
+          view.setUint8(offset++, 224 | (code >> 12));
+          view.setUint8(offset++, 128 | ((code >> 6) & 63));
+          view.setUint8(offset++, 128 | (code & 63));
+        } else {
+          i++;
+          code = 65536 + (((code & 1023) << 10) | (value.charCodeAt(i) & 1023));
+          view.setUint8(offset++, 240 | (code >> 18));
+          view.setUint8(offset++, 128 | ((code >> 12) & 63));
+          view.setUint8(offset++, 128 | ((code >> 6) & 63));
+          view.setUint8(offset++, 128 | (code & 63));
+        }
+      }
+    }
+    return view.buffer;
+  }
+
+  function msgpackDecode(buffer, startOffset = 0) {
+    const view = new DataView(buffer);
+    let offset = startOffset;
+
+    const readString = (len) => {
+      let out = "";
+      const end = offset + len;
+      while (offset < end) {
+        const byte = view.getUint8(offset++);
+        if ((byte & 0x80) === 0) out += String.fromCharCode(byte);
+        else if ((byte & 0xe0) === 0xc0) out += String.fromCharCode(((byte & 0x1f) << 6) | (view.getUint8(offset++) & 0x3f));
+        else if ((byte & 0xf0) === 0xe0) out += String.fromCharCode(((byte & 0x0f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f));
+        else {
+          const codePoint = ((byte & 0x07) << 18) | ((view.getUint8(offset++) & 0x3f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f);
+          const cp = codePoint - 0x10000;
+          out += String.fromCharCode((cp >> 10) + 0xd800, (cp & 1023) + 0xdc00);
+        }
+      }
+      return out;
+    };
+
+    const read = () => {
+      const token = view.getUint8(offset++);
+      if (token < 0x80) return token;
+      if (token < 0x90) {
+        const size = token & 0x0f;
+        const map = {};
+        for (let i = 0; i < size; i++) map[read()] = read();
+        return map;
+      }
+      if (token < 0xa0) {
+        const size = token & 0x0f;
+        const arr = new Array(size);
+        for (let i = 0; i < size; i++) arr[i] = read();
+        return arr;
+      }
+      if (token < 0xc0) return readString(token & 0x1f);
+      if (token > 0xdf) return token - 256;
+      switch (token) {
+        case 192: return null;
+        case 194: return false;
+        case 195: return true;
+        case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
+        case 204: { const v = view.getUint8(offset); offset += 1; return v; }
+        case 205: { const v = view.getUint16(offset); offset += 2; return v; }
+        case 206: { const v = view.getUint32(offset); offset += 4; return v; }
+        case 208: { const v = view.getInt8(offset); offset += 1; return v; }
+        case 209: { const v = view.getInt16(offset); offset += 2; return v; }
+        case 210: { const v = view.getInt32(offset); offset += 4; return v; }
+        case 217: { const n = view.getUint8(offset); offset += 1; return readString(n); }
+        case 218: { const n = view.getUint16(offset); offset += 2; return readString(n); }
+        case 219: { const n = view.getUint32(offset); offset += 4; return readString(n); }
+        case 220: { const n = view.getUint16(offset); offset += 2; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
+        case 221: { const n = view.getUint32(offset); offset += 4; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
+        case 222: { const n = view.getUint16(offset); offset += 2; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
+        case 223: { const n = view.getUint32(offset); offset += 4; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
+        default: return null;
+      }
+    };
+
+    return { value: read(), offset };
+  }
+
   // Simplified msgpack-like encoding/decoding for Blueboat
   const blueboat = (() => {
     function encode(t, e, s) {
@@ -275,6 +452,7 @@
         nativeXMLSend.apply(this, arguments);
       };
       window.WebSocket = NewWebSocket;
+      globalThis.socketManager = this;
     }
     registerSocket(socket) {
       this.socket = socket;
@@ -310,20 +488,31 @@
       if (!this.blueboatRoomId && this.transportType === "blueboat") return;
       let encoded;
       if (this.transportType === "colyseus") {
-        // Colyseus encoding is more complex, might need more from example.js if we use it
-        // For now, only Blueboat is fully implemented for Auto Answer
+        const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
+        const channelEncoded = msgpackEncode(channel);
+        const packetEncoded = msgpackEncode(data);
+        encoded = new Uint8Array(header.length + channelEncoded.byteLength + packetEncoded.byteLength);
+        encoded.set(header, 0);
+        encoded.set(new Uint8Array(channelEncoded), header.length);
+        encoded.set(new Uint8Array(packetEncoded), header.length + channelEncoded.byteLength);
+        this.socket.send(encoded);
       } else {
         encoded = blueboat.encode(channel, data, this.blueboatRoomId);
         this.socket.send(encoded);
       }
     }
     decodeColyseus(event) {
-      const bytes = Array.from(new Uint8Array(event.data));
+      const bytes = new Uint8Array(event.data);
       const code = bytes[0];
       if (code === colyseusProtocol.ROOM_DATA) {
-        const it = { offset: 1 };
-        // Simplified decoding for colyseus
-        return { type: "ROOM_DATA", message: bytes.slice(1) };
+        const first = msgpackDecode(event.data, 1);
+        if (!first) return null;
+        let message;
+        if (bytes.byteLength > first.offset) {
+          const second = msgpackDecode(event.data, first.offset);
+          message = second?.value;
+        }
+        return { type: first.value, message };
       }
       return null;
     }
