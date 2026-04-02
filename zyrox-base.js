@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox Client
 // @namespace    https://github.com/zyrox
-// @version      0.5.5
+// @version      0.5.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -19,7 +19,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.5.5";
+    const CLIENT_VERSION = "0.5.6";
     return CLIENT_VERSION;
   }
 
@@ -100,6 +100,8 @@
       --zyx-header-text: #fff;
       --zyx-header-bg-start: rgba(255, 61, 61, 0.24);
       --zyx-header-bg-end: rgba(40, 12, 12, 0.92);
+      --zyx-slider-color: #ff6b6b;
+      --zyx-shell-blur: 10px;
       --zyx-muted: #9b9bab;
       --zyx-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
       --zyx-radius-xl: 14px;
@@ -133,7 +135,7 @@
       border-radius: var(--zyx-radius-xl);
       border: 1px solid var(--zyx-border-soft);
       background: linear-gradient(150deg, rgba(255, 54, 54, 0.08), rgba(0, 0, 0, 0.45));
-      backdrop-filter: blur(10px) saturate(115%);
+      backdrop-filter: blur(var(--zyx-shell-blur)) saturate(115%);
       box-shadow: var(--zyx-shadow);
       overflow: auto;
     }
@@ -392,7 +394,8 @@
     .zyrox-settings {
       position: relative;
       z-index: 2147483649;
-      width: min(640px, 90vw);
+      width: min(760px, 92vw);
+      min-height: 460px;
       border-radius: 12px;
       border: 1px solid rgba(255, 79, 79, 0.45);
       background: linear-gradient(180deg, rgba(18, 18, 22, 0.97), rgba(8, 8, 10, 0.97));
@@ -434,7 +437,16 @@
     .zyrox-setting-card { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.03); }
     .zyrox-setting-card label { display:block; font-size: 12px; margin-bottom: 8px; color: #ffe5e5; }
     .zyrox-setting-card input[type='color'] { width: 100%; height: 34px; border: none; background: transparent; cursor: pointer; }
-    .zyrox-setting-card input[type='range'] { width: 100%; }
+    .zyrox-setting-card input[type='range'] { width: 100%; accent-color: var(--zyx-slider-color); }
+    .zyrox-subheading {
+      grid-column: 1 / -1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.25px;
+      color: #ffbdbd;
+      margin-top: -2px;
+      margin-bottom: -4px;
+    }
     .zyrox-settings-actions { display:flex; justify-content:flex-end; gap:8px; padding: 0 14px 14px; }
     .zyrox-close-btn {
       position: absolute;
@@ -554,6 +566,7 @@
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="theme">
         <div class="zyrox-settings-body">
+          <div class="zyrox-subheading">Main Window</div>
           <div class="zyrox-setting-card">
             <label>Accent Color</label>
             <input type="color" class="set-accent" value="#ff3d3d" />
@@ -570,6 +583,11 @@
             <label>Background Opacity</label>
             <input type="range" class="set-opacity" min="20" max="100" value="45" />
           </div>
+          <div class="zyrox-setting-card">
+            <label>Slider Color</label>
+            <input type="color" class="set-slider-color" value="#ff6b6b" />
+          </div>
+          <div class="zyrox-subheading">Modules</div>
           <div class="zyrox-setting-card">
             <label>Module Bar Start Color</label>
             <input type="color" class="set-header-start" value="#ff4a4a" />
@@ -622,6 +640,7 @@
   const borderInput = settingsMenu.querySelector(".set-border");
   const textInput = settingsMenu.querySelector(".set-text");
   const opacityInput = settingsMenu.querySelector(".set-opacity");
+  const sliderColorInput = settingsMenu.querySelector(".set-slider-color");
   const headerStartInput = settingsMenu.querySelector(".set-header-start");
   const headerEndInput = settingsMenu.querySelector(".set-header-end");
   const headerTextInput = settingsMenu.querySelector(".set-header-text");
@@ -691,6 +710,7 @@
     const border = borderInput.value;
     const text = textInput.value;
     const opacity = Number(opacityInput.value) / 100;
+    const sliderColor = sliderColorInput.value;
     const headerStart = headerStartInput.value;
     const headerEnd = headerEndInput.value;
     const headerText = headerTextInput.value;
@@ -702,11 +722,15 @@
     shell.style.setProperty("--zyx-header-bg-start", `${headerStart}3d`);
     shell.style.setProperty("--zyx-header-bg-end", `${headerEnd}eb`);
     shell.style.setProperty("--zyx-header-text", headerText);
+    shell.style.setProperty("--zyx-slider-color", sliderColor);
     shell.style.setProperty("--zyx-radius-xl", `${radius}px`);
+    shell.style.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
+    shell.style.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
     shell.style.transform = `scale(${scale.toFixed(2)})`;
     shell.style.transformOrigin = "top left";
     shell.style.background = `linear-gradient(150deg, ${accent}22, rgba(0, 0, 0, ${opacity.toFixed(2)}))`;
-    shell.style.backdropFilter = `blur(${blur}px) saturate(115%)`;
+    shell.style.setProperty("--zyx-shell-blur", `${blur}px`);
+    shell.style.backdropFilter = `blur(var(--zyx-shell-blur)) saturate(115%)`;
   }
 
   function applySearchFilter() {
@@ -836,6 +860,7 @@
   borderInput.addEventListener("input", applyAppearance);
   textInput.addEventListener("input", applyAppearance);
   opacityInput.addEventListener("input", applyAppearance);
+  sliderColorInput.addEventListener("input", applyAppearance);
   headerStartInput.addEventListener("input", applyAppearance);
   headerEndInput.addEventListener("input", applyAppearance);
   headerTextInput.addEventListener("input", applyAppearance);
@@ -848,6 +873,7 @@
     borderInput.value = "#ff6f6f";
     textInput.value = "#d6d6df";
     opacityInput.value = "45";
+    sliderColorInput.value = "#ff6b6b";
     headerStartInput.value = "#ff4a4a";
     headerEndInput.value = "#3c1212";
     headerTextInput.value = "#ffffff";
@@ -859,7 +885,11 @@
     shell.style.removeProperty("--zyx-header-bg-start");
     shell.style.removeProperty("--zyx-header-bg-end");
     shell.style.removeProperty("--zyx-header-text");
+    shell.style.removeProperty("--zyx-slider-color");
     shell.style.removeProperty("--zyx-radius-xl");
+    shell.style.removeProperty("--zyx-radius-lg");
+    shell.style.removeProperty("--zyx-radius-md");
+    shell.style.removeProperty("--zyx-shell-blur");
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
