@@ -322,22 +322,15 @@
       };
       window.__zyroxEspShared = shared;
 
-      function readCharacterPosition(character) {
-        const x = Number(character?.x ?? character?.body?.x ?? character?.container?.x);
-        const y = Number(character?.y ?? character?.body?.y ?? character?.container?.y);
-        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-        return { x, y };
-      }
-
       function tick() {
-        const phaser = window?.stores?.phaser;
-        const scene = phaser?.scene;
-        const camera = scene?.cameras?.cameras?.[0];
-        const characters = scene?.characterManager?.characters;
-        const mainCharacter = phaser?.mainCharacter;
-        const localPlayerId = mainCharacter?.id ?? window?.socketManager?.playerId ?? null;
-        const localTeamId = mainCharacter?.teamId ?? null;
-        if (!camera || !(characters instanceof Map) || localTeamId == null) {
+        const serializer = window?.serializer;
+        const characters = serializer?.state?.characters?.$items;
+        const camera = window?.stores?.phaser?.scene?.cameras?.cameras?.[0];
+        const localPlayerId = window?.socketManager?.playerId ?? null;
+        const localCharacter = localPlayerId != null ? characters?.get?.(localPlayerId) : null;
+        const localTeamId = localCharacter?.teamId ?? null;
+
+        if (!characters || typeof characters[Symbol.iterator] !== "function" || !camera || localPlayerId == null || localTeamId == null) {
           shared.ready = false;
           shared.lastUpdate = Date.now();
           requestAnimationFrame(tick);
@@ -346,14 +339,15 @@
 
         const outPlayers = [];
         for (const [id, character] of characters) {
-          const pos = readCharacterPosition(character);
-          if (!pos) continue;
+          const x = Number(character?.x);
+          const y = Number(character?.y);
+          if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
           outPlayers.push({
             id: String(id ?? character?.id ?? "unknown"),
             name: String(character?.name ?? character?.displayName ?? character?.username ?? id ?? "Unknown"),
             teamId: character?.teamId ?? null,
-            x: pos.x,
-            y: pos.y,
+            x,
+            y,
           });
         }
 
@@ -965,10 +959,8 @@
     enabled: false,
     canvas: null,
     ctx: null,
-    rafId: null,
+    intervalId: null,
     seenPlayers: new Map(),
-    serializerFound: false,
-    usingFallbackCharacters: false,
     waitLogTick: 0,
   };
 
@@ -1034,35 +1026,26 @@
   function processEspPlayers(snapshot) {
     const localPlayerId = snapshot?.localPlayerId ?? null;
     const localTeamId = snapshot?.localTeamId ?? null;
-    if (localTeamId == null) {
-      espLog("Waiting for game data... missing local team id.");
-      return [];
-    }
+    if (localPlayerId == null || localTeamId == null) return [];
     const camX = Number(snapshot?.camera?.midX);
     const camY = Number(snapshot?.camera?.midY);
-    const zoom = Number(snapshot?.camera?.zoom ?? 1);
-    if (!Number.isFinite(camX) || !Number.isFinite(camY) || !Number.isFinite(zoom)) {
-      espLog("Missing data for camera midpoint/zoom; rendering skip.");
-      return [];
-    }
+    if (!Number.isFinite(camX) || !Number.isFinite(camY)) return [];
 
     const playersSource = Array.isArray(snapshot?.players) ? snapshot.players : [];
     const framePlayers = [];
     const currentIds = new Set();
     for (const character of playersSource) {
       const id = String(character?.id ?? character?.playerId ?? character?.name ?? "unknown");
-      if (localPlayerId != null && id === String(localPlayerId)) continue;
+      if (id === String(localPlayerId)) continue;
       currentIds.add(id);
       const pos = getCharacterPosition(character);
-      if (!pos) {
-        espLog(`Invalid positions for player ${id}; rendering skip.`);
-        continue;
-      }
+      if (!pos) continue;
       const name = getCharacterName(character, id);
-      if (!espState.seenPlayers.has(id)) espLog(`Player detected: ${id}/${name}`);
       const isTeammate = localTeamId === character?.teamId;
-      const angle = Math.atan2(pos.y - camY, pos.x - camX);
-      const distance = Math.sqrt(Math.pow(pos.x - camX, 2) + Math.pow(pos.y - camY, 2)) * zoom;
+      const dx = pos.x - camX;
+      const dy = pos.y - camY;
+      const angle = Math.atan2(dy, dx);
+      const distance = Math.hypot(dx, dy);
       const arrowDist = Math.min(250, distance);
       const arrowTipX = Math.cos(angle) * arrowDist + espState.canvas.width / 2;
       const arrowTipY = Math.sin(angle) * arrowDist + espState.canvas.height / 2;
@@ -1078,9 +1061,8 @@
       espState.seenPlayers.set(id, { name, x: pos.x, y: pos.y, teamId: character?.teamId ?? null });
     }
 
-    for (const [knownId, knownData] of espState.seenPlayers.entries()) {
+    for (const [knownId] of espState.seenPlayers.entries()) {
       if (!currentIds.has(knownId)) {
-        espLog(`Player disappeared: ${knownId}/${knownData?.name ?? "Unknown"}`);
         espState.seenPlayers.delete(knownId);
       }
     }
@@ -1100,36 +1082,33 @@
       const rightAngle = player.angle - (Math.PI / 4) * 3;
       ctx.beginPath();
       ctx.moveTo(player.arrowTipX, player.arrowTipY);
-      ctx.lineTo(player.arrowTipX + Math.cos(leftAngle) * 50, player.arrowTipY + Math.sin(leftAngle) * 50);
+      ctx.lineTo(player.arrowTipX + Math.cos(leftAngle) * 10, player.arrowTipY + Math.sin(leftAngle) * 10);
       ctx.moveTo(player.arrowTipX, player.arrowTipY);
-      ctx.lineTo(player.arrowTipX + Math.cos(rightAngle) * 50, player.arrowTipY + Math.sin(rightAngle) * 50);
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = player.isTeammate ? "green" : "red";
+      ctx.lineTo(player.arrowTipX + Math.cos(rightAngle) * 10, player.arrowTipY + Math.sin(rightAngle) * 10);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = player.isTeammate ? "lime" : "red";
       ctx.stroke();
 
-      ctx.fillStyle = player.isTeammate ? "rgba(0,255,0,0.9)" : "rgba(255,0,0,0.9)";
-      ctx.font = "20px Verdana";
-      ctx.textAlign = "center";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.font = "12px Arial";
+      ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${player.name} (${Math.floor(player.distance)})`, player.arrowTipX, player.arrowTipY);
-      espLog(`Player rendered: ${player.id}/${player.name}`);
+      ctx.fillText(`${player.name} (${Math.round(player.distance)})`, player.arrowTipX + 12, player.arrowTipY + 4);
     }
-    espLog(`Frame rendered with ${players.length} players`);
   }
 
-  function espFrame() {
-    if (!espState.enabled) return;
+  function renderEspTick() {
+    if (!espState.enabled || !espState.ctx || !espState.canvas) return;
     const snapshot = getEspSnapshotFromBridge();
-    if (!snapshot || !espState.ctx || !espState.canvas) {
+    if (!snapshot) {
       espState.waitLogTick += 1;
-      if (espState.waitLogTick % 60 === 0) espLog("Waiting for game data...");
-      espState.rafId = requestAnimationFrame(espFrame);
+      if (espState.waitLogTick % 60 === 0) espLog("Waiting for serializer.state/playerId/stores.phaser...");
+      espState.ctx.clearRect(0, 0, espState.canvas.width, espState.canvas.height);
       return;
     }
     espState.waitLogTick = 0;
     const players = processEspPlayers(snapshot);
     renderEspPlayers(players);
-    espState.rafId = requestAnimationFrame(espFrame);
   }
 
   function startEsp() {
@@ -1141,12 +1120,11 @@
     espLog("ESP initialized");
     createEspCanvas();
     resizeEspCanvas();
-    espLog(window.__zyroxEspShared ? "Serializer found / not found state delegated to page bridge" : "Serializer not found");
-    if (espState.rafId != null) {
-      cancelAnimationFrame(espState.rafId);
-      espState.rafId = null;
+    if (espState.intervalId != null) {
+      clearInterval(espState.intervalId);
+      espState.intervalId = null;
     }
-    espState.rafId = requestAnimationFrame(espFrame);
+    espState.intervalId = setInterval(renderEspTick, 1000 / 30);
   }
 
   function stopEsp() {
@@ -1155,9 +1133,9 @@
       return;
     }
     espState.enabled = false;
-    if (espState.rafId != null) {
-      cancelAnimationFrame(espState.rafId);
-      espState.rafId = null;
+    if (espState.intervalId != null) {
+      clearInterval(espState.intervalId);
+      espState.intervalId = null;
     }
     espState.seenPlayers.clear();
     destroyEspCanvas();
