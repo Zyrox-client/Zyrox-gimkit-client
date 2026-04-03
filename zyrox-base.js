@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.0.2
+// @version      1.0.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.0.2";
+    const CLIENT_VERSION = "1.0.3";
     return CLIENT_VERSION;
   }
 
@@ -1085,6 +1085,10 @@
     if (!camera || !me) return;
 
     const myTeam = getCharacterTeam(me);
+    const espCfg = moduleCfg("ESP");
+    const showHitbox = espCfg.hitbox !== false;
+    const showNames = espCfg.names !== false;
+    const offscreenStyle = espCfg.offscreenStyle === "arrows" ? "arrows" : "tracers";
     const camX = Number(camera?.midPoint?.x);
     const camY = Number(camera?.midPoint?.y);
     const zoom = Number(camera?.zoom ?? 1) || 1;
@@ -1102,13 +1106,13 @@
       const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
       const color = isTeammate ? "green" : "red";
 
-      if (onScreen) {
+      if (onScreen && showHitbox) {
         const boxSize = Math.max(24, 80 / zoom);
         ctx.beginPath();
         ctx.lineWidth = 3;
         ctx.strokeStyle = color;
         ctx.strokeRect(screenX - boxSize / 2, screenY - boxSize / 2, boxSize, boxSize);
-      } else {
+      } else if (!onScreen) {
         const margin = 20;
         const halfW = canvas.width / 2 - margin;
         const halfH = canvas.height / 2 - margin;
@@ -1121,14 +1125,30 @@
         const endX = canvas.width / 2 + dx * scale;
         const endY = canvas.height / 2 + dy * scale;
 
-        ctx.beginPath();
-        ctx.moveTo(canvas.width / 2, canvas.height / 2);
-        ctx.lineTo(endX, endY);
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = color;
-        ctx.stroke();
+        if (offscreenStyle === "tracers") {
+          ctx.beginPath();
+          ctx.moveTo(canvas.width / 2, canvas.height / 2);
+          ctx.lineTo(endX, endY);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = color;
+          ctx.stroke();
+        } else {
+          const headLength = 14;
+          const headAngle = Math.PI / 6;
+          const a1 = angle - headAngle;
+          const a2 = angle + headAngle;
+          ctx.beginPath();
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(endX - Math.cos(a1) * headLength, endY - Math.sin(a1) * headLength);
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(endX - Math.cos(a2) * headLength, endY - Math.sin(a2) * headLength);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = color;
+          ctx.stroke();
+        }
       }
 
+      if (!showNames) continue;
       ctx.fillStyle = "black";
       ctx.font = "20px Verdana";
       ctx.textAlign = "center";
@@ -1216,7 +1236,27 @@
         },
         {
           name: "Visual",
-          modules: ["ESP", "HUD", "Overlay"],
+          modules: [
+            {
+              name: "ESP",
+              settings: [
+                { id: "hitbox", label: "Hitbox", type: "checkbox", default: true },
+                { id: "names", label: "Names", type: "checkbox", default: true },
+                {
+                  id: "offscreenStyle",
+                  label: "Off-screen Indicator",
+                  type: "select",
+                  default: "tracers",
+                  options: [
+                    { value: "tracers", label: "Tracers" },
+                    { value: "arrows", label: "Arrows" },
+                  ],
+                },
+              ],
+            },
+            "HUD",
+            "Overlay",
+          ],
         },
         {
           name: "Quality of Life",
@@ -2306,6 +2346,42 @@
                   window.__zyroxAutoAnswer?.start(newVal);
                 }
               }
+            });
+          }
+        }
+
+        if (setting.type === "checkbox") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = Boolean(setting.default);
+          const checked = cfg[setting.id] ? "checked" : "";
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${setting.id}" ${checked} />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-checkbox");
+          if (settingInput) {
+            settingInput.addEventListener("change", (event) => {
+              cfg[setting.id] = Boolean(event.target.checked);
+            });
+          }
+        }
+
+        if (setting.type === "select") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? setting.options?.[0]?.value ?? "";
+          const options = Array.isArray(setting.options) ? setting.options : [];
+          const optionsHtml = options
+            .map((option) => {
+              const selected = String(option.value) === String(cfg[setting.id]) ? "selected" : "";
+              return `<option value="${option.value}" ${selected}>${option.label}</option>`;
+            })
+            .join("");
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <select class="set-module-setting-select" data-setting-id="${setting.id}">${optionsHtml}</select>
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-select");
+          if (settingInput) {
+            settingInput.addEventListener("change", (event) => {
+              cfg[setting.id] = String(event.target.value);
             });
           }
         }
