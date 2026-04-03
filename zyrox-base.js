@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.2.1
+// @version      1.2.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.2.1";
+    const CLIENT_VERSION = "1.2.2";
     return CLIENT_VERSION;
   }
 
@@ -1344,16 +1344,191 @@
 
   window.addEventListener("resize", resizeEspCanvas);
 
+  // ---------------------------------------------------------------------------
+  // CROSSHAIR MODULE
+  // Renders a crosshair at the mouse cursor position and optionally a line
+  // from the center of the screen to the cursor.
+  // ---------------------------------------------------------------------------
+  const crosshairState = {
+    enabled: false,
+    canvas: null,
+    ctx: null,
+    mouseX: 0,
+    mouseY: 0,
+    rafId: null,
+  };
+
+  function getCrosshairConfig() {
+    const defaults = {
+      enabled: true,
+      style: "cross",
+      color: "#ff3b3b",
+      showLine: false,
+      lineColor: "#ff3b3b",
+    };
+    const stored = window.__zyroxCrosshairConfig;
+    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+  }
+
+  function createCrosshairCanvas() {
+    if (crosshairState.canvas?.parentNode) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:10000;pointer-events:none;user-select:none;";
+    document.body.appendChild(canvas);
+    crosshairState.canvas = canvas;
+    crosshairState.ctx = canvas.getContext("2d");
+  }
+
+  function destroyCrosshairCanvas() {
+    if (crosshairState.rafId != null) { cancelAnimationFrame(crosshairState.rafId); crosshairState.rafId = null; }
+    crosshairState.canvas?.remove();
+    crosshairState.canvas = null;
+    crosshairState.ctx = null;
+  }
+
+  function resizeCrosshairCanvas() {
+    if (!crosshairState.canvas) return;
+    crosshairState.canvas.width = window.innerWidth;
+    crosshairState.canvas.height = window.innerHeight;
+  }
+
+  function renderCrosshairFrame() {
+    if (!crosshairState.enabled) return;
+    crosshairState.rafId = requestAnimationFrame(renderCrosshairFrame);
+    const ctx = crosshairState.ctx;
+    const canvas = crosshairState.canvas;
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const cfg = getCrosshairConfig();
+    if (!cfg.enabled) return;
+
+    const mx = crosshairState.mouseX;
+    const my = crosshairState.mouseY;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const col = cfg.color || "#ff3b3b";
+
+    // Draw line from center to cursor if enabled
+    if (cfg.showLine) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(mx, my);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = cfg.lineColor || "#ff3b3b";
+      ctx.globalAlpha = 0.65;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Draw crosshair at cursor
+    ctx.save();
+    ctx.strokeStyle = col;
+    ctx.fillStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.92;
+    const style = cfg.style || "cross";
+
+    if (style === "dot") {
+      ctx.beginPath();
+      ctx.arc(mx, my, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (style === "circle") {
+      ctx.beginPath();
+      ctx.arc(mx, my, 10, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(mx, my, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (style === "plus") {
+      // Thick plus sign
+      ctx.lineWidth = 3;
+      const arm = 10;
+      const gap = 3;
+      ctx.beginPath();
+      ctx.moveTo(mx - arm, my); ctx.lineTo(mx - gap, my);
+      ctx.moveTo(mx + gap, my); ctx.lineTo(mx + arm, my);
+      ctx.moveTo(mx, my - arm); ctx.lineTo(mx, my - gap);
+      ctx.moveTo(mx, my + gap); ctx.lineTo(mx, my + arm);
+      ctx.stroke();
+    } else {
+      // Default "cross" — thin with center gap
+      const arm = 9;
+      const gap = 4;
+      ctx.beginPath();
+      ctx.moveTo(mx - arm, my); ctx.lineTo(mx - gap, my);
+      ctx.moveTo(mx + gap, my); ctx.lineTo(mx + arm, my);
+      ctx.moveTo(mx, my - arm); ctx.lineTo(mx, my - gap);
+      ctx.moveTo(mx, my + gap); ctx.lineTo(mx, my + arm);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function startCrosshair() {
+    if (crosshairState.enabled) return;
+    crosshairState.enabled = true;
+    createCrosshairCanvas();
+    renderCrosshairFrame();
+  }
+
+  function stopCrosshair() {
+    if (!crosshairState.enabled) return;
+    crosshairState.enabled = false;
+    destroyCrosshairCanvas();
+  }
+
+  document.addEventListener("mousemove", (e) => {
+    crosshairState.mouseX = e.clientX;
+    crosshairState.mouseY = e.clientY;
+  }, { passive: true });
+
+  window.addEventListener("resize", resizeCrosshairCanvas);
+
   const MODULE_BEHAVIORS = {
     "ESP": {
       onEnable: startEsp,
       onDisable: stopEsp,
+    },
+    "Crosshair": {
+      onEnable: startCrosshair,
+      onDisable: stopCrosshair,
     },
   };
 
   // --- End of Core Utilities ---
 
   const MENU_LAYOUT = {
+    combat: {
+      title: "Combat",
+      groups: [
+        {
+          name: "Visuals",
+          modules: [
+            {
+              name: "Crosshair",
+              settings: [
+                { id: "enabled",     label: "Show Crosshair", type: "checkbox", default: true },
+                { id: "style",       label: "Style",          type: "select",   default: "cross",
+                  options: [
+                    { value: "cross",   label: "Cross" },
+                    { value: "dot",     label: "Dot" },
+                    { value: "circle",  label: "Circle" },
+                    { value: "plus",    label: "Plus (thick)" },
+                  ],
+                },
+                { id: "color",       label: "Crosshair Color", type: "color", default: "#ff3b3b" },
+                { id: "showLine",    label: "Show Line",        type: "checkbox", default: false },
+                { id: "lineColor",   label: "Line Color",       type: "color",   default: "#ff3b3b" },
+              ],
+            },
+          ],
+        },
+      ],
+    },
     general: {
       title: "General",
       groups: [
@@ -2171,6 +2346,10 @@
   const settingsBtn = topbar.querySelector(".zyrox-settings-btn");
   const collapseRow = topbar.querySelector(".zyrox-collapse-row");
 
+  const combatSection = document.createElement("section");
+  combatSection.className = "zyrox-section";
+  combatSection.innerHTML = `<div class="zyrox-section-label">Combat</div>`;
+
   const generalSection = document.createElement("section");
   generalSection.className = "zyrox-section";
   generalSection.innerHTML = `<div class="zyrox-section-label">General</div>`;
@@ -2522,7 +2701,7 @@
   }
 
   function getModuleLayoutConfig(moduleName) {
-    const allGroups = [...MENU_LAYOUT.general.groups, ...MENU_LAYOUT.gamemodeSpecific.groups];
+    const allGroups = [...MENU_LAYOUT.combat.groups, ...MENU_LAYOUT.general.groups, ...MENU_LAYOUT.gamemodeSpecific.groups];
     const found = allGroups
       .flatMap((group) => group.modules || [])
       .find((mod) => typeof mod === "object" && mod && mod.name === moduleName);
@@ -2826,6 +3005,79 @@
         });
       }
       refreshIndicatorModeVisibility();
+    } else if (moduleName === "Crosshair") {
+      const defaults = getCrosshairConfig();
+      Object.assign(cfg, { ...defaults, ...cfg });
+      window.__zyroxCrosshairConfig = { ...cfg };
+
+      const syncCrosshair = () => { window.__zyroxCrosshairConfig = { ...cfg }; };
+      syncCrosshair();
+
+      const makeRow = (title, html) => {
+        const row = document.createElement("div");
+        row.className = "zyrox-setting-card";
+        row.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:8px;width:100%;">
+            <label style="font-weight:600;">${title}</label>
+            ${html}
+          </div>
+        `;
+        configBody.appendChild(row);
+        return row;
+      };
+
+      const enabledRow = makeRow("Crosshair", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="xh-enabled" ${cfg.enabled !== false ? "checked" : ""} />
+            Show Crosshair
+          </label>
+          <input type="color" class="xh-color" value="${cfg.color || "#ff3b3b"}" title="Crosshair color" />
+        </div>
+      `);
+
+      const styleRow = makeRow("Style", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <select class="xh-style">
+            <option value="cross"  ${cfg.style === "cross"  ? "selected" : ""}>Cross</option>
+            <option value="dot"    ${cfg.style === "dot"    ? "selected" : ""}>Dot</option>
+            <option value="circle" ${cfg.style === "circle" ? "selected" : ""}>Circle</option>
+            <option value="plus"   ${cfg.style === "plus"   ? "selected" : ""}>Plus (thick)</option>
+          </select>
+        </div>
+      `);
+
+      const lineRow = makeRow("Line to Cursor", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="xh-show-line" ${cfg.showLine ? "checked" : ""} />
+            Show Line
+          </label>
+          <input type="color" class="xh-line-color" value="${cfg.lineColor || "#ff3b3b"}" title="Line color" />
+        </div>
+      `);
+
+      enabledRow.querySelector(".xh-enabled").addEventListener("change", (e) => {
+        cfg.enabled = e.target.checked;
+        syncCrosshair();
+      });
+      enabledRow.querySelector(".xh-color").addEventListener("input", (e) => {
+        cfg.color = e.target.value;
+        syncCrosshair();
+      });
+      styleRow.querySelector(".xh-style").addEventListener("change", (e) => {
+        cfg.style = e.target.value;
+        syncCrosshair();
+      });
+      lineRow.querySelector(".xh-show-line").addEventListener("change", (e) => {
+        cfg.showLine = e.target.checked;
+        syncCrosshair();
+      });
+      lineRow.querySelector(".xh-line-color").addEventListener("input", (e) => {
+        cfg.lineColor = e.target.value;
+        syncCrosshair();
+      });
+
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
         const settingCard = document.createElement("div");
@@ -3603,6 +3855,13 @@
   configCloseBtn.addEventListener("click", () => closeConfig());
   settingsTopCloseBtn.addEventListener("click", () => closeConfig());
 
+  const combatPanels = document.createElement("div");
+  combatPanels.className = "zyrox-panels";
+  for (const combatGroup of MENU_LAYOUT.combat.groups) {
+    combatPanels.appendChild(buildPanel(combatGroup.name, combatGroup.modules));
+  }
+  combatSection.appendChild(combatPanels);
+
   const generalPanels = document.createElement("div");
   generalPanels.className = "zyrox-panels";
   for (const generalGroup of MENU_LAYOUT.general.groups) {
@@ -3631,6 +3890,7 @@
   }
 
   shell.appendChild(topbar);
+  shell.appendChild(combatSection);
   shell.appendChild(generalSection);
   shell.appendChild(gamemodeSection);
   shell.appendChild(footer);
