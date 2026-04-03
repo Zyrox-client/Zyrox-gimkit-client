@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.1.9
+// @version      1.2.0
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.1.9";
+    const CLIENT_VERSION = "1.2.0";
     return CLIENT_VERSION;
   }
 
@@ -1507,7 +1507,8 @@
 
   const style = document.createElement("style");
   style.textContent = `
-    :root {
+    .zyrox-root,
+    .zyrox-config-backdrop {
       --zyx-border: #ff6f6f99;
       --zyx-border-soft: rgba(255, 255, 255, 0.12);
       --zyx-text: #d6d6df;
@@ -1566,6 +1567,22 @@
     }
 
     .zyrox-root * { box-sizing: border-box; font-family: inherit; }
+
+    .zyrox-config-backdrop {
+      all: initial;
+      position: fixed;
+      inset: 0;
+      z-index: 2147483648;
+      background: rgba(0, 0, 0, 0.26);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--zyx-settings-text);
+      font-family: var(--zyx-font);
+    }
+
+    .zyrox-config-backdrop * { box-sizing: border-box; font-family: inherit; }
     .zyrox-hidden { display: none !important; }
 
     .zyrox-shell {
@@ -1892,17 +1909,6 @@
       color: var(--zyx-icon-color);
     }
 
-    .zyrox-config-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 2147483648;
-      background: rgba(0, 0, 0, 0.26);
-      backdrop-filter: blur(4px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
     .zyrox-config-backdrop.hidden { display: none !important; }
 
     .zyrox-settings {
@@ -1915,7 +1921,7 @@
       background: var(--zyx-settings-body-bg);
       box-shadow: var(--zyx-shadow);
       overflow: hidden;
-      color: #fff;
+      color: var(--zyx-settings-text);
       font-family: var(--zyx-font);
     }
 
@@ -2999,11 +3005,35 @@
   }
 
   function clampToViewport(x, y, el) {
-    const maxX = Math.max(0, window.innerWidth - el.offsetWidth);
-    const maxY = Math.max(0, window.innerHeight - el.offsetHeight);
+    const rect = el.getBoundingClientRect();
+    const maxX = Math.max(0, window.innerWidth - rect.width);
+    const maxY = Math.max(0, window.innerHeight - rect.height);
     return {
       x: Math.max(0, Math.min(x, maxX)),
       y: Math.max(0, Math.min(y, maxY)),
+    };
+  }
+
+  function getShellScale() {
+    const transform = getComputedStyle(shell).transform;
+    if (!transform || transform === "none") return 1;
+    const matrix = transform.match(/^matrix\((.+)\)$/);
+    if (!matrix) return 1;
+    const values = matrix[1].split(",").map((v) => Number(v.trim()));
+    if (values.length < 4 || values.some((v) => !Number.isFinite(v))) return 1;
+    const [a, b] = values;
+    return Math.max(0.01, Math.hypot(a, b));
+  }
+
+  function clampLoosePosition(x, y, el, scale, shellRect) {
+    const rect = el.getBoundingClientRect();
+    const minX = -shellRect.left / scale;
+    const minY = -shellRect.top / scale;
+    const maxX = (window.innerWidth - shellRect.left - rect.width) / scale;
+    const maxY = (window.innerHeight - shellRect.top - rect.height) / scale;
+    return {
+      x: Math.max(minX, Math.min(x, maxX)),
+      y: Math.max(minY, Math.min(y, maxY)),
     };
   }
 
@@ -3043,14 +3073,16 @@
       root.style.left = "0px";
       root.style.top = "0px";
 
-      const clampedTopbar = clampToViewport(state.loosePositions.topbar.x, state.loosePositions.topbar.y, topbar);
+      const shellRect = shell.getBoundingClientRect();
+      const scale = getShellScale();
+      const clampedTopbar = clampLoosePosition(state.loosePositions.topbar.x, state.loosePositions.topbar.y, topbar, scale, shellRect);
       state.loosePositions.topbar = clampedTopbar;
       topbar.style.left = `${clampedTopbar.x}px`;
       topbar.style.top = `${clampedTopbar.y}px`;
 
       for (const [name, panel] of panelByName.entries()) {
         const pos = state.loosePanelPositions[name] || { x: 0, y: 0 };
-        const clamped = clampToViewport(pos.x, pos.y, panel);
+        const clamped = clampLoosePosition(pos.x, pos.y, panel, scale, shellRect);
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
@@ -3204,55 +3236,58 @@
     const radius = clampNumber(radiusInput.value, 8, 22, 14);
     const blur = clampNumber(blurInput.value, 0, 24, 10);
     const hoverShift = clampNumber(hoverShiftInput.value, 0, 8, 2);
-    const cssRoot = document.documentElement.style;
-    cssRoot.setProperty("--zyx-border", `${border}99`);
-    cssRoot.setProperty("--zyx-text", text);
-    cssRoot.setProperty("--zyx-font", font);
-    cssRoot.setProperty("--zyx-muted", mutedText);
-    cssRoot.setProperty("--zyx-accent-soft", accentSoft);
-    cssRoot.setProperty("--zyx-search-text", searchText);
-    cssRoot.setProperty("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
-    cssRoot.setProperty("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
-    cssRoot.setProperty("--zyx-module-hover-bg", toRgba(topbarColor, 0.16));
-    cssRoot.setProperty("--zyx-module-hover-border", toRgba(topbarColor, 0.4));
-    cssRoot.setProperty("--zyx-module-active-start", toRgba(headerStart, 0.35));
-    cssRoot.setProperty("--zyx-module-active-end", toRgba(headerEnd, 0.82));
-    cssRoot.setProperty("--zyx-module-active-border", toRgba(headerStart, 0.55));
-    cssRoot.setProperty("--zyx-icon-color", iconColor);
-    cssRoot.setProperty("--zyx-outline-color", `${outlineColor}cc`);
-    cssRoot.setProperty("--zyx-panel-count-text", panelCountText);
-    cssRoot.setProperty("--zyx-panel-count-border", toRgba(panelCountBorder, 0.45));
-    cssRoot.setProperty("--zyx-panel-count-bg", toRgba(panelCountBg, 0.6));
-    cssRoot.setProperty("--zyx-header-bg-start", toRgba(headerStart, 0.24));
-    cssRoot.setProperty("--zyx-header-bg-end", toRgba(headerEnd, 0.92));
-    cssRoot.setProperty("--zyx-header-text", headerText);
-    cssRoot.setProperty("--zyx-settings-header-start", toRgba(settingsHeaderStart, 0.3));
-    cssRoot.setProperty("--zyx-settings-header-end", toRgba(settingsHeaderEnd, 0.95));
-    cssRoot.setProperty("--zyx-settings-sidebar-bg", toRgba(settingsSidebar, 0.22));
-    cssRoot.setProperty("--zyx-settings-body-bg", `linear-gradient(180deg, ${toRgba(settingsBody, 0.97)}, rgba(8, 8, 10, 0.97))`);
-    cssRoot.setProperty("--zyx-settings-text", settingsText);
-    cssRoot.setProperty("--zyx-settings-subtext", settingsSubtext);
-    cssRoot.setProperty("--zyx-settings-card-border", toRgba(settingsCardBorder, 0.18));
-    cssRoot.setProperty("--zyx-settings-card-bg", toRgba(settingsCardBg, 0.05));
-    cssRoot.setProperty("--zyx-slider-color", sliderColor);
-    cssRoot.setProperty("--zyx-checkmark-color", checkmarkColor);
-    cssRoot.setProperty("--zyx-select-bg", toRgba(selectBg, 0.9));
-    cssRoot.setProperty("--zyx-select-text", selectText);
+    const themeTargets = [root.style, configBackdrop.style];
+    const setThemeVar = (name, value) => {
+      for (const target of themeTargets) target.setProperty(name, value);
+    };
+    setThemeVar("--zyx-border", `${border}99`);
+    setThemeVar("--zyx-text", text);
+    setThemeVar("--zyx-font", font);
+    setThemeVar("--zyx-muted", mutedText);
+    setThemeVar("--zyx-accent-soft", accentSoft);
+    setThemeVar("--zyx-search-text", searchText);
+    setThemeVar("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
+    setThemeVar("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
+    setThemeVar("--zyx-module-hover-bg", toRgba(topbarColor, 0.16));
+    setThemeVar("--zyx-module-hover-border", toRgba(topbarColor, 0.4));
+    setThemeVar("--zyx-module-active-start", toRgba(headerStart, 0.35));
+    setThemeVar("--zyx-module-active-end", toRgba(headerEnd, 0.82));
+    setThemeVar("--zyx-module-active-border", toRgba(headerStart, 0.55));
+    setThemeVar("--zyx-icon-color", iconColor);
+    setThemeVar("--zyx-outline-color", `${outlineColor}cc`);
+    setThemeVar("--zyx-panel-count-text", panelCountText);
+    setThemeVar("--zyx-panel-count-border", toRgba(panelCountBorder, 0.45));
+    setThemeVar("--zyx-panel-count-bg", toRgba(panelCountBg, 0.6));
+    setThemeVar("--zyx-header-bg-start", toRgba(headerStart, 0.24));
+    setThemeVar("--zyx-header-bg-end", toRgba(headerEnd, 0.92));
+    setThemeVar("--zyx-header-text", headerText);
+    setThemeVar("--zyx-settings-header-start", toRgba(settingsHeaderStart, 0.3));
+    setThemeVar("--zyx-settings-header-end", toRgba(settingsHeaderEnd, 0.95));
+    setThemeVar("--zyx-settings-sidebar-bg", toRgba(settingsSidebar, 0.22));
+    setThemeVar("--zyx-settings-body-bg", `linear-gradient(180deg, ${toRgba(settingsBody, 0.97)}, rgba(8, 8, 10, 0.97))`);
+    setThemeVar("--zyx-settings-text", settingsText);
+    setThemeVar("--zyx-settings-subtext", settingsSubtext);
+    setThemeVar("--zyx-settings-card-border", toRgba(settingsCardBorder, 0.18));
+    setThemeVar("--zyx-settings-card-bg", toRgba(settingsCardBg, 0.05));
+    setThemeVar("--zyx-slider-color", sliderColor);
+    setThemeVar("--zyx-checkmark-color", checkmarkColor);
+    setThemeVar("--zyx-select-bg", toRgba(selectBg, 0.9));
+    setThemeVar("--zyx-select-text", selectText);
     window.__zyroxEspValueTextColor = espValueTextColor;
     window.__zyroxEspConfig = { ...getEspRenderConfig(), valueTextColor: espValueTextColor, font: font };
-    cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
-    cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
-    cssRoot.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
-    cssRoot.setProperty("--zyx-hover-shift", `${hoverShift}px`);
+    setThemeVar("--zyx-radius-xl", `${radius}px`);
+    setThemeVar("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
+    setThemeVar("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
+    setThemeVar("--zyx-hover-shift", `${hoverShift}px`);
     shell.style.transform = `scale(${scale.toFixed(2)})`;
     shell.style.transformOrigin = "top left";
     shell.style.background = `linear-gradient(150deg, ${toRgba(shellBgStart, 0.22)}, ${toRgba(shellBgEnd, opacity.toFixed(2))})`;
-    cssRoot.setProperty("--zyx-shell-blur", `${blur}px`);
+    setThemeVar("--zyx-shell-blur", `${blur}px`);
     shell.style.backdropFilter = `blur(var(--zyx-shell-blur)) saturate(115%)`;
 
     // FIX: derive button accent background from outlineColor so buttons always match the theme
-    cssRoot.setProperty("--zyx-btn-bg", toRgba(outlineColor, 0.12));
-    cssRoot.setProperty("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
+    setThemeVar("--zyx-btn-bg", toRgba(outlineColor, 0.12));
+    setThemeVar("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
   }
 
   function applySearchFilter() {
@@ -3482,46 +3517,50 @@
     }
     syncCollapseButtons();
     setDisplayMode("merged");
-    const cssRoot = document.documentElement.style;
-    cssRoot.removeProperty("--zyx-border");
-    cssRoot.removeProperty("--zyx-text");
-    cssRoot.removeProperty("--zyx-muted");
-    cssRoot.removeProperty("--zyx-accent-soft");
-    cssRoot.removeProperty("--zyx-search-text");
-    cssRoot.removeProperty("--zyx-topbar-bg-start");
-    cssRoot.removeProperty("--zyx-topbar-bg-end");
-    cssRoot.removeProperty("--zyx-module-hover-bg");
-    cssRoot.removeProperty("--zyx-module-hover-border");
-    cssRoot.removeProperty("--zyx-module-active-start");
-    cssRoot.removeProperty("--zyx-module-active-end");
-    cssRoot.removeProperty("--zyx-module-active-border");
-    cssRoot.removeProperty("--zyx-icon-color");
-    cssRoot.removeProperty("--zyx-outline-color");
-    cssRoot.removeProperty("--zyx-panel-count-text");
-    cssRoot.removeProperty("--zyx-panel-count-border");
-    cssRoot.removeProperty("--zyx-panel-count-bg");
-    cssRoot.removeProperty("--zyx-header-bg-start");
-    cssRoot.removeProperty("--zyx-header-bg-end");
-    cssRoot.removeProperty("--zyx-header-text");
-    cssRoot.removeProperty("--zyx-settings-header-start");
-    cssRoot.removeProperty("--zyx-settings-header-end");
-    cssRoot.removeProperty("--zyx-settings-sidebar-bg");
-    cssRoot.removeProperty("--zyx-settings-body-bg");
-    cssRoot.removeProperty("--zyx-settings-text");
-    cssRoot.removeProperty("--zyx-settings-subtext");
-    cssRoot.removeProperty("--zyx-settings-card-border");
-    cssRoot.removeProperty("--zyx-settings-card-bg");
-    cssRoot.removeProperty("--zyx-slider-color");
-    cssRoot.removeProperty("--zyx-checkmark-color");
-    cssRoot.removeProperty("--zyx-select-bg");
-    cssRoot.removeProperty("--zyx-select-text");
-    cssRoot.removeProperty("--zyx-radius-xl");
-    cssRoot.removeProperty("--zyx-radius-lg");
-    cssRoot.removeProperty("--zyx-radius-md");
-    cssRoot.removeProperty("--zyx-hover-shift");
-    cssRoot.removeProperty("--zyx-shell-blur");
-    cssRoot.removeProperty("--zyx-btn-bg");
-    cssRoot.removeProperty("--zyx-btn-hover-bg");
+    const themeTargets = [root.style, configBackdrop.style];
+    const removeThemeVar = (name) => {
+      for (const target of themeTargets) target.removeProperty(name);
+    };
+    removeThemeVar("--zyx-border");
+    removeThemeVar("--zyx-text");
+    removeThemeVar("--zyx-font");
+    removeThemeVar("--zyx-muted");
+    removeThemeVar("--zyx-accent-soft");
+    removeThemeVar("--zyx-search-text");
+    removeThemeVar("--zyx-topbar-bg-start");
+    removeThemeVar("--zyx-topbar-bg-end");
+    removeThemeVar("--zyx-module-hover-bg");
+    removeThemeVar("--zyx-module-hover-border");
+    removeThemeVar("--zyx-module-active-start");
+    removeThemeVar("--zyx-module-active-end");
+    removeThemeVar("--zyx-module-active-border");
+    removeThemeVar("--zyx-icon-color");
+    removeThemeVar("--zyx-outline-color");
+    removeThemeVar("--zyx-panel-count-text");
+    removeThemeVar("--zyx-panel-count-border");
+    removeThemeVar("--zyx-panel-count-bg");
+    removeThemeVar("--zyx-header-bg-start");
+    removeThemeVar("--zyx-header-bg-end");
+    removeThemeVar("--zyx-header-text");
+    removeThemeVar("--zyx-settings-header-start");
+    removeThemeVar("--zyx-settings-header-end");
+    removeThemeVar("--zyx-settings-sidebar-bg");
+    removeThemeVar("--zyx-settings-body-bg");
+    removeThemeVar("--zyx-settings-text");
+    removeThemeVar("--zyx-settings-subtext");
+    removeThemeVar("--zyx-settings-card-border");
+    removeThemeVar("--zyx-settings-card-bg");
+    removeThemeVar("--zyx-slider-color");
+    removeThemeVar("--zyx-checkmark-color");
+    removeThemeVar("--zyx-select-bg");
+    removeThemeVar("--zyx-select-text");
+    removeThemeVar("--zyx-radius-xl");
+    removeThemeVar("--zyx-radius-lg");
+    removeThemeVar("--zyx-radius-md");
+    removeThemeVar("--zyx-hover-shift");
+    removeThemeVar("--zyx-shell-blur");
+    removeThemeVar("--zyx-btn-bg");
+    removeThemeVar("--zyx-btn-hover-bg");
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
@@ -3740,7 +3779,7 @@
   let dragState = null;
   let resizeState = null;
 
-  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0 };
+  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
 
   topbar.addEventListener("mousedown", (event) => {
     const interactiveTarget = event.target instanceof Element
@@ -3751,10 +3790,15 @@
     const rootBox = root.getBoundingClientRect();
     if (state.displayMode === "loose") {
       const box = topbar.getBoundingClientRect();
+      const shellRect = shell.getBoundingClientRect();
+      const scale = getShellScale();
       dragState = {
         mode: "topbar",
         offsetX: event.clientX - box.left,
         offsetY: event.clientY - box.top,
+        shellLeft: shellRect.left,
+        shellTop: shellRect.top,
+        scale,
       };
     } else {
       dragState = {
@@ -3771,9 +3815,14 @@
     header.addEventListener("mousedown", (event) => {
       if (state.displayMode !== "loose") return;
       const box = panel.getBoundingClientRect();
+      const shellRect = shell.getBoundingClientRect();
+      const scale = getShellScale();
       panelDragState.panelName = panelName;
       panelDragState.offsetX = event.clientX - box.left;
       panelDragState.offsetY = event.clientY - box.top;
+      panelDragState.shellLeft = shellRect.left;
+      panelDragState.shellTop = shellRect.top;
+      panelDragState.scale = scale;
       event.preventDefault();
       event.stopPropagation();
     });
@@ -3781,14 +3830,19 @@
 
   document.addEventListener("mousemove", (event) => {
     if (dragState?.mode === "root") {
-      const nextX = Math.max(0, event.clientX - dragState.offsetX);
-      const nextY = Math.max(0, event.clientY - dragState.offsetY);
-      root.style.left = `${nextX}px`;
-      root.style.top = `${nextY}px`;
+      const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY, root);
+      root.style.left = `${clamped.x}px`;
+      root.style.top = `${clamped.y}px`;
     }
 
     if (dragState?.mode === "topbar") {
-      const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY, topbar);
+      const scale = dragState.scale || 1;
+      const unclampedX = (event.clientX - dragState.offsetX - dragState.shellLeft) / scale;
+      const unclampedY = (event.clientY - dragState.offsetY - dragState.shellTop) / scale;
+      const clamped = clampLoosePosition(unclampedX, unclampedY, topbar, scale, {
+        left: dragState.shellLeft,
+        top: dragState.shellTop,
+      });
       state.loosePositions.topbar = clamped;
       topbar.style.left = `${clamped.x}px`;
       topbar.style.top = `${clamped.y}px`;
@@ -3797,7 +3851,13 @@
     if (panelDragState.panelName) {
       const panel = panelByName.get(panelDragState.panelName);
       if (panel) {
-        const clamped = clampToViewport(event.clientX - panelDragState.offsetX, event.clientY - panelDragState.offsetY, panel);
+        const scale = panelDragState.scale || 1;
+        const unclampedX = (event.clientX - panelDragState.offsetX - panelDragState.shellLeft) / scale;
+        const unclampedY = (event.clientY - panelDragState.offsetY - panelDragState.shellTop) / scale;
+        const clamped = clampLoosePosition(unclampedX, unclampedY, panel, scale, {
+          left: panelDragState.shellLeft,
+          top: panelDragState.shellTop,
+        });
         state.loosePanelPositions[panelDragState.panelName] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
@@ -3809,6 +3869,9 @@
     dragState = null;
     resizeState = null;
     panelDragState.panelName = null;
+    panelDragState.shellLeft = 0;
+    panelDragState.shellTop = 0;
+    panelDragState.scale = 1;
   });
 
   resizeHandle.addEventListener("mousedown", (event) => {
