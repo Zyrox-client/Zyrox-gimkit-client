@@ -1129,18 +1129,18 @@
       hitbox: true,
       hitboxSize: 80,
       hitboxWidth: 3,
-      hitboxColor: "#ff3b3b",
+      hitboxColor: "#ff4444",
       names: true,
       namesDistanceOnly: false,
       nameSize: 20,
-      nameColor: "#000000",
+      nameColor: "#ffffff",
       offscreenStyle: "tracers",
       offscreenTheme: "classic",
       alwaysTracer: false,
       tracerWidth: 3,
-      tracerColor: "#ff3b3b",
+      tracerColor: "#ff4444",
       arrowSize: 14,
-      arrowColor: "#ff3b3b",
+      arrowColor: "#ff4444",
       arrowStyle: "regular",
       valueTextColor: window.__zyroxEspValueTextColor || "#ffffff",
     };
@@ -1277,7 +1277,7 @@
 
       if (!showNames) continue;
       ctx.fillStyle = nameColor;
-      ctx.font = `${nameSize}px Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
+      ctx.font = `${nameSize}px ${espCfg.font || "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
@@ -1354,7 +1354,7 @@
             {
               name: "Auto Answer",
               settings: [
-                { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
+                { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 500 },
               ],
             },
             "Answer Streak",
@@ -2192,6 +2192,18 @@
           </div>
           <div class="zyrox-subheading">Typography</div>
           <div class="zyrox-setting-card">
+            <label>Font Family</label>
+            <select class="set-font">
+              <option value="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" selected>Inter (Default)</option>
+              <option value="JetBrains Mono, 'Courier New', monospace">JetBrains Mono</option>
+              <option value="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif">Segoe UI</option>
+              <option value="Roboto, 'Helvetica Neue', Arial, sans-serif">Roboto</option>
+              <option value="'Open Sans', 'Helvetica Neue', Arial, sans-serif">Open Sans</option>
+              <option value="'Fira Code', 'Courier New', monospace">Fira Code</option>
+              <option value="Poppins, 'Helvetica Neue', Arial, sans-serif">Poppins</option>
+            </select>
+          </div>
+          <div class="zyrox-setting-card">
             <label>Muted Text</label>
             <input type="color" class="set-muted-text" value="#9b9bab" />
           </div>
@@ -2218,7 +2230,7 @@
           </div>
           <div class="zyrox-setting-card">
             <label>Panel Count Background</label>
-            <input type="color" class="set-panel-count-bg" value="#08080a" />
+            <input type="color" class="set-panel-count-bg" value="#1a1a1e" />
           </div>
           <div class="zyrox-subheading">Panels & Modules</div>
           <div class="zyrox-setting-card">
@@ -2363,6 +2375,7 @@
   const mutedTextInput = settingsMenu.querySelector(".set-muted-text");
   const accentSoftInput = settingsMenu.querySelector(".set-accent-soft");
   const searchTextInput = settingsMenu.querySelector(".set-search-text");
+  const fontInput = settingsMenu.querySelector(".set-font");
   const headerStartInput = settingsMenu.querySelector(".set-header-start");
   const headerEndInput = settingsMenu.querySelector(".set-header-end");
   const headerTextInput = settingsMenu.querySelector(".set-header-text");
@@ -2830,6 +2843,7 @@
       mutedText: mutedTextInput.value,
       accentSoft: accentSoftInput.value,
       searchText: searchTextInput.value,
+      font: fontInput.value,
       headerStart: headerStartInput.value,
       headerEnd: headerEndInput.value,
       headerText: headerTextInput.value,
@@ -2962,6 +2976,7 @@
           selectBg: "#111e16", selectText: "#d7ffe6",
           headerStart: "#2dff75", headerEnd: "#0f2f1b", headerText: "#f0fff4",
           settingsHeaderStart: "#2dff75", settingsHeaderEnd: "#0f2f1b", espValueTextColor: "#ffffff",
+          font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
         };
       }
       if (presetName === "ice") {
@@ -2972,6 +2987,7 @@
           selectBg: "#0c1c26", selectText: "#d7edff",
           headerStart: "#6cd8ff", headerEnd: "#133042", headerText: "#f4fbff",
           settingsHeaderStart: "#6cd8ff", settingsHeaderEnd: "#133042", espValueTextColor: "#ffffff",
+          font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
         };
       }
       if (presetName === "grayscale") {
@@ -2982,16 +2998,18 @@
           selectBg: "#1b1b1b", selectText: "#efefef",
           headerStart: "#8f8f8f", headerEnd: "#1d1d1d", headerText: "#ffffff",
           settingsHeaderStart: "#8f8f8f", settingsHeaderEnd: "#1d1d1d", espValueTextColor: "#ffffff",
+          font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
         };
       }
       // Default (red)
       return {
         accent: "#ff3d3d", shellStart: "#ff3d3d", shellEnd: "#000000", topbar: "#ff4a4a", border: "#ff6f6f",
         outline: "#ff5b5b", text: "#d6d6df", muted: "#9b9bab", soft: "#ffbdbd", search: "#ffe6e6", icon: "#ffdada",
-        panelText: "#ffd9d9", panelBorder: "#ff6464", panelBg: "#08080a", slider: "#ff6b6b", checkmark: "#ff6b6b",
+        panelText: "#ffd9d9", panelBorder: "#ff6464", panelBg: "#1a1a1e", slider: "#ff6b6b", checkmark: "#ff6b6b",
         selectBg: "#17171f", selectText: "#ffe5e5",
         headerStart: "#ff4a4a", headerEnd: "#3c1212", headerText: "#ffffff",
         settingsHeaderStart: "#ff3d3d", settingsHeaderEnd: "#2d0c0c", espValueTextColor: "#ffffff",
+        font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
       };
     })();
 
@@ -3005,6 +3023,7 @@
     mutedTextInput.value = preset.muted;
     accentSoftInput.value = preset.soft;
     searchTextInput.value = preset.search;
+    fontInput.value = preset.font || "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
     iconColorInput.value = preset.icon;
     panelCountTextInput.value = preset.panelText;
     panelCountBorderInput.value = preset.panelBorder;
@@ -3056,6 +3075,7 @@
     const mutedText = mutedTextInput.value;
     const accentSoft = accentSoftInput.value;
     const searchText = searchTextInput.value;
+    const font = fontInput.value;
     const headerStart = headerStartInput.value;
     const headerEnd = headerEndInput.value;
     const headerText = headerTextInput.value;
@@ -3075,6 +3095,7 @@
     const cssRoot = document.documentElement.style;
     cssRoot.setProperty("--zyx-border", `${border}99`);
     cssRoot.setProperty("--zyx-text", text);
+    cssRoot.setProperty("--zyx-font", font);
     cssRoot.setProperty("--zyx-muted", mutedText);
     cssRoot.setProperty("--zyx-accent-soft", accentSoft);
     cssRoot.setProperty("--zyx-search-text", searchText);
@@ -3106,7 +3127,7 @@
     cssRoot.setProperty("--zyx-select-bg", toRgba(selectBg, 0.9));
     cssRoot.setProperty("--zyx-select-text", selectText);
     window.__zyroxEspValueTextColor = espValueTextColor;
-    window.__zyroxEspConfig = { ...getEspRenderConfig(), valueTextColor: espValueTextColor };
+    window.__zyroxEspConfig = { ...getEspRenderConfig(), valueTextColor: espValueTextColor, font: font };
     cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
     cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
     cssRoot.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
@@ -3309,7 +3330,7 @@
     outlineColorInput.value = "#ff5b5b";
     panelCountTextInput.value = "#ffd9d9";
     panelCountBorderInput.value = "#ff6464";
-    panelCountBgInput.value = "#08080a";
+    panelCountBgInput.value = "#1a1a1e";
     borderInput.value = "#ff6f6f";
     textInput.value = "#d6d6df";
     opacityInput.value = "45";
@@ -3320,6 +3341,7 @@
     mutedTextInput.value = "#9b9bab";
     accentSoftInput.value = "#ffbdbd";
     searchTextInput.value = "#ffe6e6";
+    fontInput.value = "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif";
     headerStartInput.value = "#ff4a4a";
     headerEndInput.value = "#3c1212";
     headerTextInput.value = "#ffffff";
@@ -3484,6 +3506,7 @@
         assign(mutedTextInput, "mutedText");
         assign(accentSoftInput, "accentSoft");
         assign(searchTextInput, "searchText");
+        assign(fontInput, "font");
         assign(headerStartInput, "headerStart");
         assign(headerEndInput, "headerEnd");
         assign(headerTextInput, "headerText");
