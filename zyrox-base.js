@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.1.4
+// @version      1.1.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.1.4";
+    const CLIENT_VERSION = "1.1.5";
     return CLIENT_VERSION;
   }
 
@@ -2047,7 +2047,7 @@
       padding: 14px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      align-items: flex-start;
       background: var(--zyx-settings-sidebar-bg);
       overflow-y: auto;
     }
@@ -2062,6 +2062,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      width: 100%;
     }
     .zyrox-theme-category {
       border: 1px solid rgba(255,255,255,.12);
@@ -2203,22 +2204,9 @@
       <div class="zyrox-settings-pane hidden" data-pane="appearance">
         <div class="zyrox-theme-layout">
           <div class="zyrox-theme-sidebar">
-            <div class="zyrox-preset-header">Presets</div>
-            <div class="zyrox-preset-row">
-              <button type="button" class="zyrox-preset-btn" data-preset="default"><span class="preset-swatch" style="background:#ff3d3d"></span>Default</button>
-              <button type="button" class="zyrox-preset-btn" data-preset="green"><span class="preset-swatch" style="background:#2dff75"></span>Green</button>
-              <button type="button" class="zyrox-preset-btn" data-preset="ice"><span class="preset-swatch" style="background:#6cd8ff"></span>Ice</button>
-              <button type="button" class="zyrox-preset-btn" data-preset="grayscale"><span class="preset-swatch" style="background:#bfbfbf"></span>Greyscale</button>
-            </div>
-            <div class="zyrox-setting-card" style="margin: 12px 0; border: 1px solid var(--zyx-settings-card-border); border-radius: 10px; padding: 8px 10px; background: var(--zyx-settings-card-bg);">
-              <label style="margin-bottom: 6px; display: block;">Display Mode</label>
-              <div class="zyrox-settings-actions-group">
-                <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
-                <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
-              </div>
-            </div>
             <div class="zyrox-theme-categories">
-              <button class="zyrox-theme-category active" data-category="layout-sizing">Layout & Sizing</button>
+              <button class="zyrox-theme-category active" data-category="quick-settings">Quick Settings</button>
+              <button class="zyrox-theme-category" data-category="layout-sizing">Layout & Sizing</button>
               <button class="zyrox-theme-category" data-category="main-window">Main Window</button>
               <button class="zyrox-theme-category" data-category="buttons-inputs">Buttons & Inputs</button>
               <button class="zyrox-theme-category" data-category="typography">Typography</button>
@@ -2228,7 +2216,21 @@
             </div>
           </div>
           <div class="zyrox-theme-content">
-            <div class="zyrox-theme-section active" data-section="layout-sizing">
+            <div class="zyrox-theme-section active" data-section="quick-settings">
+              <div class="zyrox-subheading">Presets</div>
+              <div class="zyrox-preset-row">
+                <button type="button" class="zyrox-preset-btn" data-preset="default"><span class="preset-swatch" style="background:#ff3d3d"></span>Default</button>
+                <button type="button" class="zyrox-preset-btn" data-preset="green"><span class="preset-swatch" style="background:#2dff75"></span>Green</button>
+                <button type="button" class="zyrox-preset-btn" data-preset="ice"><span class="preset-swatch" style="background:#6cd8ff"></span>Ice</button>
+                <button type="button" class="zyrox-preset-btn" data-preset="grayscale"><span class="preset-swatch" style="background:#bfbfbf"></span>Greyscale</button>
+              </div>
+              <div class="zyrox-subheading">Display Mode</div>
+              <div class="zyrox-settings-actions-group" style="margin-top: 8px;">
+                <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
+                <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
+              </div>
+            </div>
+            <div class="zyrox-theme-section" data-section="layout-sizing">
               <div class="zyrox-subheading">Layout & Sizing</div>
               <div class="zyrox-setting-card">
                 <label>UI Scale</label>
@@ -2248,6 +2250,7 @@
                 <input type="range" class="set-hover-shift" min="0" max="6" value="2" />
               </div>
             </div>
+            <div class="zyrox-theme-section" data-section="main-window">
               <div class="zyrox-subheading">Main Window</div>
               <div class="zyrox-setting-card">
                 <label>Accent Color</label>
