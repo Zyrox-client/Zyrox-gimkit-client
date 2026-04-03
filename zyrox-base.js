@@ -311,6 +311,77 @@
     el.remove();
   })();
 
+  (function injectEspPageContextBridge() {
+    function pageMain() {
+      const LOG = "[ESP][page]";
+      const shared = {
+        ready: false,
+        lastUpdate: 0,
+        localPlayerId: null,
+        localTeamId: null,
+        camera: null,
+        players: [],
+      };
+      window.__zyroxEspShared = shared;
+
+      function readCharacterPosition(character) {
+        const x = Number(character?.x ?? character?.body?.x ?? character?.container?.x);
+        const y = Number(character?.y ?? character?.body?.y ?? character?.container?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y };
+      }
+
+      function tick() {
+        const phaser = window?.stores?.phaser;
+        const scene = phaser?.scene;
+        const camera = scene?.cameras?.cameras?.[0];
+        const characters = scene?.characterManager?.characters;
+        const mainCharacter = phaser?.mainCharacter;
+        const localPlayerId = mainCharacter?.id ?? window?.socketManager?.playerId ?? null;
+        const localTeamId = mainCharacter?.teamId ?? null;
+        if (!camera || !(characters instanceof Map) || localTeamId == null) {
+          shared.ready = false;
+          shared.lastUpdate = Date.now();
+          requestAnimationFrame(tick);
+          return;
+        }
+
+        const outPlayers = [];
+        for (const [id, character] of characters) {
+          const pos = readCharacterPosition(character);
+          if (!pos) continue;
+          outPlayers.push({
+            id: String(id ?? character?.id ?? "unknown"),
+            name: String(character?.name ?? character?.displayName ?? character?.username ?? id ?? "Unknown"),
+            teamId: character?.teamId ?? null,
+            x: pos.x,
+            y: pos.y,
+          });
+        }
+
+        shared.ready = true;
+        shared.lastUpdate = Date.now();
+        shared.localPlayerId = localPlayerId;
+        shared.localTeamId = localTeamId;
+        shared.camera = {
+          midX: Number(camera?.midPoint?.x ?? 0),
+          midY: Number(camera?.midPoint?.y ?? 0),
+          zoom: Number(camera?.zoom ?? 1),
+        };
+        shared.players = outPlayers;
+        requestAnimationFrame(tick);
+      }
+
+      requestAnimationFrame(tick);
+      console.log(LOG, "Bridge ready");
+    }
+
+    const el = document.createElement("script");
+    el.textContent = `;(${pageMain.toString()})();`;
+    (document.head || document.documentElement).appendChild(el);
+    el.remove();
+  })();
+
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
     const CLIENT_VERSION = "0.9.6";
@@ -890,6 +961,219 @@
     if (!autoAnswerEnabled) return;
     answerQuestion();
   }, AUTO_ANSWER_TICK);
+
+  const ESP_LOG = "[ESP]";
+  const espState = {
+    enabled: false,
+    canvas: null,
+    ctx: null,
+    rafId: null,
+    seenPlayers: new Map(),
+    serializerFound: false,
+    usingFallbackCharacters: false,
+    waitLogTick: 0,
+  };
+
+  function espLog(message, extra) {
+    if (extra !== undefined) console.log(`${ESP_LOG} ${message}`, extra);
+    else console.log(`${ESP_LOG} ${message}`);
+  }
+
+  function createEspCanvas() {
+    if (espState.canvas) {
+      espLog("Canvas already exists; reusing existing canvas.");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.position = "fixed";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.width = "100vw";
+    canvas.style.height = "100vh";
+    canvas.style.zIndex = "9999";
+    canvas.style.pointerEvents = "none";
+    canvas.style.userSelect = "none";
+    document.body.appendChild(canvas);
+    espState.canvas = canvas;
+    espState.ctx = canvas.getContext("2d");
+    espLog("Canvas created");
+  }
+
+  function destroyEspCanvas() {
+    if (!espState.canvas) return;
+    espState.canvas.remove();
+    espState.canvas = null;
+    espState.ctx = null;
+    espLog("Canvas destroyed");
+  }
+
+  function resizeEspCanvas() {
+    if (!espState.canvas) return;
+    espState.canvas.width = window.innerWidth;
+    espState.canvas.height = window.innerHeight;
+    espLog(`Canvas resized to ${espState.canvas.width}x${espState.canvas.height}`);
+  }
+
+  function getCharacterPosition(character) {
+    const x = Number(character?.x);
+    const y = Number(character?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }
+
+  function getCharacterName(character, fallbackId) {
+    return String(character?.name ?? character?.displayName ?? character?.username ?? fallbackId ?? "Unknown");
+  }
+
+  function getEspSnapshotFromBridge() {
+    const shared = window.__zyroxEspShared;
+    if (!shared || !shared.ready) return null;
+    return shared;
+  }
+
+  function processEspPlayers(snapshot) {
+    const localPlayerId = snapshot?.localPlayerId ?? null;
+    const localTeamId = snapshot?.localTeamId ?? null;
+    if (localTeamId == null) {
+      espLog("Waiting for game data... missing local team id.");
+      return [];
+    }
+    const camX = Number(snapshot?.camera?.midX);
+    const camY = Number(snapshot?.camera?.midY);
+    const zoom = Number(snapshot?.camera?.zoom ?? 1);
+    if (!Number.isFinite(camX) || !Number.isFinite(camY) || !Number.isFinite(zoom)) {
+      espLog("Missing data for camera midpoint/zoom; rendering skip.");
+      return [];
+    }
+
+    const playersSource = Array.isArray(snapshot?.players) ? snapshot.players : [];
+    const framePlayers = [];
+    const currentIds = new Set();
+    for (const character of playersSource) {
+      const id = String(character?.id ?? character?.playerId ?? character?.name ?? "unknown");
+      if (localPlayerId != null && id === String(localPlayerId)) continue;
+      currentIds.add(id);
+      const pos = getCharacterPosition(character);
+      if (!pos) {
+        espLog(`Invalid positions for player ${id}; rendering skip.`);
+        continue;
+      }
+      const name = getCharacterName(character, id);
+      if (!espState.seenPlayers.has(id)) espLog(`Player detected: ${id}/${name}`);
+      const isTeammate = localTeamId === character?.teamId;
+      const angle = Math.atan2(pos.y - camY, pos.x - camX);
+      const distance = Math.sqrt(Math.pow(pos.x - camX, 2) + Math.pow(pos.y - camY, 2)) * zoom;
+      const arrowDist = Math.min(250, distance);
+      const arrowTipX = Math.cos(angle) * arrowDist + espState.canvas.width / 2;
+      const arrowTipY = Math.sin(angle) * arrowDist + espState.canvas.height / 2;
+      framePlayers.push({
+        id,
+        name,
+        isTeammate,
+        angle,
+        distance,
+        arrowTipX,
+        arrowTipY,
+      });
+      espState.seenPlayers.set(id, { name, x: pos.x, y: pos.y, teamId: character?.teamId ?? null });
+    }
+
+    for (const [knownId, knownData] of espState.seenPlayers.entries()) {
+      if (!currentIds.has(knownId)) {
+        espLog(`Player disappeared: ${knownId}/${knownData?.name ?? "Unknown"}`);
+        espState.seenPlayers.delete(knownId);
+      }
+    }
+    return framePlayers;
+  }
+
+  function renderEspPlayers(players) {
+    const ctx = espState.ctx;
+    const canvas = espState.canvas;
+    if (!ctx || !canvas) {
+      espLog("Missing data: no canvas/context; rendering skip.");
+      return;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const player of players) {
+      const leftAngle = player.angle + (Math.PI / 4) * 3;
+      const rightAngle = player.angle - (Math.PI / 4) * 3;
+      ctx.beginPath();
+      ctx.moveTo(player.arrowTipX, player.arrowTipY);
+      ctx.lineTo(player.arrowTipX + Math.cos(leftAngle) * 50, player.arrowTipY + Math.sin(leftAngle) * 50);
+      ctx.moveTo(player.arrowTipX, player.arrowTipY);
+      ctx.lineTo(player.arrowTipX + Math.cos(rightAngle) * 50, player.arrowTipY + Math.sin(rightAngle) * 50);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = player.isTeammate ? "green" : "red";
+      ctx.stroke();
+
+      ctx.fillStyle = player.isTeammate ? "rgba(0,255,0,0.9)" : "rgba(255,0,0,0.9)";
+      ctx.font = "20px Verdana";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${player.name} (${Math.floor(player.distance)})`, player.arrowTipX, player.arrowTipY);
+      espLog(`Player rendered: ${player.id}/${player.name}`);
+    }
+    espLog(`Frame rendered with ${players.length} players`);
+  }
+
+  function espFrame() {
+    if (!espState.enabled) return;
+    const snapshot = getEspSnapshotFromBridge();
+    if (!snapshot || !espState.ctx || !espState.canvas) {
+      espState.waitLogTick += 1;
+      if (espState.waitLogTick % 60 === 0) espLog("Waiting for game data...");
+      espState.rafId = requestAnimationFrame(espFrame);
+      return;
+    }
+    espState.waitLogTick = 0;
+    const players = processEspPlayers(snapshot);
+    renderEspPlayers(players);
+    espState.rafId = requestAnimationFrame(espFrame);
+  }
+
+  function startEsp() {
+    if (espState.enabled) {
+      espLog("ESP already enabled; skipping duplicate start.");
+      return;
+    }
+    espState.enabled = true;
+    espLog("ESP initialized");
+    createEspCanvas();
+    resizeEspCanvas();
+    espLog(window.__zyroxEspShared ? "Serializer found / not found state delegated to page bridge" : "Serializer not found");
+    if (espState.rafId != null) {
+      cancelAnimationFrame(espState.rafId);
+      espState.rafId = null;
+    }
+    espState.rafId = requestAnimationFrame(espFrame);
+  }
+
+  function stopEsp() {
+    if (!espState.enabled) {
+      espLog("ESP already disabled; skipping duplicate stop.");
+      return;
+    }
+    espState.enabled = false;
+    if (espState.rafId != null) {
+      cancelAnimationFrame(espState.rafId);
+      espState.rafId = null;
+    }
+    espState.seenPlayers.clear();
+    destroyEspCanvas();
+    espLog("ESP stopped and cleaned up");
+  }
+
+  window.addEventListener("resize", resizeEspCanvas);
+
+  const MODULE_BEHAVIORS = {
+    "ESP": {
+      onEnable: startEsp,
+      onDisable: stopEsp,
+    },
+  };
 
   // --- End of Core Utilities ---
 
@@ -2382,9 +2666,16 @@
       state.moduleItems.set(moduleName, item);
       state.moduleEntries.push({ name: moduleName, item, panel });
 
+      const behavior = MODULE_BEHAVIORS[moduleName];
       const moduleInstance = new Module(moduleName, {
-        onEnable: () => console.log(`${moduleName} enabled`),
-        onDisable: () => console.log(`${moduleName} disabled`),
+        onEnable: () => {
+          console.log(`${moduleName} enabled`);
+          if (behavior?.onEnable) behavior.onEnable();
+        },
+        onDisable: () => {
+          console.log(`${moduleName} disabled`);
+          if (behavior?.onDisable) behavior.onDisable();
+        },
       });
       state.modules.set(moduleName, moduleInstance);
 
