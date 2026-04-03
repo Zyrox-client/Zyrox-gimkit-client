@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.9.8
+// @version      0.9.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -309,9 +309,80 @@
     el.remove();
   })();
 
+  (function injectEspPageContextBridge() {
+    function pageMain() {
+      const LOG = "[ESP][page]";
+      const shared = {
+        ready: false,
+        lastUpdate: 0,
+        localPlayerId: null,
+        localTeamId: null,
+        camera: null,
+        players: [],
+      };
+      window.__zyroxEspShared = shared;
+
+      function readCharacterPosition(character) {
+        const x = Number(character?.x ?? character?.body?.x ?? character?.container?.x);
+        const y = Number(character?.y ?? character?.body?.y ?? character?.container?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y };
+      }
+
+      function tick() {
+        const phaser = window?.stores?.phaser;
+        const scene = phaser?.scene;
+        const camera = scene?.cameras?.cameras?.[0];
+        const characters = scene?.characterManager?.characters;
+        const mainCharacter = phaser?.mainCharacter;
+        const localPlayerId = mainCharacter?.id ?? window?.socketManager?.playerId ?? null;
+        const localTeamId = mainCharacter?.teamId ?? null;
+        if (!camera || !(characters instanceof Map) || localTeamId == null) {
+          shared.ready = false;
+          shared.lastUpdate = Date.now();
+          requestAnimationFrame(tick);
+          return;
+        }
+
+        const outPlayers = [];
+        for (const [id, character] of characters) {
+          const pos = readCharacterPosition(character);
+          if (!pos) continue;
+          outPlayers.push({
+            id: String(id ?? character?.id ?? "unknown"),
+            name: String(character?.name ?? character?.displayName ?? character?.username ?? id ?? "Unknown"),
+            teamId: character?.teamId ?? null,
+            x: pos.x,
+            y: pos.y,
+          });
+        }
+
+        shared.ready = true;
+        shared.lastUpdate = Date.now();
+        shared.localPlayerId = localPlayerId;
+        shared.localTeamId = localTeamId;
+        shared.camera = {
+          midX: Number(camera?.midPoint?.x ?? 0),
+          midY: Number(camera?.midPoint?.y ?? 0),
+          zoom: Number(camera?.zoom ?? 1),
+        };
+        shared.players = outPlayers;
+        requestAnimationFrame(tick);
+      }
+
+      requestAnimationFrame(tick);
+      console.log(LOG, "Bridge ready");
+    }
+
+    const el = document.createElement("script");
+    el.textContent = `;(${pageMain.toString()})();`;
+    (document.head || document.documentElement).appendChild(el);
+    el.remove();
+  })();
+
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.9.8";
+    const CLIENT_VERSION = "0.9.9";
     return CLIENT_VERSION;
   }
 
@@ -943,38 +1014,9 @@
     espLog(`Canvas resized to ${espState.canvas.width}x${espState.canvas.height}`);
   }
 
-  function getCharacterMapFromGameState() {
-    const serializerCharacters = window?.serializer?.state?.characters?.$items;
-    if (serializerCharacters instanceof Map) {
-      if (!espState.serializerFound) {
-        espState.serializerFound = true;
-        espLog("Serializer found");
-      }
-      espState.usingFallbackCharacters = false;
-      return serializerCharacters;
-    }
-    if (espState.serializerFound) {
-      espState.serializerFound = false;
-      espLog("Serializer not found");
-    }
-    const charManagerCharacters = window?.stores?.phaser?.scene?.characterManager?.characters;
-    if (charManagerCharacters instanceof Map) {
-      if (!espState.usingFallbackCharacters) {
-        espState.usingFallbackCharacters = true;
-        espLog("Using fallback characterManager player data source");
-      }
-      return charManagerCharacters;
-    }
-    if (espState.usingFallbackCharacters) {
-      espState.usingFallbackCharacters = false;
-      espLog("Fallback characterManager player data source unavailable");
-    }
-    return null;
-  }
-
   function getCharacterPosition(character) {
-    const x = Number(character?.x ?? character?.body?.x ?? character?.container?.x);
-    const y = Number(character?.y ?? character?.body?.y ?? character?.container?.y);
+    const x = Number(character?.x);
+    const y = Number(character?.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     return { x, y };
   }
@@ -983,27 +1025,33 @@
     return String(character?.name ?? character?.displayName ?? character?.username ?? fallbackId ?? "Unknown");
   }
 
-  function processEspPlayers(camera, characters) {
-    const mainCharacter = window?.stores?.phaser?.mainCharacter ?? null;
-    const localPlayerId = mainCharacter?.id ?? null;
-    const localTeamId = mainCharacter?.teamId ?? null;
+  function getEspSnapshotFromBridge() {
+    const shared = window.__zyroxEspShared;
+    if (!shared || !shared.ready) return null;
+    return shared;
+  }
+
+  function processEspPlayers(snapshot) {
+    const localPlayerId = snapshot?.localPlayerId ?? null;
+    const localTeamId = snapshot?.localTeamId ?? null;
     if (localTeamId == null) {
       espLog("Waiting for game data... missing local team id.");
       return [];
     }
-    const camX = Number(camera?.midPoint?.x);
-    const camY = Number(camera?.midPoint?.y);
-    const zoom = Number(camera?.zoom ?? 1);
+    const camX = Number(snapshot?.camera?.midX);
+    const camY = Number(snapshot?.camera?.midY);
+    const zoom = Number(snapshot?.camera?.zoom ?? 1);
     if (!Number.isFinite(camX) || !Number.isFinite(camY) || !Number.isFinite(zoom)) {
       espLog("Missing data for camera midpoint/zoom; rendering skip.");
       return [];
     }
 
+    const playersSource = Array.isArray(snapshot?.players) ? snapshot.players : [];
     const framePlayers = [];
     const currentIds = new Set();
-    for (const [rawId, character] of characters) {
-      const id = String(rawId ?? character?.id ?? character?.playerId ?? character?.name ?? "unknown");
-      if (localPlayerId != null && (rawId === localPlayerId || character?.id === localPlayerId)) continue;
+    for (const character of playersSource) {
+      const id = String(character?.id ?? character?.playerId ?? character?.name ?? "unknown");
+      if (localPlayerId != null && id === String(localPlayerId)) continue;
       currentIds.add(id);
       const pos = getCharacterPosition(character);
       if (!pos) {
@@ -1071,16 +1119,15 @@
 
   function espFrame() {
     if (!espState.enabled) return;
-    const camera = window?.stores?.phaser?.scene?.cameras?.cameras?.[0];
-    const characters = getCharacterMapFromGameState();
-    if (!camera || !characters || !espState.ctx || !espState.canvas) {
+    const snapshot = getEspSnapshotFromBridge();
+    if (!snapshot || !espState.ctx || !espState.canvas) {
       espState.waitLogTick += 1;
-      if (espState.waitLogTick % 30 === 0) espLog("Waiting for game data...");
+      if (espState.waitLogTick % 60 === 0) espLog("Waiting for game data...");
       espState.rafId = requestAnimationFrame(espFrame);
       return;
     }
     espState.waitLogTick = 0;
-    const players = processEspPlayers(camera, characters);
+    const players = processEspPlayers(snapshot);
     renderEspPlayers(players);
     espState.rafId = requestAnimationFrame(espFrame);
   }
@@ -1094,8 +1141,7 @@
     espLog("ESP initialized");
     createEspCanvas();
     resizeEspCanvas();
-    const serializerCharacters = window?.serializer?.state?.characters?.$items;
-    espLog(serializerCharacters instanceof Map ? "Serializer found" : "Serializer not found");
+    espLog(window.__zyroxEspShared ? "Serializer found / not found state delegated to page bridge" : "Serializer not found");
     if (espState.rafId != null) {
       cancelAnimationFrame(espState.rafId);
       espState.rafId = null;
