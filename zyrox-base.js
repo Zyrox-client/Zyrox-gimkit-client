@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.1.5
+// @version      1.1.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.1.5";
+    const CLIENT_VERSION = "1.1.6";
     return CLIENT_VERSION;
   }
 
@@ -1895,6 +1895,16 @@
       box-shadow: var(--zyx-shadow);
       overflow: hidden;
       color: #fff;
+      font-family: var(--zyx-font);
+    }
+
+    .zyrox-config {
+      font-family: var(--zyx-font);
+    }
+
+    .esp-value-text {
+      font-family: var(--zyx-font);
+      font-size: 0.85em;
     }
 
     .zyrox-settings.hidden { display: none !important; }
@@ -2183,7 +2193,7 @@
     <div class="zyrox-settings-layout">
       <div class="zyrox-settings-sidebar">
         <button class="zyrox-settings-tab active" type="button" data-tab="controls">Controls</button>
-        <button class="zyrox-settings-tab" type="button" data-tab="appearance">Appearance</button>
+        <button class="zyrox-settings-tab" type="button" data-tab="theme">Theme</button>
         <button class="zyrox-settings-tab" type="button" data-tab="about">About</button>
       </div>
       <div class="zyrox-settings-pane" data-pane="controls">
@@ -2201,57 +2211,39 @@
           </div>
         </div>
       </div>
-      <div class="zyrox-settings-pane hidden" data-pane="appearance">
-        <div class="zyrox-theme-layout">
-          <div class="zyrox-theme-sidebar">
-            <div class="zyrox-theme-categories">
-              <button class="zyrox-theme-category active" data-category="quick-settings">Quick Settings</button>
-              <button class="zyrox-theme-category" data-category="layout-sizing">Layout & Sizing</button>
-              <button class="zyrox-theme-category" data-category="main-window">Main Window</button>
-              <button class="zyrox-theme-category" data-category="buttons-inputs">Buttons & Inputs</button>
-              <button class="zyrox-theme-category" data-category="typography">Typography</button>
-              <button class="zyrox-theme-category" data-category="icons-badges">Icons & Badges</button>
-              <button class="zyrox-theme-category" data-category="panels-modules">Panels & Modules</button>
-              <button class="zyrox-theme-category" data-category="settings-menu">Settings Menu</button>
-            </div>
+      <div class="zyrox-settings-pane hidden" data-pane="theme">
+        <div class="zyrox-settings-body">
+          <div class="zyrox-subheading">Presets</div>
+          <div class="zyrox-preset-row" style="margin-bottom: 14px;">
+            <button type="button" class="zyrox-preset-btn" data-preset="default"><span class="preset-swatch" style="background:#ff3d3d"></span>Default</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="green"><span class="preset-swatch" style="background:#2dff75"></span>Green</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="ice"><span class="preset-swatch" style="background:#6cd8ff"></span>Ice</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="grayscale"><span class="preset-swatch" style="background:#bfbfbf"></span>Greyscale</button>
           </div>
-          <div class="zyrox-theme-content">
-            <div class="zyrox-theme-section active" data-section="quick-settings">
-              <div class="zyrox-subheading">Presets</div>
-              <div class="zyrox-preset-row">
-                <button type="button" class="zyrox-preset-btn" data-preset="default"><span class="preset-swatch" style="background:#ff3d3d"></span>Default</button>
-                <button type="button" class="zyrox-preset-btn" data-preset="green"><span class="preset-swatch" style="background:#2dff75"></span>Green</button>
-                <button type="button" class="zyrox-preset-btn" data-preset="ice"><span class="preset-swatch" style="background:#6cd8ff"></span>Ice</button>
-                <button type="button" class="zyrox-preset-btn" data-preset="grayscale"><span class="preset-swatch" style="background:#bfbfbf"></span>Greyscale</button>
-              </div>
-              <div class="zyrox-subheading">Display Mode</div>
-              <div class="zyrox-settings-actions-group" style="margin-top: 8px;">
-                <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
-                <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
-              </div>
-            </div>
-            <div class="zyrox-theme-section" data-section="layout-sizing">
-              <div class="zyrox-subheading">Layout & Sizing</div>
-              <div class="zyrox-setting-card">
-                <label>UI Scale</label>
-                <input type="range" class="set-scale" min="80" max="130" value="100" />
-              </div>
-              <div class="zyrox-setting-card">
-                <label>Corner Radius</label>
-                <input type="range" class="set-radius" min="6" max="20" value="14" />
-              </div>
-              <div class="zyrox-setting-card">
-                <label>Panel Blur</label>
-                <input type="range" class="set-blur" min="0" max="16" value="10" />
-              </div>
-              <div class="zyrox-subheading">Motion</div>
-              <div class="zyrox-setting-card">
-                <label>Module Hover Shift</label>
-                <input type="range" class="set-hover-shift" min="0" max="6" value="2" />
-              </div>
-            </div>
-            <div class="zyrox-theme-section" data-section="main-window">
-              <div class="zyrox-subheading">Main Window</div>
+          <div class="zyrox-subheading">Display Mode</div>
+          <div class="zyrox-settings-actions-group" style="margin-bottom: 14px; margin-top: 8px;">
+            <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
+            <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
+          </div>
+          <div class="zyrox-subheading">Layout & Sizing</div>
+          <div class="zyrox-setting-card">
+            <label>UI Scale</label>
+            <input type="range" class="set-scale" min="80" max="130" value="100" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Corner Radius</label>
+            <input type="range" class="set-radius" min="6" max="20" value="14" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Panel Blur</label>
+            <input type="range" class="set-blur" min="0" max="16" value="10" />
+          </div>
+          <div class="zyrox-subheading">Motion</div>
+          <div class="zyrox-setting-card">
+            <label>Module Hover Shift</label>
+            <input type="range" class="set-hover-shift" min="0" max="6" value="2" />
+          </div>
+          <div class="zyrox-subheading">Main Window</div>
               <div class="zyrox-setting-card">
                 <label>Accent Color</label>
                 <input type="color" class="set-accent" value="#ff3d3d" />
@@ -2279,9 +2271,7 @@
                 <label>Background Opacity</label>
                 <input type="range" class="set-opacity" min="20" max="100" value="45" />
               </div>
-            </div>
-            <div class="zyrox-theme-section" data-section="buttons-inputs">
-              <div class="zyrox-subheading">Buttons & Inputs</div>
+          <div class="zyrox-subheading">Buttons & Inputs</div>
               <div class="zyrox-setting-card">
                 <label>Outline Color</label>
                 <input type="color" class="set-outline-color" value="#ff5b5b" />
@@ -2302,9 +2292,7 @@
                 <label>Dropdown Text</label>
                 <input type="color" class="set-select-text" value="#ffe5e5" />
               </div>
-            </div>
-            <div class="zyrox-theme-section" data-section="typography">
-              <div class="zyrox-subheading">Typography</div>
+          <div class="zyrox-subheading">Typography</div>
               <div class="zyrox-setting-card">
                 <label>Font Family</label>
                 <select class="set-font">
@@ -2329,9 +2317,7 @@
                 <label>Search Text</label>
                 <input type="color" class="set-search-text" value="#ffe6e6" />
               </div>
-            </div>
-            <div class="zyrox-theme-section" data-section="icons-badges">
-              <div class="zyrox-subheading">Icons & Badges</div>
+          <div class="zyrox-subheading">Icons & Badges</div>
               <div class="zyrox-setting-card">
                 <label>Icon Color</label>
                 <input type="color" class="set-icon-color" value="#ffdada" />
@@ -2348,9 +2334,7 @@
                 <label>Panel Count Background</label>
                 <input type="color" class="set-panel-count-bg" value="#1a1a1e" />
               </div>
-            </div>
-            <div class="zyrox-theme-section" data-section="panels-modules">
-              <div class="zyrox-subheading">Panels & Modules</div>
+          <div class="zyrox-subheading">Panels & Modules</div>
               <div class="zyrox-setting-card">
                 <label>Module Bar Gradient</label>
                 <span class="zyrox-gradient-pair">
@@ -2363,8 +2347,7 @@
                 <input type="color" class="set-header-text" value="#ffffff" />
               </div>
             </div>
-            <div class="zyrox-theme-section" data-section="settings-menu">
-              <div class="zyrox-subheading">Settings Menu</div>
+          <div class="zyrox-subheading">Settings Menu</div>
               <div class="zyrox-setting-card">
                 <label>Settings Header Gradient</label>
                 <span class="zyrox-gradient-pair">
@@ -2400,8 +2383,6 @@
                 <label>ESP Value Text Color</label>
                 <input type="color" class="set-esp-value-text-color" value="#ffffff" />
               </div>
-            </div>
-          </div>
         </div>
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="about">
