@@ -1,17 +1,23 @@
 # zyrox gimkit client
 
-A hacked client for `gimkit.com/join`.
-
-## Files
-- `example.js`: Reference/example userscript from another project.
-- `zyrox-base.js`: Zyrox menu framework with multi-category General panels, Gamemode-Specific panels, search, and per-module config popups.
+A hack client for [gimkit](https://www.gimkit.com/).
 
 ## Usage
 1. Install a userscript manager (Tampermonkey/Violentmonkey).
-2. Create a new userscript and paste `zyrox-base.js`.
-3. Open `https://www.gimkit.com/join`.
-4. Press `\` to show/hide the menu (or change/reset Menu Key in Settings).
-5. The search bar in the top bar auto-focuses when the menu opens and filters utilities live.
-6. Right-click a utility to open its centered config menu (with blurred background), set a keybind, or reset it with the square button.
-7. Use the top-bar ⚙ settings button to customize categorized options in a sidebar (controls, theme, and appearance), including module bar text/colors with custom two-point gradients (start + end in one row) and subcategories like Main Window and Modules.
-8. Drag the bottom-right corner to resize the menu.
+2. Create a new userscript and paste `zyrox-base.js`. (or download it from a link once added)
+3. Open [gimkit.com/join](https://www.gimkit.com/join).
+
+
+## Files
+- `example.js`: Reference/example userscript from a different hacked client.
+- `zyrox-base.js`: The main userscript file.
+
+
+## Roadmap/todo
+- Fix new issues from adding crosshair
+- Improve default settings
+- Add reset button for all setting
+- Improve ESP & Crosshair module
+- Add more module functionality's; triggerbot, aimbot,
+
+   
