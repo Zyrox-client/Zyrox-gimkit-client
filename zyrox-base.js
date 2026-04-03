@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.0.4
+// @version      1.0.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.0.4";
+    const CLIENT_VERSION = "1.0.5";
     return CLIENT_VERSION;
   }
 
@@ -1073,15 +1073,24 @@
   }
 
   function getEspRenderConfig() {
+    const defaults = {
+      hitbox: true,
+      hitboxSize: 80,
+      hitboxColor: "#ff3b3b",
+      names: true,
+      nameSize: 20,
+      nameColor: "#000000",
+      offscreenStyle: "tracers",
+      tracerWidth: 3,
+      tracerColor: "#ff3b3b",
+      arrowSize: 14,
+      arrowColor: "#ff3b3b",
+    };
     if (typeof moduleCfg === "function") {
       const cfg = moduleCfg("ESP");
-      if (cfg && typeof cfg === "object") return cfg;
+      if (cfg && typeof cfg === "object") return { ...defaults, ...cfg };
     }
-    return {
-      hitbox: true,
-      names: true,
-      offscreenStyle: "tracers",
-    };
+    return defaults;
   }
 
   function renderEspPlayers(stores) {
@@ -1116,13 +1125,20 @@
       const screenY = (pos.y - camY) * zoom + canvas.height / 2;
       const onScreen = screenX >= 0 && screenX <= canvas.width && screenY >= 0 && screenY <= canvas.height;
       const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
-      const color = isTeammate ? "green" : "red";
+      const hitboxColor = espCfg.hitboxColor || (isTeammate ? "green" : "red");
+      const tracerColor = espCfg.tracerColor || (isTeammate ? "green" : "red");
+      const arrowColor = espCfg.arrowColor || (isTeammate ? "green" : "red");
+      const nameColor = espCfg.nameColor || "#000000";
+      const hitboxSize = Math.max(12, Number(espCfg.hitboxSize) || 80);
+      const nameSize = Math.max(8, Number(espCfg.nameSize) || 20);
+      const tracerWidth = Math.max(1, Number(espCfg.tracerWidth) || 3);
+      const arrowSize = Math.max(6, Number(espCfg.arrowSize) || 14);
 
       if (onScreen && showHitbox) {
-        const boxSize = Math.max(24, 80 / zoom);
+        const boxSize = Math.max(24, hitboxSize / zoom);
         ctx.beginPath();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = color;
+        ctx.lineWidth = tracerWidth;
+        ctx.strokeStyle = hitboxColor;
         ctx.strokeRect(screenX - boxSize / 2, screenY - boxSize / 2, boxSize, boxSize);
       } else if (!onScreen) {
         const margin = 20;
@@ -1141,11 +1157,11 @@
           ctx.beginPath();
           ctx.moveTo(canvas.width / 2, canvas.height / 2);
           ctx.lineTo(endX, endY);
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = color;
+          ctx.lineWidth = tracerWidth;
+          ctx.strokeStyle = tracerColor;
           ctx.stroke();
         } else {
-          const headLength = 14;
+          const headLength = arrowSize;
           const headAngle = Math.PI / 6;
           const a1 = angle - headAngle;
           const a2 = angle + headAngle;
@@ -1154,15 +1170,15 @@
           ctx.lineTo(endX - Math.cos(a1) * headLength, endY - Math.sin(a1) * headLength);
           ctx.moveTo(endX, endY);
           ctx.lineTo(endX - Math.cos(a2) * headLength, endY - Math.sin(a2) * headLength);
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = color;
+          ctx.lineWidth = tracerWidth;
+          ctx.strokeStyle = arrowColor;
           ctx.stroke();
         }
       }
 
       if (!showNames) continue;
-      ctx.fillStyle = "black";
-      ctx.font = "20px Verdana";
+      ctx.fillStyle = nameColor;
+      ctx.font = `${nameSize}px Verdana`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
@@ -1253,7 +1269,11 @@
               name: "ESP",
               settings: [
                 { id: "hitbox", label: "Hitbox", type: "checkbox", default: true },
+                { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 180, step: 2, default: 80, unit: "px" },
+                { id: "hitboxColor", label: "Hitbox Color", type: "color", default: "#ff3b3b" },
                 { id: "names", label: "Names", type: "checkbox", default: true },
+                { id: "nameSize", label: "Name Size", type: "slider", min: 10, max: 32, step: 1, default: 20, unit: "px" },
+                { id: "nameColor", label: "Name Color", type: "color", default: "#000000" },
                 {
                   id: "offscreenStyle",
                   label: "Off-screen Indicator",
@@ -1264,6 +1284,10 @@
                     { value: "arrows", label: "Arrows" },
                   ],
                 },
+                { id: "tracerWidth", label: "Tracer Width", type: "slider", min: 1, max: 8, step: 1, default: 3, unit: "px" },
+                { id: "tracerColor", label: "Tracer Color", type: "color", default: "#ff3b3b" },
+                { id: "arrowSize", label: "Arrow Size", type: "slider", min: 8, max: 30, step: 1, default: 14, unit: "px" },
+                { id: "arrowColor", label: "Arrow Color", type: "color", default: "#ff3b3b" },
               ],
             },
             "HUD",
@@ -2338,10 +2362,11 @@
         if (setting.type === "slider") {
           if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? setting.min ?? 0;
           const initialVal = cfg[setting.id];
+          const valueUnit = setting.unit ?? "ms";
           settingCard.innerHTML = `
             <label style="display:flex;justify-content:space-between;align-items:center;">
               <span>${setting.label}</span>
-              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${initialVal}ms</span>
+              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${initialVal}${valueUnit}</span>
             </label>
             <input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${initialVal}" />
           `;
@@ -2351,7 +2376,7 @@
             settingInput.addEventListener("input", (event) => {
               const newVal = Number(event.target.value);
               cfg[setting.id] = newVal;
-              if (valueLabel) valueLabel.textContent = newVal + "ms";
+              if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
               if (moduleName === "Auto Answer" && setting.id === "speed") {
                 // Live-update the interval speed only while Auto Answer is enabled
                 if (state.enabledModules.has("Auto Answer")) {
@@ -2394,6 +2419,20 @@
           if (settingInput) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = String(event.target.value);
+            });
+          }
+        }
+
+        if (setting.type === "color") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? "#ffffff";
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="color" class="set-module-setting-color" data-setting-id="${setting.id}" value="${cfg[setting.id]}" />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-color");
+          if (settingInput) {
+            settingInput.addEventListener("input", (event) => {
+              cfg[setting.id] = String(event.target.value || "#ffffff");
             });
           }
         }
