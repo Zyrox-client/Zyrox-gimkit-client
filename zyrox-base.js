@@ -1629,11 +1629,251 @@
       moduleInstance.disable();
       item.classList.remove("active");
       if (moduleName === "Auto Answer") stopAutoAnswer();
+      if (moduleName === "ESP") stopESP();
     } else {
       moduleInstance.enable();
       item.classList.add("active");
       if (moduleName === "Auto Answer") startAutoAnswer();
+      if (moduleName === "ESP") startESP();
     }
+  }
+
+  const zyroxEspState = globalThis.__ZYROX_ESP_STATE__ || {
+    intervalId: null,
+    canvas: null,
+    ctx: null,
+    lastSerializer: null,
+    lastSerializerSource: null,
+    highlightTeammates: true,
+    highlightEnemies: true,
+    lastPlayerId: null,
+    knownCharacterIds: new Set(),
+    lastDebugAt: 0,
+    debugEveryMs: 1500,
+  };
+  globalThis.__ZYROX_ESP_STATE__ = zyroxEspState;
+
+  function espLog(message, payload) {
+    if (payload !== undefined) console.log(`[Zyrox][ESP] ${message}`, payload);
+    else console.log(`[Zyrox][ESP] ${message}`);
+  }
+
+  function ensureEspCanvas() {
+    if (zyroxEspState.canvas && document.body.contains(zyroxEspState.canvas)) return zyroxEspState.canvas;
+    const canvas = document.createElement("canvas");
+    canvas.style.position = "fixed";
+    canvas.style.left = "0";
+    canvas.style.top = "0";
+    canvas.style.width = "100vw";
+    canvas.style.height = "100vh";
+    canvas.style.pointerEvents = "none";
+    canvas.style.zIndex = "2147483646";
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    document.body.appendChild(canvas);
+    zyroxEspState.canvas = canvas;
+    zyroxEspState.ctx = canvas.getContext("2d");
+    espLog("Canvas created and mounted.");
+    return canvas;
+  }
+
+  function resizeEspCanvas() {
+    const canvas = zyroxEspState.canvas;
+    if (!canvas) return;
+    if (canvas.width === window.innerWidth && canvas.height === window.innerHeight) return;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    espLog("Canvas resized.", { width: canvas.width, height: canvas.height });
+  }
+
+  function tryGetSerializerCandidate(candidate) {
+    if (!candidate || typeof candidate !== "object") return null;
+    const mapLike = candidate?.state?.characters?.$items;
+    if (!mapLike) return null;
+    if (typeof mapLike.get === "function" && typeof mapLike[Symbol.iterator] === "function") return candidate;
+    return null;
+  }
+
+  function findSerializer() {
+    const directCandidates = [
+      ["window.serializer", globalThis.serializer],
+      ["window.socketManager.serializer", globalThis.socketManager?.serializer],
+      ["window.stores.network.serializer", globalThis.stores?.network?.serializer],
+      ["window.stores.colyseus.serializer", globalThis.stores?.colyseus?.serializer],
+    ];
+
+    for (const [label, candidate] of directCandidates) {
+      const valid = tryGetSerializerCandidate(candidate);
+      if (valid) {
+        if (zyroxEspState.lastSerializer !== valid) {
+          zyroxEspState.lastSerializer = valid;
+          zyroxEspState.lastSerializerSource = label;
+          espLog(`Serializer discovered from ${label}.`);
+        }
+        return valid;
+      }
+    }
+
+    for (const key of Object.getOwnPropertyNames(globalThis)) {
+      let candidate;
+      try {
+        candidate = globalThis[key];
+      } catch (_) {
+        continue;
+      }
+      const valid = tryGetSerializerCandidate(candidate);
+      if (valid) {
+        zyroxEspState.lastSerializer = valid;
+        zyroxEspState.lastSerializerSource = `window.${key}`;
+        espLog(`Serializer discovered by global scan at window.${key}.`);
+        return valid;
+      }
+    }
+
+    return null;
+  }
+
+  function drawEspFrame() {
+    resizeEspCanvas();
+    const canvas = zyroxEspState.canvas;
+    const ctx = zyroxEspState.ctx;
+    if (!canvas || !ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!zyroxEspState.highlightTeammates && !zyroxEspState.highlightEnemies) {
+      espLog("Both teammate and enemy highlighting are disabled, skipping frame.");
+      return;
+    }
+
+    const serializer = findSerializer();
+    if (!serializer) {
+      if (Date.now() - zyroxEspState.lastDebugAt > zyroxEspState.debugEveryMs) {
+        espLog("No serializer found yet, waiting...");
+        zyroxEspState.lastDebugAt = Date.now();
+      }
+      return;
+    }
+
+    const camera = globalThis.stores?.phaser?.scene?.cameras?.cameras?.[0];
+    if (!camera) {
+      if (Date.now() - zyroxEspState.lastDebugAt > zyroxEspState.debugEveryMs) {
+        espLog("Camera not available yet, waiting...");
+        zyroxEspState.lastDebugAt = Date.now();
+      }
+      return;
+    }
+
+    const playerId = globalThis.socketManager?.playerId;
+    if (!playerId) {
+      if (Date.now() - zyroxEspState.lastDebugAt > zyroxEspState.debugEveryMs) {
+        espLog("Player id not available yet, waiting...");
+        zyroxEspState.lastDebugAt = Date.now();
+      }
+      return;
+    }
+
+    if (zyroxEspState.lastPlayerId !== playerId) {
+      zyroxEspState.lastPlayerId = playerId;
+      espLog("Active player id updated.", { playerId });
+    }
+
+    const characters = serializer?.state?.characters?.$items;
+    if (!characters || typeof characters.get !== "function") {
+      espLog("Serializer characters map missing or invalid.");
+      return;
+    }
+
+    const localPlayer = characters.get(playerId);
+    if (!localPlayer) {
+      espLog("Local player character not found in serializer map.", { playerId });
+      return;
+    }
+
+    const camX = camera.midPoint?.x ?? 0;
+    const camY = camera.midPoint?.y ?? 0;
+    const seenThisFrame = new Set();
+    let drawn = 0;
+
+    for (const [id, character] of characters) {
+      if (!character || id === playerId) continue;
+      seenThisFrame.add(id);
+
+      const isTeammate = localPlayer.teamId === character.teamId;
+      if (isTeammate && !zyroxEspState.highlightTeammates) continue;
+      if (!isTeammate && !zyroxEspState.highlightEnemies) continue;
+
+      const angle = Math.atan2((character.y ?? 0) - camY, (character.x ?? 0) - camX);
+      const distance = Math.sqrt(Math.pow((character.x ?? 0) - camX, 2) + Math.pow((character.y ?? 0) - camY, 2)) * (camera.zoom ?? 1);
+      const arrowDist = Math.min(250, distance);
+      const arrowTipX = Math.cos(angle) * arrowDist + canvas.width / 2;
+      const arrowTipY = Math.sin(angle) * arrowDist + canvas.height / 2;
+      const leftAngle = angle + Math.PI / 4 * 3;
+      const rightAngle = angle - Math.PI / 4 * 3;
+
+      ctx.beginPath();
+      ctx.moveTo(arrowTipX, arrowTipY);
+      ctx.lineTo(arrowTipX + Math.cos(leftAngle) * 50, arrowTipY + Math.sin(leftAngle) * 50);
+      ctx.moveTo(arrowTipX, arrowTipY);
+      ctx.lineTo(arrowTipX + Math.cos(rightAngle) * 50, arrowTipY + Math.sin(rightAngle) * 50);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = isTeammate ? "green" : "red";
+      ctx.stroke();
+
+      ctx.fillStyle = "black";
+      ctx.font = "20px Verdana";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${character.name ?? "Unknown"} (${Math.floor(distance)})`, arrowTipX, arrowTipY);
+      drawn += 1;
+
+      espLog("Player found / rendered.", {
+        id,
+        name: character.name ?? "Unknown",
+        teammate: isTeammate,
+        distance: Math.floor(distance),
+        x: character.x ?? null,
+        y: character.y ?? null,
+      });
+    }
+
+    for (const existingId of zyroxEspState.knownCharacterIds) {
+      if (!seenThisFrame.has(existingId)) {
+        espLog("Player disappeared from render set.", { id: existingId });
+      }
+    }
+    zyroxEspState.knownCharacterIds = seenThisFrame;
+
+    espLog("ESP frame rendered.", {
+      totalCharacters: typeof characters.size === "number" ? characters.size : "unknown",
+      drawn,
+      serializerSource: zyroxEspState.lastSerializerSource,
+    });
+  }
+
+  function stopESP() {
+    if (zyroxEspState.intervalId) {
+      clearInterval(zyroxEspState.intervalId);
+      zyroxEspState.intervalId = null;
+      espLog("Render loop stopped.");
+    }
+    if (zyroxEspState.ctx && zyroxEspState.canvas) {
+      zyroxEspState.ctx.clearRect(0, 0, zyroxEspState.canvas.width, zyroxEspState.canvas.height);
+    }
+    if (zyroxEspState.canvas && zyroxEspState.canvas.parentNode) {
+      zyroxEspState.canvas.parentNode.removeChild(zyroxEspState.canvas);
+      espLog("Canvas removed.");
+    }
+    zyroxEspState.canvas = null;
+    zyroxEspState.ctx = null;
+    zyroxEspState.knownCharacterIds = new Set();
+  }
+
+  function startESP() {
+    stopESP();
+    ensureEspCanvas();
+    drawEspFrame();
+    zyroxEspState.intervalId = setInterval(drawEspFrame, 1000 / 10);
+    espLog("Render loop started at 10 FPS.");
   }
 
   var zyroxAutoAnswerState = globalThis.__ZYROX_AUTOANSWER_STATE__ || {
