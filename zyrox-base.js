@@ -15,7 +15,7 @@
 (() => {
   "use strict";
 
-  // Some userscript runtimes execute bundled code that expects a global `Module`
+  // Some userscript runtimes execute bundled code that expects a global `Module`.
   // with `enable/disable` methods. Provide a minimal compatible fallback.
   if (typeof globalThis.Module === "undefined") {
     globalThis.Module = class Module {
