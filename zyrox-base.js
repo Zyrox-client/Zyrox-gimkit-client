@@ -295,11 +295,9 @@
         start(speed = 1000) {
           if (_intervalId) clearInterval(_intervalId);
           _intervalId = setInterval(answerQuestion, speed);
-          console.log(LOG, "Started auto-answer", speed + "ms");
         },
         stop() {
           if (_intervalId) { clearInterval(_intervalId); _intervalId = null; }
-          console.log(LOG, "Stopped auto-answer");
         },
       };
       console.log(LOG, "Page context ready, waiting for module toggle.");
@@ -2237,8 +2235,10 @@
               cfg[setting.id] = newVal;
               if (valueLabel) valueLabel.textContent = newVal + "ms";
               if (moduleName === "Auto Answer" && setting.id === "speed") {
-                // Live-update the interval speed without requiring a toggle
-                window.__zyroxAutoAnswer?.start(newVal);
+                // Live-update the interval speed only while Auto Answer is enabled
+                if (state.enabledModules.has("Auto Answer")) {
+                  window.__zyroxAutoAnswer?.start(newVal);
+                }
               }
             });
           }
