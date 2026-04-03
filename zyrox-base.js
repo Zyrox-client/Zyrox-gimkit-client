@@ -1007,8 +1007,8 @@
   }
 
   function getCharacterPosition(character) {
-    const x = Number(character?.x);
-    const y = Number(character?.y);
+    const x = Number(character?.x ?? character?.position?.x ?? character?.body?.x);
+    const y = Number(character?.y ?? character?.position?.y ?? character?.body?.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     return { x, y };
   }
@@ -1026,9 +1026,10 @@
   function processEspPlayers(snapshot) {
     const localPlayerId = snapshot?.localPlayerId ?? null;
     const localTeamId = snapshot?.localTeamId ?? null;
-    if (localPlayerId == null || localTeamId == null) return [];
+    if (localPlayerId == null) return [];
     const camX = Number(snapshot?.camera?.midX);
     const camY = Number(snapshot?.camera?.midY);
+    const zoom = Number(snapshot?.camera?.zoom ?? 1);
     if (!Number.isFinite(camX) || !Number.isFinite(camY)) return [];
 
     const playersSource = Array.isArray(snapshot?.players) ? snapshot.players : [];
@@ -1041,22 +1042,24 @@
       const pos = getCharacterPosition(character);
       if (!pos) continue;
       const name = getCharacterName(character, id);
-      const isTeammate = localTeamId === character?.teamId;
+      const isTeammate = localTeamId != null && localTeamId === character?.teamId;
       const dx = pos.x - camX;
       const dy = pos.y - camY;
       const angle = Math.atan2(dy, dx);
-      const distance = Math.hypot(dx, dy);
-      const arrowDist = Math.min(250, distance);
-      const arrowTipX = Math.cos(angle) * arrowDist + espState.canvas.width / 2;
-      const arrowTipY = Math.sin(angle) * arrowDist + espState.canvas.height / 2;
+      const distance = Math.hypot(dx, dy) * (Number.isFinite(zoom) && zoom > 0 ? zoom : 1);
+      const screenX = dx * zoom + espState.canvas.width / 2;
+      const screenY = dy * zoom + espState.canvas.height / 2;
+      const onScreen = screenX >= 0 && screenX <= espState.canvas.width && screenY >= 0 && screenY <= espState.canvas.height;
       framePlayers.push({
         id,
         name,
         isTeammate,
         angle,
         distance,
-        arrowTipX,
-        arrowTipY,
+        screenX,
+        screenY,
+        onScreen,
+        zoom,
       });
       espState.seenPlayers.set(id, { name, x: pos.x, y: pos.y, teamId: character?.teamId ?? null });
     }
@@ -1078,22 +1081,45 @@
     }
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     for (const player of players) {
-      const leftAngle = player.angle + (Math.PI / 4) * 3;
-      const rightAngle = player.angle - (Math.PI / 4) * 3;
-      ctx.beginPath();
-      ctx.moveTo(player.arrowTipX, player.arrowTipY);
-      ctx.lineTo(player.arrowTipX + Math.cos(leftAngle) * 10, player.arrowTipY + Math.sin(leftAngle) * 10);
-      ctx.moveTo(player.arrowTipX, player.arrowTipY);
-      ctx.lineTo(player.arrowTipX + Math.cos(rightAngle) * 10, player.arrowTipY + Math.sin(rightAngle) * 10);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = player.isTeammate ? "lime" : "red";
-      ctx.stroke();
+      const color = player.isTeammate ? "green" : "red";
+      if (player.onScreen) {
+        const boxSize = Math.max(24, 80 / (player.zoom || 1));
+        ctx.beginPath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = color;
+        ctx.strokeRect(player.screenX - boxSize / 2, player.screenY - boxSize / 2, boxSize, boxSize);
+      } else {
+        const margin = 20;
+        const halfW = canvas.width / 2 - margin;
+        const halfH = canvas.height / 2 - margin;
+        const dx = Math.cos(player.angle);
+        const dy = Math.sin(player.angle);
+        const scale = Math.min(
+          Math.abs(halfW / (dx || 0.0001)),
+          Math.abs(halfH / (dy || 0.0001))
+        );
+        const endX = canvas.width / 2 + dx * scale;
+        const endY = canvas.height / 2 + dy * scale;
 
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.font = "12px Arial";
-      ctx.textAlign = "left";
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2, canvas.height / 2);
+        ctx.lineTo(endX, endY);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = "black";
+      ctx.font = "20px Verdana";
+      ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${player.name} (${Math.round(player.distance)})`, player.arrowTipX + 12, player.arrowTipY + 4);
+      const labelX = player.onScreen
+        ? player.screenX
+        : Math.cos(player.angle) * Math.min(250, player.distance) + canvas.width / 2;
+      const labelY = player.onScreen
+        ? (player.screenY - 18)
+        : Math.sin(player.angle) * Math.min(250, player.distance) + canvas.height / 2;
+      ctx.fillText(`${player.name} (${Math.floor(player.distance)})`, labelX, labelY);
     }
   }
 
