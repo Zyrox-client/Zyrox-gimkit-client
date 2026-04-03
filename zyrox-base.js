@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.0.3
+// @version      1.0.4
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.0.3";
+    const CLIENT_VERSION = "1.0.4";
     return CLIENT_VERSION;
   }
 
@@ -1072,6 +1072,18 @@
     return character?.name ?? character?.displayName ?? character?.state?.name ?? "Player";
   }
 
+  function getEspRenderConfig() {
+    if (typeof moduleCfg === "function") {
+      const cfg = moduleCfg("ESP");
+      if (cfg && typeof cfg === "object") return cfg;
+    }
+    return {
+      hitbox: true,
+      names: true,
+      offscreenStyle: "tracers",
+    };
+  }
+
   function renderEspPlayers(stores) {
     const ctx = espState.ctx;
     const canvas = espState.canvas;
@@ -1085,7 +1097,7 @@
     if (!camera || !me) return;
 
     const myTeam = getCharacterTeam(me);
-    const espCfg = moduleCfg("ESP");
+    const espCfg = getEspRenderConfig();
     const showHitbox = espCfg.hitbox !== false;
     const showNames = espCfg.names !== false;
     const offscreenStyle = espCfg.offscreenStyle === "arrows" ? "arrows" : "tracers";
