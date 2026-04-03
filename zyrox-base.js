@@ -960,6 +960,8 @@
     canvas: null,
     ctx: null,
     intervalId: null,
+    stores: null,
+    storesPromise: null,
     seenPlayers: new Map(),
     waitLogTick: 0,
   };
@@ -1006,109 +1008,276 @@
     espLog(`Canvas resized to ${espState.canvas.width}x${espState.canvas.height}`);
   }
 
+  async function resolveEspStores() {
+    if (espState.stores) return espState.stores;
+    if (espState.storesPromise) return espState.storesPromise;
+    espState.storesPromise = (async () => {
+      if (!document.body) {
+        await new Promise((resolve) => window.addEventListener("DOMContentLoaded", resolve, { once: true }));
+      }
+      const moduleScript = document.querySelector("script[src][type='module']");
+      if (!moduleScript?.src) throw new Error("Failed to find game module script");
+
+      const response = await fetch(moduleScript.src);
+      const text = await response.text();
+      const gameScriptUrl = text.match(/FixSpinePlugin-[^.]+\.js/)?.[0];
+      if (!gameScriptUrl) throw new Error("Failed to find game script URL");
+
+      const gameScript = await import(`/assets/${gameScriptUrl}`);
+      const stores = Object.values(gameScript).find((value) => value && value.assignment);
+      if (!stores) throw new Error("Failed to resolve stores export");
+
+      window.stores = stores;
+      espState.stores = stores;
+      espLog("Resolved stores via module import");
+      return stores;
+    })();
+    try {
+      return await espState.storesPromise;
+    } finally {
+      espState.storesPromise = null;
+    }
+  }
+
   function getCharacterPosition(character) {
-    const x = Number(character?.x);
-    const y = Number(character?.y);
+    const x = Number(character?.x ?? character?.position?.x ?? character?.body?.x);
+    const y = Number(character?.y ?? character?.position?.y ?? character?.body?.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     return { x, y };
   }
 
-  function getCharacterName(character, fallbackId) {
-    return String(character?.name ?? character?.displayName ?? character?.username ?? fallbackId ?? "Unknown");
+  function getCharacters(stores) {
+    const manager = stores?.phaser?.scene?.characterManager;
+    const map = manager?.characters;
+    if (!map) return [];
+    if (typeof map.values === "function") return Array.from(map.values());
+    if (Array.isArray(map)) return map;
+    return Object.values(map);
   }
 
-  function getEspSnapshotFromBridge() {
-    const shared = window.__zyroxEspShared;
-    if (!shared || !shared.ready) return null;
-    return shared;
-  }
-
-  function processEspPlayers(snapshot) {
-    const localPlayerId = snapshot?.localPlayerId ?? null;
-    const localTeamId = snapshot?.localTeamId ?? null;
-    if (localPlayerId == null || localTeamId == null) return [];
-    const camX = Number(snapshot?.camera?.midX);
-    const camY = Number(snapshot?.camera?.midY);
-    if (!Number.isFinite(camX) || !Number.isFinite(camY)) return [];
-
-    const playersSource = Array.isArray(snapshot?.players) ? snapshot.players : [];
-    const framePlayers = [];
-    const currentIds = new Set();
-    for (const character of playersSource) {
-      const id = String(character?.id ?? character?.playerId ?? character?.name ?? "unknown");
-      if (id === String(localPlayerId)) continue;
-      currentIds.add(id);
-      const pos = getCharacterPosition(character);
-      if (!pos) continue;
-      const name = getCharacterName(character, id);
-      const isTeammate = localTeamId === character?.teamId;
-      const dx = pos.x - camX;
-      const dy = pos.y - camY;
-      const angle = Math.atan2(dy, dx);
-      const distance = Math.hypot(dx, dy);
-      const arrowDist = Math.min(250, distance);
-      const arrowTipX = Math.cos(angle) * arrowDist + espState.canvas.width / 2;
-      const arrowTipY = Math.sin(angle) * arrowDist + espState.canvas.height / 2;
-      framePlayers.push({
-        id,
-        name,
-        isTeammate,
-        angle,
-        distance,
-        arrowTipX,
-        arrowTipY,
-      });
-      espState.seenPlayers.set(id, { name, x: pos.x, y: pos.y, teamId: character?.teamId ?? null });
+  function getCharacterEntries(stores) {
+    const manager = stores?.phaser?.scene?.characterManager;
+    const map = manager?.characters;
+    if (!map) return [];
+    if (typeof map.entries === "function") {
+      return Array.from(map.entries(), ([id, character]) => ({ id, character }));
     }
-
-    for (const [knownId] of espState.seenPlayers.entries()) {
-      if (!currentIds.has(knownId)) {
-        espState.seenPlayers.delete(knownId);
-      }
+    if (Array.isArray(map)) {
+      return map.map((character, index) => ({ id: character?.id ?? character?.characterId ?? index, character }));
     }
-    return framePlayers;
+    return Object.entries(map).map(([id, character]) => ({ id, character }));
   }
 
-  function renderEspPlayers(players) {
+  function getMainCharacter(stores) {
+    const mainId = stores?.phaser?.mainCharacter?.id;
+    const manager = stores?.phaser?.scene?.characterManager;
+    const map = manager?.characters;
+    if (!map) return null;
+    if (mainId != null && typeof map.get === "function") return map.get(mainId) || null;
+    return getCharacters(stores).find((character) => character?.id === mainId || character?.characterId === mainId) || null;
+  }
+
+  function getCharacterTeam(character) {
+    return character?.teamId ?? character?.team?.id ?? character?.state?.teamId ?? character?.data?.teamId ?? null;
+  }
+
+  function getCharacterId(character) {
+    return character?.id ?? character?.characterId ?? character?.playerId ?? character?.entityId ?? null;
+  }
+
+  function getSerializerCharacterById(id) {
+    if (id == null) return null;
+    const map = window?.serializer?.state?.characters?.$items;
+    if (!map || typeof map.get !== "function") return null;
+    return map.get(id) || map.get(String(id)) || null;
+  }
+
+  function getCharacterName(character, fallbackId = null) {
+    const id = getCharacterId(character) ?? fallbackId;
+    const serializerCharacter = getSerializerCharacterById(id);
+    return character?.name
+      ?? character?.displayName
+      ?? character?.state?.name
+      ?? character?.username
+      ?? character?.playerName
+      ?? character?.profile?.name
+      ?? serializerCharacter?.name
+      ?? serializerCharacter?.displayName
+      ?? serializerCharacter?.username
+      ?? String(fallbackId ?? "Player");
+  }
+
+  function getEspRenderConfig() {
+    const defaults = {
+      hitbox: true,
+      hitboxSize: 80,
+      hitboxWidth: 3,
+      hitboxColor: "#ff3b3b",
+      names: true,
+      nameSize: 20,
+      nameColor: "#000000",
+      offscreenStyle: "tracers",
+      offscreenTheme: "classic",
+      alwaysTracer: false,
+      tracerWidth: 3,
+      tracerColor: "#ff3b3b",
+      arrowSize: 14,
+      arrowColor: "#ff3b3b",
+      arrowStyle: "regular",
+      valueTextColor: window.__zyroxEspValueTextColor || "#ffffff",
+    };
+    const liveCfg = window.__zyroxEspConfig;
+    if (liveCfg && typeof liveCfg === "object") return { ...defaults, ...liveCfg };
+    return defaults;
+  }
+
+  function renderEspPlayers(stores) {
     const ctx = espState.ctx;
     const canvas = espState.canvas;
     if (!ctx || !canvas) {
       espLog("Missing data: no canvas/context; rendering skip.");
       return;
     }
+    const camera = stores?.phaser?.scene?.cameras?.cameras?.[0];
+    const me = getMainCharacter(stores);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const player of players) {
-      const leftAngle = player.angle + (Math.PI / 4) * 3;
-      const rightAngle = player.angle - (Math.PI / 4) * 3;
-      ctx.beginPath();
-      ctx.moveTo(player.arrowTipX, player.arrowTipY);
-      ctx.lineTo(player.arrowTipX + Math.cos(leftAngle) * 10, player.arrowTipY + Math.sin(leftAngle) * 10);
-      ctx.moveTo(player.arrowTipX, player.arrowTipY);
-      ctx.lineTo(player.arrowTipX + Math.cos(rightAngle) * 10, player.arrowTipY + Math.sin(rightAngle) * 10);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = player.isTeammate ? "lime" : "red";
-      ctx.stroke();
+    if (!camera || !me) return;
 
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.font = "12px Arial";
-      ctx.textAlign = "left";
+    const myTeam = getCharacterTeam(me);
+    const espCfg = getEspRenderConfig();
+    const showHitbox = espCfg.hitbox !== false;
+    const showNames = espCfg.names !== false;
+    const offscreenStyle = espCfg.offscreenStyle === "arrows" || espCfg.offscreenStyle === "none"
+      ? espCfg.offscreenStyle
+      : "tracers";
+    const offscreenTheme = espCfg.offscreenTheme || "classic";
+    const alwaysTracer = espCfg.alwaysTracer === true;
+    const arrowStyle = ["regular", "dot", "modern"].includes(espCfg.arrowStyle) ? espCfg.arrowStyle : "regular";
+    const camX = Number(camera?.midPoint?.x);
+    const camY = Number(camera?.midPoint?.y);
+    const zoom = Number(camera?.zoom ?? 1) || 1;
+    if (!Number.isFinite(camX) || !Number.isFinite(camY)) return;
+
+    for (const entry of getCharacterEntries(stores)) {
+      const character = entry.character;
+      const characterId = entry.id ?? getCharacterId(character);
+      if (!character || character === me) continue;
+      const pos = getCharacterPosition(character);
+      if (!pos) continue;
+      const angle = Math.atan2(pos.y - camY, pos.x - camX);
+      const distance = Math.hypot(pos.x - camX, pos.y - camY) * zoom;
+      const screenX = (pos.x - camX) * zoom + canvas.width / 2;
+      const screenY = (pos.y - camY) * zoom + canvas.height / 2;
+      const onScreen = screenX >= 0 && screenX <= canvas.width && screenY >= 0 && screenY <= canvas.height;
+      const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
+      const hitboxColor = espCfg.hitboxColor || (isTeammate ? "green" : "red");
+      const tracerColor = espCfg.tracerColor || (isTeammate ? "green" : "red");
+      const arrowColor = espCfg.arrowColor || (isTeammate ? "green" : "red");
+      const nameColor = espCfg.nameColor || "#000000";
+      const hitboxSize = Math.max(12, Number(espCfg.hitboxSize) || 80);
+      const hitboxWidth = Math.max(1, Number(espCfg.hitboxWidth) || 3);
+      const nameSize = Math.max(8, Number(espCfg.nameSize) || 20);
+      const tracerWidth = Math.max(1, Number(espCfg.tracerWidth) || 3);
+      const arrowSize = Math.max(6, Number(espCfg.arrowSize) || 14);
+
+      if (onScreen && showHitbox) {
+        const boxSize = Math.max(24, hitboxSize / zoom);
+        ctx.beginPath();
+        ctx.lineWidth = hitboxWidth;
+        ctx.strokeStyle = hitboxColor;
+        ctx.strokeRect(screenX - boxSize / 2, screenY - boxSize / 2, boxSize, boxSize);
+      }
+
+      const shouldDrawOffscreen = !onScreen && offscreenStyle !== "none";
+      const shouldDrawTracer = offscreenStyle === "tracers" && (alwaysTracer || !onScreen);
+
+      if (shouldDrawOffscreen || shouldDrawTracer) {
+        const margin = 20;
+        const halfW = canvas.width / 2 - margin;
+        const halfH = canvas.height / 2 - margin;
+        const dx = Math.cos(angle);
+        const dy = Math.sin(angle);
+        const scale = Math.min(
+          Math.abs(halfW / (dx || 0.0001)),
+          Math.abs(halfH / (dy || 0.0001))
+        );
+        const endX = canvas.width / 2 + dx * scale;
+        const endY = canvas.height / 2 + dy * scale;
+
+        if (shouldDrawTracer) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(canvas.width / 2, canvas.height / 2);
+          ctx.lineTo(onScreen ? screenX : endX, onScreen ? screenY : endY);
+          ctx.lineWidth = tracerWidth;
+          ctx.strokeStyle = tracerColor;
+          if (offscreenTheme === "dashed") ctx.setLineDash([8, 6]);
+          if (offscreenTheme === "neon") {
+            ctx.shadowColor = tracerColor;
+            ctx.shadowBlur = 10;
+          }
+          ctx.stroke();
+          ctx.restore();
+        } else if (offscreenStyle === "arrows" && !onScreen) {
+          const headLength = arrowSize;
+          const headAngle = Math.PI / 6;
+          const a1 = angle - headAngle;
+          const a2 = angle + headAngle;
+          ctx.save();
+          ctx.beginPath();
+          if (arrowStyle === "dot") {
+            ctx.arc(endX, endY, Math.max(4, headLength * 0.35), 0, Math.PI * 2);
+            ctx.fillStyle = arrowColor;
+          } else if (arrowStyle === "modern") {
+            const tailX = endX - Math.cos(angle) * headLength;
+            const tailY = endY - Math.sin(angle) * headLength;
+            const perpX = Math.cos(angle + Math.PI / 2) * (headLength * 0.45);
+            const perpY = Math.sin(angle + Math.PI / 2) * (headLength * 0.45);
+            ctx.moveTo(endX, endY);
+            ctx.quadraticCurveTo(tailX + perpX, tailY + perpY, tailX, tailY);
+            ctx.quadraticCurveTo(tailX - perpX, tailY - perpY, endX, endY);
+            ctx.fillStyle = arrowColor;
+          } else {
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - Math.cos(a1) * headLength, endY - Math.sin(a1) * headLength);
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - Math.cos(a2) * headLength, endY - Math.sin(a2) * headLength);
+          }
+          ctx.lineWidth = tracerWidth;
+          ctx.strokeStyle = arrowColor;
+          if (offscreenTheme === "dashed") ctx.setLineDash([6, 5]);
+          if (offscreenTheme === "neon") {
+            ctx.shadowColor = arrowColor;
+            ctx.shadowBlur = 10;
+          }
+          if (arrowStyle === "dot" || arrowStyle === "modern") ctx.fill();
+          else ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      if (!showNames) continue;
+      ctx.fillStyle = nameColor;
+      ctx.font = `${nameSize}px Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif`;
+      ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${player.name} (${Math.round(player.distance)})`, player.arrowTipX + 12, player.arrowTipY + 4);
+      const labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
+      const labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, distance) + canvas.height / 2;
+      ctx.fillText(`${getCharacterName(character, characterId)} (${Math.floor(distance)})`, labelX, labelY);
     }
   }
 
   function renderEspTick() {
     if (!espState.enabled || !espState.ctx || !espState.canvas) return;
-    const snapshot = getEspSnapshotFromBridge();
-    if (!snapshot) {
+    const stores = espState.stores ?? window.stores;
+    if (!stores) {
       espState.waitLogTick += 1;
-      if (espState.waitLogTick % 60 === 0) espLog("Waiting for serializer.state/playerId/stores.phaser...");
+      if (espState.waitLogTick % 60 === 0) espLog("Waiting for stores...");
       espState.ctx.clearRect(0, 0, espState.canvas.width, espState.canvas.height);
       return;
     }
     espState.waitLogTick = 0;
-    const players = processEspPlayers(snapshot);
-    renderEspPlayers(players);
+    renderEspPlayers(stores);
   }
 
   function startEsp() {
@@ -1120,6 +1289,7 @@
     espLog("ESP initialized");
     createEspCanvas();
     resizeEspCanvas();
+    resolveEspStores().catch((error) => espLog("Failed to resolve stores", error));
     if (espState.intervalId != null) {
       clearInterval(espState.intervalId);
       espState.intervalId = null;
@@ -1174,7 +1344,60 @@
         },
         {
           name: "Visual",
-          modules: ["ESP", "HUD", "Overlay"],
+          modules: [
+            {
+              name: "ESP",
+              settings: [
+                { id: "hitbox", label: "Hitbox", type: "checkbox", default: true },
+                { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 180, step: 2, default: 80, unit: "px" },
+                { id: "hitboxWidth", label: "Hitbox Width", type: "slider", min: 1, max: 10, step: 1, default: 3, unit: "px" },
+                { id: "hitboxColor", label: "Hitbox Color", type: "color", default: "#ff3b3b" },
+                { id: "names", label: "Names", type: "checkbox", default: true },
+                { id: "nameSize", label: "Name Size", type: "slider", min: 10, max: 32, step: 1, default: 20, unit: "px" },
+                { id: "nameColor", label: "Name Color", type: "color", default: "#000000" },
+                {
+                  id: "offscreenStyle",
+                  label: "Off-screen Indicator",
+                  type: "select",
+                  default: "tracers",
+                  options: [
+                    { value: "none", label: "None" },
+                    { value: "tracers", label: "Tracers" },
+                    { value: "arrows", label: "Arrows" },
+                  ],
+                },
+                {
+                  id: "offscreenTheme",
+                  label: "Off-screen Theme",
+                  type: "select",
+                  default: "classic",
+                  options: [
+                    { value: "classic", label: "Classic" },
+                    { value: "dashed", label: "Dashed" },
+                    { value: "neon", label: "Neon" },
+                  ],
+                },
+                { id: "alwaysTracer", label: "Always Show Tracer", type: "checkbox", default: false },
+                { id: "tracerWidth", label: "Tracer Width", type: "slider", min: 1, max: 8, step: 1, default: 3, unit: "px" },
+                { id: "tracerColor", label: "Tracer Color", type: "color", default: "#ff3b3b" },
+                { id: "arrowSize", label: "Arrow Size", type: "slider", min: 8, max: 30, step: 1, default: 14, unit: "px" },
+                { id: "arrowColor", label: "Arrow Color", type: "color", default: "#ff3b3b" },
+                {
+                  id: "arrowStyle",
+                  label: "Arrow Style",
+                  type: "select",
+                  default: "regular",
+                  options: [
+                    { value: "regular", label: "Regular Arrow" },
+                    { value: "dot", label: "Dot" },
+                    { value: "modern", label: "Modern Arrow" },
+                  ],
+                },
+              ],
+            },
+            "HUD",
+            "Overlay",
+          ],
         },
         {
           name: "Quality of Life",
@@ -1265,6 +1488,8 @@
       --zyx-settings-subtext: #c2c2ce;
       --zyx-settings-card-bg: rgba(255,255,255,.03);
       --zyx-settings-card-border: rgba(255,255,255,.08);
+      --zyx-select-bg: rgba(20, 20, 28, 0.9);
+      --zyx-select-text: #ffe5e5;
       --zyx-accent-soft: #ffbdbd;
       --zyx-search-text: #ffe6e6;
       --zyx-checkmark-color: #ff6b6b;
@@ -1697,9 +1922,39 @@
     }
     .zyrox-setting-card input[type='range'] { width: 190px; accent-color: var(--zyx-slider-color); }
     .zyrox-setting-card input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--zyx-checkmark-color); }
+    .zyrox-setting-card select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      border: 1px solid var(--zyx-settings-card-border);
+      background: var(--zyx-select-bg);
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--zyx-select-text) 50%),
+        linear-gradient(135deg, var(--zyx-select-text) 50%, transparent 50%);
+      background-position:
+        calc(100% - 14px) calc(50% - 2px),
+        calc(100% - 8px) calc(50% - 2px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+      color: var(--zyx-select-text);
+      border-radius: 8px;
+      padding: 6px 26px 6px 8px;
+      font-size: 12px;
+      min-height: 30px;
+    }
+    .zyrox-setting-card select:focus {
+      outline: 1px solid var(--zyx-outline-color);
+      outline-offset: 1px;
+    }
+    .zyrox-setting-card select option {
+      background: var(--zyx-select-bg);
+      color: var(--zyx-select-text);
+    }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
+    .zyrox-preset-header { font-size: 11px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
     .zyrox-preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
     .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+    .zyrox-preset-btn .preset-swatch { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; border:1px solid rgba(255,255,255,.3); vertical-align:-1px; }
     .zyrox-preset-btn:hover { background: var(--zyx-btn-hover-bg); }
     .zyrox-subheading {
       grid-column: 1 / -1;
@@ -1857,11 +2112,12 @@
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="theme">
         <div class="zyrox-settings-body">
+          <div class="zyrox-preset-header">Presets</div>
           <div class="zyrox-preset-row">
-            <button type="button" class="zyrox-preset-btn" data-preset="default">Default</button>
-            <button type="button" class="zyrox-preset-btn" data-preset="green">Green</button>
-            <button type="button" class="zyrox-preset-btn" data-preset="ice">Ice</button>
-            <button type="button" class="zyrox-preset-btn" data-preset="grayscale">Greyscale</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="default"><span class="preset-swatch" style="background:#ff3d3d"></span>Default</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="green"><span class="preset-swatch" style="background:#2dff75"></span>Green</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="ice"><span class="preset-swatch" style="background:#6cd8ff"></span>Ice</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="grayscale"><span class="preset-swatch" style="background:#bfbfbf"></span>Greyscale</button>
           </div>
           <div class="zyrox-subheading">Main Window</div>
           <div class="zyrox-setting-card">
@@ -1903,6 +2159,14 @@
           <div class="zyrox-setting-card">
             <label>Checkmark Color</label>
             <input type="color" class="set-checkmark-color" value="#ff6b6b" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Dropdown Background</label>
+            <input type="color" class="set-select-bg" value="#17171f" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>Dropdown Text</label>
+            <input type="color" class="set-select-text" value="#ffe5e5" />
           </div>
           <div class="zyrox-subheading">Typography</div>
           <div class="zyrox-setting-card">
@@ -1977,6 +2241,10 @@
           <div class="zyrox-setting-card">
             <label>Settings Card Background</label>
             <input type="color" class="set-settings-card-bg" value="#ffffff" />
+          </div>
+          <div class="zyrox-setting-card">
+            <label>ESP Value Text Color</label>
+            <input type="color" class="set-esp-value-text-color" value="#ffffff" />
           </div>
         </div>
       </div>
@@ -2068,6 +2336,8 @@
   const opacityInput = settingsMenu.querySelector(".set-opacity");
   const sliderColorInput = settingsMenu.querySelector(".set-slider-color");
   const checkmarkColorInput = settingsMenu.querySelector(".set-checkmark-color");
+  const selectBgInput = settingsMenu.querySelector(".set-select-bg");
+  const selectTextInput = settingsMenu.querySelector(".set-select-text");
   const mutedTextInput = settingsMenu.querySelector(".set-muted-text");
   const accentSoftInput = settingsMenu.querySelector(".set-accent-soft");
   const searchTextInput = settingsMenu.querySelector(".set-search-text");
@@ -2082,6 +2352,7 @@
   const settingsSubtextInput = settingsMenu.querySelector(".set-settings-subtext");
   const settingsCardBorderInput = settingsMenu.querySelector(".set-settings-card-border");
   const settingsCardBgInput = settingsMenu.querySelector(".set-settings-card-bg");
+  const espValueTextColorInput = settingsMenu.querySelector(".set-esp-value-text-color");
   const scaleInput = settingsMenu.querySelector(".set-scale");
   const radiusInput = settingsMenu.querySelector(".set-radius");
   const blurInput = settingsMenu.querySelector(".set-blur");
@@ -2141,7 +2412,11 @@
       }
       store.set(name, { keybind: null, ...settings });
     }
-    return store.get(name);
+    const cfg = store.get(name);
+    if (name === "ESP") {
+      window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
+    }
+    return cfg;
   }
 
   function setBindLabel(item, moduleName) {
@@ -2159,10 +2434,12 @@
     if (moduleInstance.enabled) {
       moduleInstance.disable();
       item.classList.remove("active");
+      state.enabledModules.delete(moduleName);
       if (moduleName === "Auto Answer") stopAutoAnswer();
     } else {
       moduleInstance.enable();
       item.classList.add("active");
+      state.enabledModules.add(moduleName);
       if (moduleName === "Auto Answer") startAutoAnswer();
     }
   }
@@ -2236,7 +2513,174 @@
       });
     }
 
-    if (moduleLayout && Array.isArray(moduleLayout.settings)) {
+    if (moduleName === "ESP") {
+      const defaults = getEspRenderConfig();
+      Object.assign(cfg, { ...defaults, ...cfg });
+      window.__zyroxEspConfig = { ...cfg };
+
+      const makeRow = (title, html) => {
+        const row = document.createElement("div");
+        row.className = "zyrox-setting-card";
+        row.innerHTML = `
+          <div style="display:flex;flex-direction:column;gap:8px;width:100%;">
+            <label style="font-weight:600;">${title}</label>
+            ${html}
+          </div>
+        `;
+        configBody.appendChild(row);
+        return row;
+      };
+
+      const hitboxRow = makeRow("Hitbox", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-hitbox-enabled" ${cfg.hitbox ? "checked" : ""} /> Enabled</label>
+          <label>Size <input type="range" class="esp-hitbox-size" min="24" max="180" step="2" value="${cfg.hitboxSize}" /></label>
+          <span class="esp-hitbox-size-value esp-value-text">${cfg.hitboxSize}px</span>
+          <label>Width <input type="range" class="esp-hitbox-width" min="1" max="10" step="1" value="${cfg.hitboxWidth}" /></label>
+          <span class="esp-hitbox-width-value esp-value-text">${cfg.hitboxWidth}px</span>
+          <input type="color" class="esp-hitbox-color" value="${cfg.hitboxColor}" />
+        </div>
+      `);
+
+      const namesRow = makeRow("Names", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-enabled" ${cfg.names ? "checked" : ""} /> Enabled</label>
+          <label>Size <input type="range" class="esp-name-size" min="10" max="32" step="1" value="${cfg.nameSize}" /></label>
+          <span class="esp-name-size-value esp-value-text">${cfg.nameSize}px</span>
+          <input type="color" class="esp-name-color" value="${cfg.nameColor}" />
+        </div>
+      `);
+
+      const offscreenRow = makeRow("Off-screen", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label>Mode
+            <select class="esp-offscreen-style">
+              <option value="none" ${cfg.offscreenStyle === "none" ? "selected" : ""}>None</option>
+              <option value="tracers" ${cfg.offscreenStyle === "tracers" ? "selected" : ""}>Tracers</option>
+              <option value="arrows" ${cfg.offscreenStyle === "arrows" ? "selected" : ""}>Arrows</option>
+            </select>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="esp-always-tracer" ${cfg.alwaysTracer ? "checked" : ""} />
+            Always Show Tracer
+          </label>
+          <label>Theme
+            <select class="esp-offscreen-theme">
+              <option value="classic" ${cfg.offscreenTheme === "classic" ? "selected" : ""}>Classic</option>
+              <option value="dashed" ${cfg.offscreenTheme === "dashed" ? "selected" : ""}>Dashed</option>
+              <option value="neon" ${cfg.offscreenTheme === "neon" ? "selected" : ""}>Neon</option>
+            </select>
+          </label>
+          <span class="esp-tracer-controls" style="display:flex;align-items:center;gap:10px;">
+            <label>Tracer Width <input type="range" class="esp-tracer-width" min="1" max="8" step="1" value="${cfg.tracerWidth}" /></label>
+            <span class="esp-tracer-width-value esp-value-text">${cfg.tracerWidth}px</span>
+            <input type="color" class="esp-tracer-color" value="${cfg.tracerColor}" />
+          </span>
+          <span class="esp-arrow-controls" style="display:flex;align-items:center;gap:10px;">
+            <label>Arrow Size <input type="range" class="esp-arrow-size" min="8" max="30" step="1" value="${cfg.arrowSize}" /></label>
+            <span class="esp-arrow-size-value esp-value-text">${cfg.arrowSize}px</span>
+            <input type="color" class="esp-arrow-color" value="${cfg.arrowColor}" />
+            <label>Arrow Style
+              <select class="esp-arrow-style">
+                <option value="regular" ${cfg.arrowStyle === "regular" ? "selected" : ""}>Regular Arrow</option>
+                <option value="dot" ${cfg.arrowStyle === "dot" ? "selected" : ""}>Dot</option>
+                <option value="modern" ${cfg.arrowStyle === "modern" ? "selected" : ""}>Modern Arrow</option>
+              </select>
+            </label>
+          </span>
+        </div>
+      `);
+
+      const syncEsp = () => {
+        window.__zyroxEspConfig = { ...cfg };
+      };
+      syncEsp();
+      const applyValueTextColor = () => {
+        for (const el of configBody.querySelectorAll(".esp-value-text")) {
+          el.style.color = cfg.valueTextColor || "#ffffff";
+        }
+      };
+      applyValueTextColor();
+
+      const bindCheckbox = (root, selector, key) => {
+        const input = root.querySelector(selector);
+        if (!input) return;
+        input.addEventListener("change", (event) => {
+          cfg[key] = Boolean(event.target.checked);
+          syncEsp();
+        });
+      };
+      const bindColor = (root, selector, key) => {
+        const input = root.querySelector(selector);
+        if (!input) return;
+        input.addEventListener("input", (event) => {
+          cfg[key] = String(event.target.value || "#ffffff");
+          syncEsp();
+        });
+      };
+      const bindSlider = (root, selector, key, labelSelector) => {
+        const input = root.querySelector(selector);
+        const label = root.querySelector(labelSelector);
+        if (!input) return;
+        input.addEventListener("input", (event) => {
+          const value = Number(event.target.value);
+          cfg[key] = value;
+          if (label) label.textContent = `${value}px`;
+          syncEsp();
+        });
+      };
+
+      bindCheckbox(hitboxRow, ".esp-hitbox-enabled", "hitbox");
+      bindSlider(hitboxRow, ".esp-hitbox-size", "hitboxSize", ".esp-hitbox-size-value");
+      bindSlider(hitboxRow, ".esp-hitbox-width", "hitboxWidth", ".esp-hitbox-width-value");
+      bindColor(hitboxRow, ".esp-hitbox-color", "hitboxColor");
+
+      bindCheckbox(namesRow, ".esp-names-enabled", "names");
+      bindSlider(namesRow, ".esp-name-size", "nameSize", ".esp-name-size-value");
+      bindColor(namesRow, ".esp-name-color", "nameColor");
+
+      const styleInput = offscreenRow.querySelector(".esp-offscreen-style");
+      const tracerControls = offscreenRow.querySelector(".esp-tracer-controls");
+      const arrowControls = offscreenRow.querySelector(".esp-arrow-controls");
+      const alwaysTracerInput = offscreenRow.querySelector(".esp-always-tracer");
+      const refreshIndicatorModeVisibility = () => {
+        const mode = cfg.offscreenStyle === "arrows" || cfg.offscreenStyle === "none" ? cfg.offscreenStyle : "tracers";
+        if (tracerControls) tracerControls.style.display = mode === "tracers" ? "flex" : "none";
+        if (arrowControls) arrowControls.style.display = mode === "arrows" ? "flex" : "none";
+      };
+      if (styleInput) {
+        styleInput.addEventListener("change", (event) => {
+          cfg.offscreenStyle = String(event.target.value || "tracers");
+          refreshIndicatorModeVisibility();
+          syncEsp();
+        });
+      }
+      const themeInput = offscreenRow.querySelector(".esp-offscreen-theme");
+      if (themeInput) {
+        themeInput.addEventListener("change", (event) => {
+          cfg.offscreenTheme = String(event.target.value || "classic");
+          syncEsp();
+        });
+      }
+      if (alwaysTracerInput) {
+        alwaysTracerInput.addEventListener("change", (event) => {
+          cfg.alwaysTracer = Boolean(event.target.checked);
+          syncEsp();
+        });
+      }
+      bindSlider(offscreenRow, ".esp-tracer-width", "tracerWidth", ".esp-tracer-width-value");
+      bindColor(offscreenRow, ".esp-tracer-color", "tracerColor");
+      bindSlider(offscreenRow, ".esp-arrow-size", "arrowSize", ".esp-arrow-size-value");
+      bindColor(offscreenRow, ".esp-arrow-color", "arrowColor");
+      const arrowStyleInput = offscreenRow.querySelector(".esp-arrow-style");
+      if (arrowStyleInput) {
+        arrowStyleInput.addEventListener("change", (event) => {
+          cfg.arrowStyle = String(event.target.value || "regular");
+          syncEsp();
+        });
+      }
+      refreshIndicatorModeVisibility();
+    } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
         const settingCard = document.createElement("div");
         settingCard.className = "zyrox-setting-card";
@@ -2244,10 +2688,11 @@
         if (setting.type === "slider") {
           if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? setting.min ?? 0;
           const initialVal = cfg[setting.id];
+          const valueUnit = setting.unit ?? "ms";
           settingCard.innerHTML = `
             <label style="display:flex;justify-content:space-between;align-items:center;">
               <span>${setting.label}</span>
-              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${initialVal}ms</span>
+              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${initialVal}${valueUnit}</span>
             </label>
             <input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${initialVal}" />
           `;
@@ -2257,13 +2702,63 @@
             settingInput.addEventListener("input", (event) => {
               const newVal = Number(event.target.value);
               cfg[setting.id] = newVal;
-              if (valueLabel) valueLabel.textContent = newVal + "ms";
+              if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
               if (moduleName === "Auto Answer" && setting.id === "speed") {
                 // Live-update the interval speed only while Auto Answer is enabled
                 if (state.enabledModules.has("Auto Answer")) {
                   window.__zyroxAutoAnswer?.start(newVal);
                 }
               }
+            });
+          }
+        }
+
+        if (setting.type === "checkbox") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = Boolean(setting.default);
+          const checked = cfg[setting.id] ? "checked" : "";
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${setting.id}" ${checked} />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-checkbox");
+          if (settingInput) {
+            settingInput.addEventListener("change", (event) => {
+              cfg[setting.id] = Boolean(event.target.checked);
+            });
+          }
+        }
+
+        if (setting.type === "select") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? setting.options?.[0]?.value ?? "";
+          const options = Array.isArray(setting.options) ? setting.options : [];
+          const optionsHtml = options
+            .map((option) => {
+              const selected = String(option.value) === String(cfg[setting.id]) ? "selected" : "";
+              return `<option value="${option.value}" ${selected}>${option.label}</option>`;
+            })
+            .join("");
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <select class="set-module-setting-select" data-setting-id="${setting.id}">${optionsHtml}</select>
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-select");
+          if (settingInput) {
+            settingInput.addEventListener("change", (event) => {
+              cfg[setting.id] = String(event.target.value);
+            });
+          }
+        }
+
+        if (setting.type === "color") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default ?? "#ffffff";
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="color" class="set-module-setting-color" data-setting-id="${setting.id}" value="${cfg[setting.id]}" />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-color");
+          if (settingInput) {
+            settingInput.addEventListener("input", (event) => {
+              cfg[setting.id] = String(event.target.value || "#ffffff");
             });
           }
         }
@@ -2306,6 +2801,8 @@
       opacity: opacityInput.value,
       sliderColor: sliderColorInput.value,
       checkmarkColor: checkmarkColorInput.value,
+      selectBg: selectBgInput.value,
+      selectText: selectTextInput.value,
       mutedText: mutedTextInput.value,
       accentSoft: accentSoftInput.value,
       searchText: searchTextInput.value,
@@ -2320,6 +2817,7 @@
       settingsSubtext: settingsSubtextInput.value,
       settingsCardBorder: settingsCardBorderInput.value,
       settingsCardBg: settingsCardBgInput.value,
+      espValueTextColor: espValueTextColorInput.value,
       scale: scaleInput.value,
       radius: radiusInput.value,
       blur: blurInput.value,
@@ -2437,8 +2935,9 @@
           accent: "#2dff75", shellStart: "#2dff75", shellEnd: "#03130a", topbar: "#35d96d", border: "#5dff9a",
           outline: "#37d878", text: "#d7ffe6", muted: "#88b79b", soft: "#a8ffd0", search: "#e6fff0", icon: "#d7ffe9",
           panelText: "#d9ffe8", panelBorder: "#5fff99", panelBg: "#04110a", slider: "#2dff75", checkmark: "#2dff75",
+          selectBg: "#111e16", selectText: "#d7ffe6",
           headerStart: "#2dff75", headerEnd: "#0f2f1b", headerText: "#f0fff4",
-          settingsHeaderStart: "#2dff75", settingsHeaderEnd: "#0f2f1b",
+          settingsHeaderStart: "#2dff75", settingsHeaderEnd: "#0f2f1b", espValueTextColor: "#ffffff",
         };
       }
       if (presetName === "ice") {
@@ -2446,8 +2945,9 @@
           accent: "#6cd8ff", shellStart: "#6cd8ff", shellEnd: "#07131a", topbar: "#58bff1", border: "#8ae4ff",
           outline: "#6fbce8", text: "#d7edff", muted: "#8ea7bd", soft: "#b8e5ff", search: "#e7f5ff", icon: "#dff3ff",
           panelText: "#e1f4ff", panelBorder: "#8fd7ff", panelBg: "#071019", slider: "#7bdfff", checkmark: "#7bdfff",
+          selectBg: "#0c1c26", selectText: "#d7edff",
           headerStart: "#6cd8ff", headerEnd: "#133042", headerText: "#f4fbff",
-          settingsHeaderStart: "#6cd8ff", settingsHeaderEnd: "#133042",
+          settingsHeaderStart: "#6cd8ff", settingsHeaderEnd: "#133042", espValueTextColor: "#ffffff",
         };
       }
       if (presetName === "grayscale") {
@@ -2455,8 +2955,9 @@
           accent: "#d3d3d3", shellStart: "#7a7a7a", shellEnd: "#0a0a0a", topbar: "#8d8d8d", border: "#b1b1b1",
           outline: "#9a9a9a", text: "#dddddd", muted: "#9a9a9a", soft: "#c9c9c9", search: "#f1f1f1", icon: "#f5f5f5",
           panelText: "#efefef", panelBorder: "#a0a0a0", panelBg: "#0f0f0f", slider: "#c4c4c4", checkmark: "#d0d0d0",
+          selectBg: "#1b1b1b", selectText: "#efefef",
           headerStart: "#8f8f8f", headerEnd: "#1d1d1d", headerText: "#ffffff",
-          settingsHeaderStart: "#8f8f8f", settingsHeaderEnd: "#1d1d1d",
+          settingsHeaderStart: "#8f8f8f", settingsHeaderEnd: "#1d1d1d", espValueTextColor: "#ffffff",
         };
       }
       // Default (red)
@@ -2464,8 +2965,9 @@
         accent: "#ff3d3d", shellStart: "#ff3d3d", shellEnd: "#000000", topbar: "#ff4a4a", border: "#ff6f6f",
         outline: "#ff5b5b", text: "#d6d6df", muted: "#9b9bab", soft: "#ffbdbd", search: "#ffe6e6", icon: "#ffdada",
         panelText: "#ffd9d9", panelBorder: "#ff6464", panelBg: "#08080a", slider: "#ff6b6b", checkmark: "#ff6b6b",
+        selectBg: "#17171f", selectText: "#ffe5e5",
         headerStart: "#ff4a4a", headerEnd: "#3c1212", headerText: "#ffffff",
-        settingsHeaderStart: "#ff3d3d", settingsHeaderEnd: "#2d0c0c",
+        settingsHeaderStart: "#ff3d3d", settingsHeaderEnd: "#2d0c0c", espValueTextColor: "#ffffff",
       };
     })();
 
@@ -2485,11 +2987,14 @@
     panelCountBgInput.value = preset.panelBg;
     sliderColorInput.value = preset.slider;
     checkmarkColorInput.value = preset.checkmark;
+    selectBgInput.value = preset.selectBg;
+    selectTextInput.value = preset.selectText;
     headerStartInput.value = preset.headerStart;
     headerEndInput.value = preset.headerEnd;
     headerTextInput.value = preset.headerText;
     settingsHeaderStartInput.value = preset.settingsHeaderStart;
     settingsHeaderEndInput.value = preset.settingsHeaderEnd;
+    espValueTextColorInput.value = preset.espValueTextColor;
     applyAppearance();
   }
 
@@ -2522,6 +3027,8 @@
     const opacity = Number(opacityInput.value) / 100;
     const sliderColor = sliderColorInput.value;
     const checkmarkColor = checkmarkColorInput.value;
+    const selectBg = selectBgInput.value;
+    const selectText = selectTextInput.value;
     const mutedText = mutedTextInput.value;
     const accentSoft = accentSoftInput.value;
     const searchText = searchTextInput.value;
@@ -2536,6 +3043,7 @@
     const settingsSubtext = settingsSubtextInput.value;
     const settingsCardBorder = settingsCardBorderInput.value;
     const settingsCardBg = settingsCardBgInput.value;
+    const espValueTextColor = espValueTextColorInput.value;
     const scale = Number(scaleInput.value) / 100;
     const radius = Number(radiusInput.value);
     const blur = Number(blurInput.value);
@@ -2571,6 +3079,10 @@
     cssRoot.setProperty("--zyx-settings-card-bg", toRgba(settingsCardBg, 0.05));
     cssRoot.setProperty("--zyx-slider-color", sliderColor);
     cssRoot.setProperty("--zyx-checkmark-color", checkmarkColor);
+    cssRoot.setProperty("--zyx-select-bg", toRgba(selectBg, 0.9));
+    cssRoot.setProperty("--zyx-select-text", selectText);
+    window.__zyroxEspValueTextColor = espValueTextColor;
+    window.__zyroxEspConfig = { ...getEspRenderConfig(), valueTextColor: espValueTextColor };
     cssRoot.setProperty("--zyx-radius-xl", `${radius}px`);
     cssRoot.setProperty("--zyx-radius-lg", `${Math.max(4, radius - 2)}px`);
     cssRoot.setProperty("--zyx-radius-md", `${Math.max(3, radius - 4)}px`);
@@ -2750,6 +3262,9 @@
   settingsSubtextInput.addEventListener("input", applyAppearance);
   settingsCardBorderInput.addEventListener("input", applyAppearance);
   settingsCardBgInput.addEventListener("input", applyAppearance);
+  selectBgInput.addEventListener("input", applyAppearance);
+  selectTextInput.addEventListener("input", applyAppearance);
+  espValueTextColorInput.addEventListener("input", applyAppearance);
   scaleInput.addEventListener("input", applyAppearance);
   radiusInput.addEventListener("input", applyAppearance);
   blurInput.addEventListener("input", applyAppearance);
@@ -2776,6 +3291,8 @@
     opacityInput.value = "45";
     sliderColorInput.value = "#ff6b6b";
     checkmarkColorInput.value = "#ff6b6b";
+    selectBgInput.value = "#17171f";
+    selectTextInput.value = "#ffe5e5";
     mutedTextInput.value = "#9b9bab";
     accentSoftInput.value = "#ffbdbd";
     searchTextInput.value = "#ffe6e6";
@@ -2790,6 +3307,7 @@
     settingsSubtextInput.value = "#c2c2ce";
     settingsCardBorderInput.value = "#ffffff";
     settingsCardBgInput.value = "#ffffff";
+    espValueTextColorInput.value = "#ffffff";
     searchAutofocusInput.checked = true;
     state.searchAutofocus = true;
     scaleInput.value = "100";
@@ -2836,6 +3354,8 @@
     cssRoot.removeProperty("--zyx-settings-card-bg");
     cssRoot.removeProperty("--zyx-slider-color");
     cssRoot.removeProperty("--zyx-checkmark-color");
+    cssRoot.removeProperty("--zyx-select-bg");
+    cssRoot.removeProperty("--zyx-select-text");
     cssRoot.removeProperty("--zyx-radius-xl");
     cssRoot.removeProperty("--zyx-radius-lg");
     cssRoot.removeProperty("--zyx-radius-md");
@@ -2935,6 +3455,8 @@
         assign(opacityInput, "opacity");
         assign(sliderColorInput, "sliderColor");
         assign(checkmarkColorInput, "checkmarkColor");
+        assign(selectBgInput, "selectBg");
+        assign(selectTextInput, "selectText");
         assign(mutedTextInput, "mutedText");
         assign(accentSoftInput, "accentSoft");
         assign(searchTextInput, "searchText");
@@ -2949,6 +3471,7 @@
         assign(settingsSubtextInput, "settingsSubtext");
         assign(settingsCardBorderInput, "settingsCardBorder");
         assign(settingsCardBgInput, "settingsCardBg");
+        assign(espValueTextColorInput, "espValueTextColor");
         assign(scaleInput, "scale");
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
