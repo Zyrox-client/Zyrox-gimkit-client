@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.9.7
+// @version      0.9.8
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -313,7 +313,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.9.7";
+    const CLIENT_VERSION = "0.9.8";
     return CLIENT_VERSION;
   }
 
@@ -899,6 +899,7 @@
     rafId: null,
     seenPlayers: new Map(),
     serializerFound: false,
+    usingFallbackCharacters: false,
     waitLogTick: 0,
   };
 
@@ -951,16 +952,25 @@
         espState.serializerFound = true;
         espLog("Serializer found");
       }
+      espState.usingFallbackCharacters = false;
       return serializerCharacters;
     }
     if (espState.serializerFound) {
       espState.serializerFound = false;
       espLog("Serializer not found");
-    } else {
-      espLog("Serializer not found");
     }
     const charManagerCharacters = window?.stores?.phaser?.scene?.characterManager?.characters;
-    if (charManagerCharacters instanceof Map) return charManagerCharacters;
+    if (charManagerCharacters instanceof Map) {
+      if (!espState.usingFallbackCharacters) {
+        espState.usingFallbackCharacters = true;
+        espLog("Using fallback characterManager player data source");
+      }
+      return charManagerCharacters;
+    }
+    if (espState.usingFallbackCharacters) {
+      espState.usingFallbackCharacters = false;
+      espLog("Fallback characterManager player data source unavailable");
+    }
     return null;
   }
 
@@ -975,25 +985,16 @@
     return String(character?.name ?? character?.displayName ?? character?.username ?? fallbackId ?? "Unknown");
   }
 
-  function getLocalPlayerFromMap(characters) {
-    const localId = socketManager.playerId ?? window?.stores?.phaser?.mainCharacter?.id ?? null;
-    if (localId == null) return { localId: null, localPlayer: null };
-    return { localId, localPlayer: characters.get(localId) || null };
-  }
-
   function processEspPlayers(camera, characters) {
-    const { localId, localPlayer } = getLocalPlayerFromMap(characters);
-    if (!localPlayer || !localId) {
-      espLog("Waiting for game data... missing local player.");
+    const mainCharacter = window?.stores?.phaser?.mainCharacter ?? null;
+    const localPlayerId = mainCharacter?.id ?? null;
+    const localTeamId = mainCharacter?.teamId ?? null;
+    if (localTeamId == null) {
+      espLog("Waiting for game data... missing local team id.");
       return [];
     }
-    const localPos = getCharacterPosition(localPlayer);
-    if (!localPos) {
-      espLog(`Invalid positions for local player: ${localId}`);
-      return [];
-    }
-    const camX = Number(camera?.midPoint?.x ?? localPos.x);
-    const camY = Number(camera?.midPoint?.y ?? localPos.y);
+    const camX = Number(camera?.midPoint?.x);
+    const camY = Number(camera?.midPoint?.y);
     const zoom = Number(camera?.zoom ?? 1);
     if (!Number.isFinite(camX) || !Number.isFinite(camY) || !Number.isFinite(zoom)) {
       espLog("Missing data for camera midpoint/zoom; rendering skip.");
@@ -1002,8 +1003,9 @@
 
     const framePlayers = [];
     const currentIds = new Set();
-    for (const [id, character] of characters) {
-      if (id === localId) continue;
+    for (const [rawId, character] of characters) {
+      const id = String(rawId ?? character?.id ?? character?.playerId ?? character?.name ?? "unknown");
+      if (localPlayerId != null && (rawId === localPlayerId || character?.id === localPlayerId)) continue;
       currentIds.add(id);
       const pos = getCharacterPosition(character);
       if (!pos) {
@@ -1012,7 +1014,7 @@
       }
       const name = getCharacterName(character, id);
       if (!espState.seenPlayers.has(id)) espLog(`Player detected: ${id}/${name}`);
-      const isTeammate = localPlayer?.teamId === character?.teamId;
+      const isTeammate = localTeamId === character?.teamId;
       const angle = Math.atan2(pos.y - camY, pos.x - camX);
       const distance = Math.sqrt(Math.pow(pos.x - camX, 2) + Math.pow(pos.y - camY, 2)) * zoom;
       const arrowDist = Math.min(250, distance);
