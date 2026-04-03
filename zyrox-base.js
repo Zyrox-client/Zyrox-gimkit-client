@@ -89,16 +89,14 @@
   }
 
   function parseChangePacket(packet) {
-    const returnVar = [];
-    for (const change of packet.changes) {
+    const out = [];
+    for (const change of packet?.changes || []) {
       const data = {};
       const keys = change[1].map((index) => packet.values[index]);
-      for (let i = 0; i < keys.length; i++) {
-        data[keys[i]] = change[2][i];
-      }
-      returnVar.push({ id: change[0], data });
+      for (let i = 0; i < keys.length; i++) data[keys[i]] = change[2][i];
+      out.push({ id: change[0], data });
     }
-    return returnVar;
+    return out;
   }
 
   function msgpackEncode(value) {
@@ -432,6 +430,7 @@
       this.socket = null;
       this.transportType = "unknown";
       this.blueboatRoomId = null;
+      this.playerId = null;
       this.setup();
     }
     setup() {
@@ -490,7 +489,12 @@
         let decoded;
         if (this.transportType === "colyseus") {
           decoded = this.decodeColyseus(e);
-          if (decoded) this.dispatchEvent(new CustomEvent("colyseusMessage", { detail: decoded }));
+          if (decoded) {
+            this.dispatchEvent(new CustomEvent("colyseusMessage", { detail: decoded }));
+            if (decoded.type === "AUTH_ID") {
+              this.playerId = decoded.message;
+            }
+          }
         } else {
           decoded = blueboat.decode(e.data);
           if (decoded) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: decoded }));
@@ -541,52 +545,57 @@
 
   const socketManager = new SocketManager();
 
-  let currentQuestions = [];
-  let currentAnswerDeviceId = null;
-  let currentQuestionId = null;
-  let currentQuestionIdList = [];
-  let currentQuestionIndex = -1;
+  const autoAnswerState = {
+    questions: [],
+    answerDeviceId: null,
+    currentQuestionId: null,
+    questionIdList: [],
+    currentQuestionIndex: -1,
+  };
+  const AUTO_ANSWER_TICK = 1000;
+  let autoAnswerEnabled = false;
   let answerInterval = null;
+
+  function answerQuestion() {
+    if (socketManager.transportType === "colyseus") {
+      if (autoAnswerState.currentQuestionId == null || autoAnswerState.answerDeviceId == null) return;
+      const question = autoAnswerState.questions.find((q) => q._id == autoAnswerState.currentQuestionId);
+      if (!question) return;
+      const packet = { key: "answered", deviceId: autoAnswerState.answerDeviceId, data: {} };
+      if (question.type == "text") packet.data.answer = question.answers[0].text;
+      else packet.data.answer = question.answers.find((a) => a.correct)?._id;
+      if (!packet.data.answer) return;
+      socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
+    } else {
+      const questionId = autoAnswerState.questionIdList[autoAnswerState.currentQuestionIndex];
+      const question = autoAnswerState.questions.find((q) => q._id == questionId);
+      if (!question) return;
+      const answer = question.type == "mc" ? question.answers.find((a) => a.correct)?._id : question.answers[0]?.text;
+      if (!answer) return;
+      socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+    }
+  }
 
   const autoAnswerModule = new Module("Auto Answer", {
     onEnable: () => {
       console.log("Auto Answer enabled");
-      const cfg = moduleCfg("Auto Answer");
-      answerInterval = setInterval(() => {
-        // Actual auto-answer logic will go here
-        if (currentQuestionId && currentQuestions.length > 0 && currentAnswerDeviceId) {
-          const question = currentQuestions.find(q => q._id === currentQuestionId);
-          if (question) {
-            let answer;
-            if (question.type === 'text') {
-              answer = question.answers[0].text;
-            } else {
-              const correctAnswer = question.answers.find(a => a.correct);
-              answer = correctAnswer ? correctAnswer._id : question.answers[0]?._id;
-            }
-            if (answer) {
-              socketManager.sendMessage("MESSAGE_FOR_DEVICE", { key: "answered", deviceId: currentAnswerDeviceId, data: { answer } });
-            }
-          }
-        }
-      }, cfg.speed || 1000);
+      autoAnswerEnabled = true;
     },
     onDisable: () => {
       console.log("Auto Answer disabled");
-      clearInterval(answerInterval);
-      answerInterval = null;
+      autoAnswerEnabled = false;
     },
   });
 
   socketManager.addEventListener("deviceChanges", event => {
-    for (const { id, data } of event.detail) {
-      for (const key in data) {
+    for (const { id, data } of event.detail || []) {
+      for (const key in data || {}) {
         if (key === "GLOBAL_questions") {
-          currentQuestions = JSON.parse(data[key]);
-          currentAnswerDeviceId = id;
+          autoAnswerState.questions = JSON.parse(data[key]);
+          autoAnswerState.answerDeviceId = id;
         }
         if (key === `PLAYER_${socketManager.playerId}_currentQuestionId`) {
-          currentQuestionId = data[key];
+          autoAnswerState.currentQuestionId = data[key];
         }
       }
     }
@@ -597,17 +606,22 @@
 
     switch (event.detail.data.type) {
       case "GAME_QUESTIONS":
-        currentQuestions = event.detail.data.value;
+        autoAnswerState.questions = event.detail.data.value;
         break;
       case "PLAYER_QUESTION_LIST":
-        currentQuestionIdList = event.detail.data.value.questionList;
-        currentQuestionIndex = event.detail.data.value.questionIndex;
+        autoAnswerState.questionIdList = event.detail.data.value.questionList;
+        autoAnswerState.currentQuestionIndex = event.detail.data.value.questionIndex;
         break;
       case "PLAYER_QUESTION_LIST_INDEX":
-        currentQuestionIndex = event.detail.data.value;
+        autoAnswerState.currentQuestionIndex = event.detail.data.value;
         break;
     }
   });
+
+  answerInterval = setInterval(() => {
+    if (!autoAnswerEnabled) return;
+    answerQuestion();
+  }, AUTO_ANSWER_TICK);
 
   // --- End of Core Utilities ---
 
