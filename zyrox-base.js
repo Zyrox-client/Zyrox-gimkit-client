@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      0.9.5
+// @version      0.9.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,7 +45,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "0.9.5";
+    const CLIENT_VERSION = "0.9.6";
     return CLIENT_VERSION;
   }
 
@@ -89,16 +89,14 @@
   }
 
   function parseChangePacket(packet) {
-    const returnVar = [];
-    for (const change of packet.changes) {
+    const out = [];
+    for (const change of packet?.changes || []) {
       const data = {};
       const keys = change[1].map((index) => packet.values[index]);
-      for (let i = 0; i < keys.length; i++) {
-        data[keys[i]] = change[2][i];
-      }
-      returnVar.push({ id: change[0], data });
+      for (let i = 0; i < keys.length; i++) data[keys[i]] = change[2][i];
+      out.push({ id: change[0], data });
     }
-    return returnVar;
+    return out;
   }
 
   function msgpackEncode(value) {
@@ -554,6 +552,8 @@
     questionIdList: [],
     currentQuestionIndex: -1,
   };
+  const AUTO_ANSWER_TICK = 1000;
+  let autoAnswerEnabled = false;
   let answerInterval = null;
 
   function answerQuestion() {
@@ -579,21 +579,17 @@
   const autoAnswerModule = new Module("Auto Answer", {
     onEnable: () => {
       console.log("Auto Answer enabled");
-      const cfg = moduleCfg("Auto Answer");
-      answerInterval = setInterval(() => {
-        answerQuestion();
-      }, cfg.speed || 1000);
+      autoAnswerEnabled = true;
     },
     onDisable: () => {
       console.log("Auto Answer disabled");
-      clearInterval(answerInterval);
-      answerInterval = null;
+      autoAnswerEnabled = false;
     },
   });
 
   socketManager.addEventListener("deviceChanges", event => {
-    for (const { id, data } of event.detail) {
-      for (const key in data) {
+    for (const { id, data } of event.detail || []) {
+      for (const key in data || {}) {
         if (key === "GLOBAL_questions") {
           autoAnswerState.questions = JSON.parse(data[key]);
           autoAnswerState.answerDeviceId = id;
@@ -621,6 +617,11 @@
         break;
     }
   });
+
+  answerInterval = setInterval(() => {
+    if (!autoAnswerEnabled) return;
+    answerQuestion();
+  }, AUTO_ANSWER_TICK);
 
   // --- End of Core Utilities ---
 
