@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.7
+// @version      1.3.8
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.7";
+    const CLIENT_VERSION = "1.3.8";
     return CLIENT_VERSION;
   }
 
@@ -1618,9 +1618,9 @@
     const defaults = {
       enabled: true,
       teamCheck: true,
-      fovPx: 42,
-      holdToFire: true,
-      fireRateMs: 120,
+      fovPx: 85,
+      holdToFire: false,
+      fireRateMs: 45,
       requireLOS: false,
       onlyWhenGameFocused: true,
       showTargetRing: true,
@@ -1679,20 +1679,43 @@
     canvas.dispatchEvent(new PointerEvent(type, init));
   }
 
+  function fireCanvasMouseEvent(type, canvas, x, y, buttons = 0) {
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = rect.left + Math.max(0, Math.min(rect.width, x));
+    const clientY = rect.top + Math.max(0, Math.min(rect.height, y));
+    canvas.dispatchEvent(new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons,
+      clientX,
+      clientY,
+    }));
+  }
+
+  function syncAimPointer(canvas, x, y, buttons = 0) {
+    fireCanvasPointerEvent("pointermove", canvas, x, y);
+    fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
+  }
+
   function releaseFireHold() {
     if (!triggerAssistState.mouseHeld) return;
     const canvas = getGameCanvas();
     if (canvas) {
+      syncAimPointer(canvas, crosshairState.mouseX, crosshairState.mouseY, 0);
       fireCanvasPointerEvent("pointerup", canvas, crosshairState.mouseX, crosshairState.mouseY);
-      canvas.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+      fireCanvasMouseEvent("mouseup", canvas, crosshairState.mouseX, crosshairState.mouseY, 0);
     }
     triggerAssistState.mouseHeld = false;
   }
 
-  function attemptFire(hold, forceRelease = false) {
+  function attemptFire(hold, forceRelease = false, point = null) {
     const canvas = getGameCanvas();
     if (!canvas) return false;
     canvas.focus?.({ preventScroll: true });
+    const aimX = Number(point?.x ?? crosshairState.mouseX);
+    const aimY = Number(point?.y ?? crosshairState.mouseY);
 
     if (forceRelease) {
       releaseFireHold();
@@ -1700,19 +1723,22 @@
     }
 
     if (hold) {
+      syncAimPointer(canvas, aimX, aimY, 1);
       if (!triggerAssistState.mouseHeld) {
-        fireCanvasPointerEvent("pointerdown", canvas, crosshairState.mouseX, crosshairState.mouseY);
-        canvas.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+        fireCanvasPointerEvent("pointerdown", canvas, aimX, aimY);
+        fireCanvasMouseEvent("mousedown", canvas, aimX, aimY, 1);
         triggerAssistState.mouseHeld = true;
       }
       return true;
     }
 
-    fireCanvasPointerEvent("pointerdown", canvas, crosshairState.mouseX, crosshairState.mouseY);
-    canvas.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    syncAimPointer(canvas, aimX, aimY, 1);
+    fireCanvasPointerEvent("pointerdown", canvas, aimX, aimY);
+    fireCanvasMouseEvent("mousedown", canvas, aimX, aimY, 1);
     setTimeout(() => {
-      fireCanvasPointerEvent("pointerup", canvas, crosshairState.mouseX, crosshairState.mouseY);
-      canvas.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+      syncAimPointer(canvas, aimX, aimY, 0);
+      fireCanvasPointerEvent("pointerup", canvas, aimX, aimY);
+      fireCanvasMouseEvent("mouseup", canvas, aimX, aimY, 0);
     }, 12);
     return true;
   }
@@ -1763,7 +1789,7 @@
     if (!Array.isArray(players) || !camera) return null;
     const mx = crosshairState.mouseX;
     const my = crosshairState.mouseY;
-    const fov = Math.max(8, Number(cfg.fovPx) || 42);
+    const fov = Math.max(8, Number(cfg.fovPx) || 85);
     let best = null;
     for (const player of players) {
       if (!player) continue;
@@ -1790,7 +1816,7 @@
     ctx.strokeStyle = "rgba(255, 80, 80, 0.95)";
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, Math.max(8, Number(cfg.fovPx) || 42), 0, Math.PI * 2);
+    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, Math.max(8, Number(cfg.fovPx) || 85), 0, Math.PI * 2);
     ctx.stroke();
     ctx.strokeStyle = "rgba(255, 255, 0, 0.95)";
     ctx.beginPath();
@@ -1830,10 +1856,11 @@
 
     triggerAssistState.statusText = `Target Acquired: ${target.player?.name ?? "Player"}`;
     const now = Date.now();
-    const minDelay = Math.max(35, Number(cfg.fireRateMs) || 120);
+    const minDelay = Math.max(16, Number(cfg.fireRateMs) || 45);
+    const aimPoint = { x: target.screenX, y: target.screenY };
     if (cfg.holdToFire) {
-      attemptFire(true);
-    } else if (now - triggerAssistState.lastFireAt >= minDelay && attemptFire(false)) {
+      attemptFire(true, false, aimPoint);
+    } else if (now - triggerAssistState.lastFireAt >= minDelay && attemptFire(false, false, aimPoint)) {
       triggerAssistState.lastFireAt = now;
     }
 
@@ -2013,9 +2040,9 @@
               settings: [
                 { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
-                { id: "fovPx",               label: "FOV Radius",               type: "slider",   default: 42, min: 8, max: 220, step: 1, unit: "px" },
-                { id: "holdToFire",          label: "Hold Fire While Targeted", type: "checkbox", default: true },
-                { id: "fireRateMs",          label: "Fire Rate Limit",          type: "slider",   default: 120, min: 35, max: 500, step: 5, unit: "ms" },
+                { id: "fovPx",               label: "FOV Radius",               type: "slider",   default: 85, min: 8, max: 220, step: 1, unit: "px" },
+                { id: "holdToFire",          label: "Hold Fire While Targeted", type: "checkbox", default: false },
+                { id: "fireRateMs",          label: "Fire Rate Limit",          type: "slider",   default: 45, min: 16, max: 500, step: 1, unit: "ms" },
                 { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
                 { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
