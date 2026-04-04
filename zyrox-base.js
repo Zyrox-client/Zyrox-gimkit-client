@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.4.3
+// @version      1.4.4
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.4.3";
+    const CLIENT_VERSION = "1.4.4";
     return CLIENT_VERSION;
   }
 
@@ -2448,21 +2448,6 @@
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
                 { id: "requireMouseDown",    label: "Require Left Mouse",    type: "checkbox", default: false },
                 { id: "showDebugDot",        label: "Show Debug Dot",        type: "checkbox", default: true },
-              ],
-            },
-            {
-              name: "Auto Aim",
-              settings: [
-                { id: "enabled",             label: "Enabled",               type: "checkbox", default: true },
-                { id: "teamCheck",           label: "Ignore Teammates",      type: "checkbox", default: true },
-                { id: "fovPx",               label: "FOV Radius",            type: "slider",   default: 160, min: 8, max: 320, step: 1, unit: "px" },
-                { id: "smoothing",           label: "Smoothing",             type: "slider",   default: 0.2, min: 0, max: 1, step: 0.01 },
-                { id: "maxStepPx",           label: "Max Step",              type: "slider",   default: 32, min: 2, max: 120, step: 1, unit: "px" },
-                { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: true },
-                { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
-                { id: "requireMouseDown",    label: "Require Left Mouse",    type: "checkbox", default: false },
-                { id: "showDebugDot",        label: "Show Debug Dot",        type: "checkbox", default: true },
-                { id: "debugStatus",         label: "Show Debug Status",     type: "checkbox", default: true },
               ],
             },
           ],
@@ -4644,6 +4629,7 @@
     for (const moduleDef of modules) {
       const moduleName = typeof moduleDef === "string" ? moduleDef : moduleDef?.name;
       if (!moduleName) continue;
+      if (state.moduleItems.has(moduleName)) continue;
       moduleNames.push(moduleName);
       const item = document.createElement("li");
       item.className = "zyrox-module";
