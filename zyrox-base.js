@@ -1665,6 +1665,13 @@
   }
 
   document.addEventListener("mousemove", (e) => {
+    const dx = e.clientX - crosshairState.mouseX;
+    const dy = e.clientY - crosshairState.mouseY;
+    const len = Math.hypot(dx, dy);
+    if (len > 0.0001) {
+      autoAimState.aimDirX = dx / len;
+      autoAimState.aimDirY = dy / len;
+    }
     crosshairState.mouseX = e.clientX;
     crosshairState.mouseY = e.clientY;
   }, { passive: true });
@@ -1688,6 +1695,23 @@
     statusText: "Idle",
   };
 
+  const autoAimState = {
+    enabled: false,
+    loopId: null,
+    canvas: null,
+    ctx: null,
+    target: null,
+    statusText: "Idle",
+    lastAimX: 0,
+    lastAimY: 0,
+    aimDirX: 1,
+    aimDirY: 0,
+  };
+
+  const autoAimInputState = {
+    leftMouseDown: false,
+  };
+
   function getTriggerAssistConfig() {
     const defaults = {
       enabled: true,
@@ -1698,10 +1722,32 @@
       requireLOS: false,
       onlyWhenGameFocused: true,
       showTargetRing: true,
-      debugStatus: true,
     };
     const stored = window.__zyroxTriggerAssistConfig;
     return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+  }
+
+  function getAutoAimConfig() {
+    const defaults = {
+      enabled: true,
+      teamCheck: true,
+      fovDeg: 120,
+      smoothing: 0.2,
+      maxStepPx: 32,
+      stickToTarget: true,
+      onlyWhenGameFocused: true,
+      requireMouseDown: false,
+      showDebugDot: true,
+    };
+    const stored = window.__zyroxAutoAimConfig;
+    if (stored && typeof stored === "object") {
+      const merged = { ...defaults, ...stored };
+      if (merged.fovDeg == null && Number.isFinite(Number(stored.fovPx))) {
+        merged.fovDeg = Math.max(15, Math.min(180, Number(stored.fovPx)));
+      }
+      return merged;
+    }
+    return defaults;
   }
 
   function createTriggerAssistCanvas() {
@@ -1725,6 +1771,29 @@
     if (!triggerAssistState.canvas) return;
     triggerAssistState.canvas.width = window.innerWidth;
     triggerAssistState.canvas.height = window.innerHeight;
+  }
+
+  function createAutoAimCanvas() {
+    if (autoAimState.canvas?.parentNode) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:10002;pointer-events:none;user-select:none;";
+    document.body.appendChild(canvas);
+    autoAimState.canvas = canvas;
+    autoAimState.ctx = canvas.getContext("2d");
+  }
+
+  function destroyAutoAimCanvas() {
+    autoAimState.canvas?.remove();
+    autoAimState.canvas = null;
+    autoAimState.ctx = null;
+  }
+
+  function resizeAutoAimCanvas() {
+    if (!autoAimState.canvas) return;
+    autoAimState.canvas.width = window.innerWidth;
+    autoAimState.canvas.height = window.innerHeight;
   }
 
   function getGameCanvas() {
@@ -1880,6 +1949,198 @@
     return best;
   }
 
+  function getAutoAimPlayerSnapshot() {
+    const shared = window.__zyroxEspShared;
+    if (shared?.ready && Array.isArray(shared.players) && shared.camera) {
+      return {
+        localPlayerId: shared.localPlayerId ?? null,
+        localTeamId: shared.localTeamId ?? null,
+        camera: shared.camera,
+        players: shared.players,
+      };
+    }
+
+    const stores = espState.stores ?? window.stores ?? null;
+    const me = stores ? getMainCharacter(stores) : null;
+    const cam = stores?.phaser?.scene?.cameras?.cameras?.[0];
+    if (!me || !cam) return null;
+    const mePos = getCharacterPosition(me);
+    const meId = String(getCharacterId(me) ?? stores?.phaser?.mainCharacter?.id ?? "");
+    const meTeam = getCharacterTeam(me);
+    const fallbackPlayers = [];
+    for (const { id, character } of getCharacterEntries(stores)) {
+      const pos = getCharacterPosition(character);
+      if (!pos) continue;
+      fallbackPlayers.push({
+        id: String(id ?? getCharacterId(character) ?? ""),
+        name: String(getCharacterName(character, id)),
+        teamId: getCharacterTeam(character),
+        x: pos.x,
+        y: pos.y,
+      });
+    }
+    return {
+      localPlayerId: meId || (mePos ? `${mePos.x}:${mePos.y}` : null),
+      localTeamId: meTeam ?? null,
+      camera: {
+        midX: Number(cam?.midPoint?.x ?? 0),
+        midY: Number(cam?.midPoint?.y ?? 0),
+        zoom: Number(cam?.zoom ?? 1),
+      },
+      players: fallbackPlayers,
+    };
+  }
+
+  function findAutoAimTarget(cfg) {
+    const snapshot = getAutoAimPlayerSnapshot();
+    if (!snapshot?.camera || !Array.isArray(snapshot.players)) return null;
+    const mx = crosshairState.mouseX;
+    const my = crosshairState.mouseY;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const margin = 80;
+    const fovDeg = Math.max(15, Math.min(180, Number(cfg.fovDeg) || 120));
+    const stickyFovDeg = Math.min(180, fovDeg * 1.15);
+    const aimDirX = Number(autoAimState.aimDirX) || 1;
+    const aimDirY = Number(autoAimState.aimDirY) || 0;
+    const angleToAimDir = (toX, toY) => {
+      const len = Math.hypot(toX, toY);
+      if (len <= 0.001) return 0;
+      const nx = toX / len;
+      const ny = toY / len;
+      const dot = Math.max(-1, Math.min(1, nx * aimDirX + ny * aimDirY));
+      return Math.acos(dot) * (180 / Math.PI);
+    };
+    const canUseSticky = cfg.stickToTarget && autoAimState.target?.player;
+    let stickyCandidate = null;
+    let best = null;
+
+    for (const player of snapshot.players) {
+      if (!player) continue;
+      const pid = String(player.id ?? "");
+      if (!pid || (snapshot.localPlayerId != null && pid === String(snapshot.localPlayerId))) continue;
+      if (cfg.teamCheck && snapshot.localTeamId != null && player.teamId === snapshot.localTeamId) continue;
+      const screen = projectWorldToScreen(player, snapshot.camera, width, height);
+      if (!screen) continue;
+      if (screen.x < -margin || screen.x > width + margin || screen.y < -margin || screen.y > height + margin) continue;
+      const dist = Math.hypot(mx - screen.x, my - screen.y);
+      const angleDelta = angleToAimDir(screen.x - mx, screen.y - my);
+      if (angleDelta <= fovDeg && (!best || dist < best.distancePx)) {
+        best = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta };
+      }
+      if (canUseSticky && pid === String(autoAimState.target.playerId) && angleDelta <= stickyFovDeg) {
+        stickyCandidate = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta };
+      }
+    }
+    return stickyCandidate || best;
+  }
+
+  function renderAutoAimOverlay(cfg) {
+    const ctx = autoAimState.ctx;
+    const canvas = autoAimState.canvas;
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!cfg.showDebugDot || !autoAimState.target) return;
+    const pulse = (Math.sin(performance.now() / 140) + 1) * 0.5;
+    const tx = autoAimState.target.screenX;
+    const ty = autoAimState.target.screenY;
+    ctx.save();
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.55 + pulse * 0.2})`;
+    ctx.strokeStyle = `rgba(255, 92, 92, ${0.7 + pulse * 0.2})`;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 2.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(tx, ty, 7 + pulse * 2.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function autoAimTick() {
+    if (!autoAimState.enabled) return;
+    const cfg = getAutoAimConfig();
+    if (!cfg.enabled) {
+      autoAimState.target = null;
+      autoAimState.statusText = "Disabled in config";
+      renderAutoAimOverlay(cfg);
+      return;
+    }
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
+      autoAimState.target = null;
+      autoAimState.statusText = "Waiting for focus";
+      renderAutoAimOverlay(cfg);
+      return;
+    }
+    if (cfg.requireMouseDown && !autoAimInputState.leftMouseDown) {
+      autoAimState.target = null;
+      autoAimState.statusText = "Waiting for mouse hold";
+      renderAutoAimOverlay(cfg);
+      return;
+    }
+
+    const target = findAutoAimTarget(cfg);
+    autoAimState.target = target;
+    if (!target) {
+      const hasShared = window.__zyroxEspShared?.ready;
+      const hasStores = Boolean((espState.stores ?? window.stores)?.phaser?.scene);
+      autoAimState.statusText = (!hasShared && !hasStores) ? "Waiting for match data" : "No target";
+      renderAutoAimOverlay(cfg);
+      return;
+    }
+
+    const canvas = getGameCanvas();
+    const smoothing = Math.max(0, Math.min(1, Number(cfg.smoothing) || 0.2));
+    const maxStep = Math.max(2, Number(cfg.maxStepPx) || 32);
+    const dx = target.screenX - crosshairState.mouseX;
+    const dy = target.screenY - crosshairState.mouseY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 0.01) {
+      const baseStep = dist * smoothing;
+      const step = Math.min(maxStep, Math.max(0.1, baseStep));
+      const ratio = Math.min(1, step / dist);
+      const nextX = crosshairState.mouseX + dx * ratio;
+      const nextY = crosshairState.mouseY + dy * ratio;
+      const moveX = nextX - crosshairState.mouseX;
+      const moveY = nextY - crosshairState.mouseY;
+      const moveLen = Math.hypot(moveX, moveY);
+      if (moveLen > 0.0001) {
+        autoAimState.aimDirX = moveX / moveLen;
+        autoAimState.aimDirY = moveY / moveLen;
+      }
+      crosshairState.mouseX = nextX;
+      crosshairState.mouseY = nextY;
+      autoAimState.lastAimX = nextX;
+      autoAimState.lastAimY = nextY;
+      if (canvas) syncAimPointer(canvas, nextX, nextY, autoAimInputState.leftMouseDown ? 1 : 0);
+    }
+    autoAimState.statusText = `Locked: ${target.player?.name ?? "Player"}`;
+    renderAutoAimOverlay(cfg);
+  }
+
+  function startAutoAim() {
+    if (autoAimState.enabled) return;
+    primeSharedPlayerData();
+    autoAimState.enabled = true;
+    autoAimState.target = null;
+    autoAimState.statusText = "Armed";
+    createAutoAimCanvas();
+    if (autoAimState.loopId != null) clearInterval(autoAimState.loopId);
+    autoAimState.loopId = setInterval(autoAimTick, 1000 / 60);
+  }
+
+  function stopAutoAim() {
+    if (!autoAimState.enabled) return;
+    autoAimState.enabled = false;
+    if (autoAimState.loopId != null) {
+      clearInterval(autoAimState.loopId);
+      autoAimState.loopId = null;
+    }
+    autoAimState.target = null;
+    autoAimState.statusText = "Idle";
+    destroyAutoAimCanvas();
+  }
+
   function renderTriggerAssistOverlay(cfg) {
     const ctx = triggerAssistState.ctx;
     const canvas = triggerAssistState.canvas;
@@ -2000,12 +2261,25 @@
   }
 
   window.addEventListener("blur", () => {
+    autoAimInputState.leftMouseDown = false;
+    autoAimState.target = null;
     releaseFireHold();
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "visible") releaseFireHold();
+    if (document.visibilityState !== "visible") {
+      autoAimInputState.leftMouseDown = false;
+      autoAimState.target = null;
+      releaseFireHold();
+    }
   });
   window.addEventListener("resize", resizeTriggerAssistCanvas);
+  window.addEventListener("resize", resizeAutoAimCanvas);
+  window.addEventListener("mousedown", (event) => {
+    if (event.button === 0) autoAimInputState.leftMouseDown = true;
+  }, { passive: true });
+  window.addEventListener("mouseup", (event) => {
+    if (event.button === 0) autoAimInputState.leftMouseDown = false;
+  }, { passive: true });
 
   const MODULE_BEHAVIORS = {
     "ESP": {
@@ -2020,8 +2294,12 @@
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
     },
+    "Auto Aim": {
+      onEnable: startAutoAim,
+      onDisable: stopAutoAim,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Trigger Assist"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Trigger Assist", "Auto Aim"]);
 
   // --- End of Core Utilities ---
 
@@ -2156,7 +2434,20 @@
                 { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
                 { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
-                { id: "debugStatus",         label: "Show Debug Status",        type: "checkbox", default: true },
+              ],
+            },
+            {
+              name: "Auto Aim",
+              settings: [
+                { id: "enabled",             label: "Enabled",               type: "checkbox", default: true },
+                { id: "teamCheck",           label: "Ignore Teammates",      type: "checkbox", default: true },
+                { id: "fovDeg",              label: "Aim FOV",               type: "slider",   default: 120, min: 15, max: 180, step: 1, unit: "°" },
+                { id: "smoothing",           label: "Smoothing",             type: "slider",   default: 0.2, min: 0, max: 1, step: 0.01 },
+                { id: "maxStepPx",           label: "Max Step",              type: "slider",   default: 32, min: 2, max: 120, step: 1, unit: "px" },
+                { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: true },
+                { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
+                { id: "requireMouseDown",    label: "Require Left Mouse",    type: "checkbox", default: false },
+                { id: "showDebugDot",        label: "Show Debug Dot",        type: "checkbox", default: true },
               ],
             },
           ],
@@ -3307,6 +3598,8 @@
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
     } else if (name === "Trigger Assist") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
+    } else if (name === "Auto Aim") {
+      window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
     }
     return cfg;
   }
@@ -3717,16 +4010,6 @@
       const syncTriggerAssist = () => { window.__zyroxTriggerAssistConfig = { ...cfg }; };
       syncTriggerAssist();
 
-      const statusCard = document.createElement("div");
-      statusCard.className = "zyrox-setting-card";
-      statusCard.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <span style="font-weight:600;">Status</span>
-          <span class="zyrox-trigger-status" style="opacity:0.85;font-size:0.92em;">${triggerAssistState.statusText}</span>
-        </div>
-      `;
-      configBody.appendChild(statusCard);
-
       for (const setting of moduleLayout?.settings || []) {
         if (setting.type === "checkbox") {
           if (cfg[setting.id] === undefined) cfg[setting.id] = Boolean(setting.default);
@@ -3766,17 +4049,53 @@
           });
         }
       }
+    } else if (moduleName === "Auto Aim") {
+      const defaults = getAutoAimConfig();
+      Object.assign(cfg, { ...defaults, ...cfg });
+      window.__zyroxAutoAimConfig = { ...cfg };
 
-      const statusValueEl = statusCard.querySelector(".zyrox-trigger-status");
-      const statusUpdater = setInterval(() => {
-        if (openConfigModule !== "Trigger Assist") {
-          clearInterval(statusUpdater);
-          return;
+      const syncAutoAim = () => { window.__zyroxAutoAimConfig = { ...cfg }; };
+      syncAutoAim();
+
+      for (const setting of moduleLayout?.settings || []) {
+        if (setting.type === "checkbox") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = Boolean(setting.default);
+          const checked = cfg[setting.id] ? "checked" : "";
+          const card = document.createElement("div");
+          card.className = "zyrox-setting-card";
+          card.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${setting.id}" ${checked} />
+          `;
+          configBody.appendChild(card);
+          const input = card.querySelector(".set-module-setting-checkbox");
+          input?.addEventListener("change", (event) => {
+            cfg[setting.id] = Boolean(event.target.checked);
+            syncAutoAim();
+          });
+        } else if (setting.type === "slider") {
+          const value = Number(cfg[setting.id] ?? setting.default ?? setting.min ?? 0);
+          const unit = setting.unit ?? "";
+          const card = document.createElement("div");
+          card.className = "zyrox-setting-card";
+          card.innerHTML = `
+            <label style="display:flex;justify-content:space-between;align-items:center;">
+              <span>${setting.label}</span>
+              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${value}${unit}</span>
+            </label>
+            <input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
+          `;
+          configBody.appendChild(card);
+          const slider = card.querySelector(".set-module-setting");
+          const valueLabel = card.querySelector(".zyrox-slider-value");
+          slider?.addEventListener("input", (event) => {
+            const next = Number(event.target.value);
+            cfg[setting.id] = next;
+            if (valueLabel) valueLabel.textContent = `${next}${unit}`;
+            syncAutoAim();
+          });
         }
-        if (statusValueEl) {
-          statusValueEl.textContent = cfg.debugStatus ? triggerAssistState.statusText : "Hidden";
-        }
-      }, 120);
+      }
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
         const settingCard = document.createElement("div");
