@@ -4,7 +4,7 @@ A hack client for [gimkit](https://www.gimkit.com/).
 
 ## Usage
 1. Install a userscript manager (Tampermonkey/Violentmonkey).
-2. Create a new userscript and paste `zyrox-base.js`. (or download it from a link once added)
+2. Install the userscript [here](https://www.tampermonkey.net/script_installation.php#url=https://update.greasyfork.org/scripts/572408/Zyrox%20client%20%28gimkit%29.user.js).
 3. Open [gimkit.com/join](https://www.gimkit.com/join).
 
 
