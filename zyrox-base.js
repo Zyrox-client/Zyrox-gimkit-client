@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.5
+// @version      1.4.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.5";
+    const CLIENT_VERSION = "1.4.1";
     return CLIENT_VERSION;
   }
 
@@ -1184,6 +1184,54 @@
     return defaults;
   }
 
+  function getHealthBarsConfig() {
+    const defaults = {
+      enabled: true,
+      width: 54,
+      height: 6,
+      yOffset: 32,
+      showText: true,
+    };
+    const liveCfg = window.__zyroxHealthBarsConfig;
+    return liveCfg && typeof liveCfg === "object" ? { ...defaults, ...liveCfg } : defaults;
+  }
+
+  function readNumericCandidate(source, paths) {
+    if (!source) return null;
+    for (const path of paths) {
+      const parts = path.split(".");
+      let node = source;
+      for (const part of parts) node = node?.[part];
+      const value = Number(node);
+      if (Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
+  function getCharacterHealthSnapshot(character, fallbackId = null) {
+    const cid = getCharacterId(character) ?? fallbackId;
+    const serializerCharacter = getSerializerCharacterById(cid) ?? findSerializerCharacterByPosition(character);
+    const candidates = [character, serializerCharacter];
+    let current = null;
+    let max = null;
+    for (const source of candidates) {
+      if (!source) continue;
+      if (current == null) {
+        current = readNumericCandidate(source, ["health", "hp", "currentHealth", "state.health", "stats.health", "data.health"]);
+      }
+      if (max == null) {
+        max = readNumericCandidate(source, ["maxHealth", "maxHp", "healthMax", "state.maxHealth", "stats.maxHealth", "data.maxHealth"]);
+      }
+      if (current != null && max != null) break;
+    }
+    if (current == null) return null;
+    if (max == null || max <= 0) {
+      if (current <= 100) max = 100;
+      else return null;
+    }
+    return { current: Math.max(0, current), max: Math.max(1, max) };
+  }
+
   function renderEspPlayers(stores) {
     const ctx = espState.ctx;
     const canvas = espState.canvas;
@@ -1201,8 +1249,10 @@
 
     const myTeam = getCharacterTeam(me);
     const espCfg = getEspRenderConfig();
+    const healthCfg = getHealthBarsConfig();
     const showHitbox = espCfg.hitbox !== false;
     const showNames = espCfg.names !== false;
+    const showHealthBars = state.enabledModules?.has("Health Bars") && healthCfg.enabled !== false;
     const namesDistanceOnly = espCfg.namesDistanceOnly === true;
     const offscreenStyle = espCfg.offscreenStyle === "arrows" || espCfg.offscreenStyle === "none"
       ? espCfg.offscreenStyle
@@ -2046,6 +2096,16 @@
                     { value: "modern", label: "Modern Arrow" },
                   ],
                 },
+              ],
+            },
+            {
+              name: "Health Bars",
+              settings: [
+                { id: "enabled", label: "Enabled", type: "checkbox", default: true },
+                { id: "width", label: "Bar Width", type: "slider", min: 20, max: 120, step: 1, default: 54, unit: "px" },
+                { id: "height", label: "Bar Height", type: "slider", min: 3, max: 18, step: 1, default: 6, unit: "px" },
+                { id: "yOffset", label: "Vertical Offset", type: "slider", min: 8, max: 90, step: 1, default: 32, unit: "px" },
+                { id: "showText", label: "Show HP Text", type: "checkbox", default: true },
               ],
             },
             "HUD",
