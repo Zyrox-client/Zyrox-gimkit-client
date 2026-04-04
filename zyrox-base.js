@@ -1887,64 +1887,37 @@
   }
 
   function findTriggerTarget(cfg) {
-    const shared = window.__zyroxEspShared;
-    let localPlayerId = null;
-    let localTeamId = null;
-    let camera = null;
-    let players = null;
-
-    if (shared?.ready && Array.isArray(shared.players) && shared.camera) {
-      localPlayerId = shared.localPlayerId ?? null;
-      localTeamId = shared.localTeamId ?? null;
-      camera = shared.camera;
-      players = shared.players;
-    } else {
-      const stores = espState.stores ?? window.stores ?? null;
-      const me = stores ? getMainCharacter(stores) : null;
-      const cam = stores?.phaser?.scene?.cameras?.cameras?.[0];
-      if (me && cam) {
-        const mePos = getCharacterPosition(me);
-        const meId = String(getCharacterId(me) ?? stores?.phaser?.mainCharacter?.id ?? "");
-        const meTeam = getCharacterTeam(me);
-        const fallbackPlayers = [];
-        for (const { id, character } of getCharacterEntries(stores)) {
-          const pos = getCharacterPosition(character);
-          if (!pos) continue;
-          fallbackPlayers.push({
-            id: String(id ?? getCharacterId(character) ?? ""),
-            name: String(getCharacterName(character, id)),
-            teamId: getCharacterTeam(character),
-            x: pos.x,
-            y: pos.y,
-          });
-        }
-        localPlayerId = meId || (mePos ? `${mePos.x}:${mePos.y}` : null);
-        localTeamId = meTeam ?? null;
-        camera = {
-          midX: Number(cam?.midPoint?.x ?? 0),
-          midY: Number(cam?.midPoint?.y ?? 0),
-          zoom: Number(cam?.zoom ?? 1),
-        };
-        players = fallbackPlayers;
-      }
-    }
-
-    if (!Array.isArray(players) || !camera) return null;
+    const snapshot = getAutoAimPlayerSnapshot();
+    if (!snapshot?.camera || !Array.isArray(snapshot.players)) return null;
     const mx = crosshairState.mouseX;
     const my = crosshairState.mouseY;
-    const fov = Math.max(8, Number(cfg.fovPx) || 85);
+    const espCfg = getEspRenderConfig();
+    const baseHitbox = Math.max(12, Number(espCfg.hitboxSize) || 150);
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const margin = 80;
     let best = null;
-    for (const player of players) {
+    for (const player of snapshot.players) {
       if (!player) continue;
       const pid = String(player.id ?? "");
-      if (!pid || (localPlayerId != null && pid === String(localPlayerId))) continue;
-      if (cfg.teamCheck && localTeamId != null && player.teamId === localTeamId) continue;
-      const screen = projectWorldToScreen(player, camera, window.innerWidth, window.innerHeight);
+      if (!pid || (snapshot.localPlayerId != null && pid === String(snapshot.localPlayerId))) continue;
+      if (cfg.teamCheck && snapshot.localTeamId != null && player.teamId === snapshot.localTeamId) continue;
+      const screen = projectWorldToScreen(player, snapshot.camera, width, height);
       if (!screen) continue;
-      if (screen.x < -80 || screen.x > window.innerWidth + 80 || screen.y < -80 || screen.y > window.innerHeight + 80) continue;
+      if (screen.x < -margin || screen.x > width + margin || screen.y < -margin || screen.y > height + margin) continue;
+      const boxSize = Math.max(24, baseHitbox / Math.max(0.01, Number(screen.zoom) || 1));
+      const half = boxSize * 0.5;
+      if (mx < screen.x - half || mx > screen.x + half || my < screen.y - half || my > screen.y + half) continue;
       const dist = Math.hypot(mx - screen.x, my - screen.y);
-      if (dist > fov) continue;
-      if (!best || dist < best.distancePx) best = { player, screenX: screen.x, screenY: screen.y, distancePx: dist };
+      if (!best || dist < best.distancePx) {
+        best = {
+          player,
+          screenX: screen.x,
+          screenY: screen.y,
+          distancePx: dist,
+          hitboxSizePx: boxSize,
+        };
+      }
     }
     return best;
   }
@@ -2215,13 +2188,12 @@
       return;
     }
 
-    triggerAssistState.statusText = `Target Acquired: ${target.player?.name ?? "Player"}`;
+    triggerAssistState.statusText = `Inside Hitbox: ${target.player?.name ?? "Player"}`;
     const now = Date.now();
     const minDelay = Math.max(16, Number(cfg.fireRateMs) || 45);
-    const aimPoint = { x: target.screenX, y: target.screenY };
     if (cfg.holdToFire) {
-      attemptFire(true, false, aimPoint);
-    } else if (now - triggerAssistState.lastFireAt >= minDelay && attemptFire(false, false, aimPoint)) {
+      attemptFire(true, false, null);
+    } else if (now - triggerAssistState.lastFireAt >= minDelay && attemptFire(false, false, null)) {
       triggerAssistState.lastFireAt = now;
     }
 
