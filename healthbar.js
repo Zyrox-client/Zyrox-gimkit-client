@@ -24,6 +24,7 @@
     warnedNoHealth: false,
     healthPath: null,
     maxHealthPath: null,
+    noDataFrames: 0,
   };
 
   function readNumber(source, paths) {
@@ -176,15 +177,15 @@
     if (hp == null) {
       if (!state.warnedNoHealth) {
         state.warnedNoHealth = true;
-        console.warn("[Healthbar Test] no health field found yet; drawing placeholder bars.", {
+        console.info("[Healthbar Test] no remote health fields detected in current match data.", {
           discoveredHealthPath: state.healthPath,
           discoveredMaxPath: state.maxHealthPath,
         });
       }
-      return { hp: 100, maxHp: 100, unknown: true };
+      return null;
     }
     if (maxHp == null || maxHp <= 0) maxHp = 100;
-    return { hp: Math.max(0, hp), maxHp: Math.max(1, maxHp), unknown: false };
+    return { hp: Math.max(0, hp), maxHp: Math.max(1, maxHp) };
   }
 
   async function resolveStores() {
@@ -246,9 +247,13 @@
     if (!Number.isFinite(camX) || !Number.isFinite(camY)) return;
     const myTeam = getCharacterTeam(me);
 
+    let drewAnyBars = false;
+    let sawAnyEnemy = false;
+
     for (const { id, character } of getCharacterEntries(stores)) {
       if (!character || character === me) continue;
       if (myTeam != null && getCharacterTeam(character) === myTeam) continue;
+      sawAnyEnemy = true;
       const pos = getCharacterPosition(character);
       if (!pos) continue;
       const sx = (pos.x - camX) * zoom + canvas.width / 2;
@@ -256,6 +261,7 @@
       if (sx < 0 || sx > canvas.width || sy < 0 || sy > canvas.height) continue;
       const health = getHealth(character, id);
       if (!health) continue;
+      drewAnyBars = true;
 
       const ratio = Math.max(0, Math.min(1, health.hp / health.maxHp));
       const w = 56;
@@ -267,21 +273,30 @@
       ctx.fillStyle = "rgba(255, 70, 70, 0.9)";
       ctx.fillRect(bx, by, w, h);
       const grad = ctx.createLinearGradient(bx, by, bx + w, by);
-      grad.addColorStop(0, health.unknown ? "#bfc7d8" : "#74ff80");
-      grad.addColorStop(1, health.unknown ? "#8693ad" : "#2dcf55");
+      grad.addColorStop(0, "#74ff80");
+      grad.addColorStop(1, "#2dcf55");
       ctx.fillStyle = grad;
       ctx.fillRect(bx, by, w * ratio, h);
       ctx.font = "11px Verdana";
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
-      ctx.fillText(
-        health.unknown
-          ? "HP: unknown"
-          : `${Math.round(health.hp)}/${Math.round(health.maxHp)}`,
-        sx,
-        by - 2
-      );
+      ctx.fillText(`${Math.round(health.hp)}/${Math.round(health.maxHp)}`, sx, by - 2);
+    }
+
+    if (!drewAnyBars && sawAnyEnemy) {
+      state.noDataFrames += 1;
+      if (state.noDataFrames > 20) {
+        ctx.fillStyle = "rgba(0,0,0,0.45)";
+        ctx.fillRect(12, 12, 360, 42);
+        ctx.fillStyle = "#ffd1d1";
+        ctx.font = "14px Inter, Verdana, sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText("Healthbar Test: enemy health is not exposed to this client.", 22, 33);
+      }
+    } else {
+      state.noDataFrames = 0;
     }
   }
 
