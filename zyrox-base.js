@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.8
+// @version      1.3.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.8";
+    const CLIENT_VERSION = "1.3.9";
     return CLIENT_VERSION;
   }
 
@@ -1215,16 +1215,33 @@
     const zoom = Number(camera?.zoom ?? 1) || 1;
     if (!Number.isFinite(camX) || !Number.isFinite(camY)) return;
 
+    const activeIds = new Set();
+    const now = performance.now();
+
     for (const entry of getCharacterEntries(stores)) {
       const character = entry.character;
       const characterId = entry.id ?? getCharacterId(character);
       if (!character || character === me) continue;
       const pos = getCharacterPosition(character);
       if (!pos) continue;
+      const stableId = String(characterId ?? `${Math.round(pos.x)}:${Math.round(pos.y)}`);
+      activeIds.add(stableId);
       const angle = Math.atan2(pos.y - camY, pos.x - camX);
       const distance = Math.hypot(pos.x - camX, pos.y - camY) * zoom;
-      const screenX = (pos.x - camX) * zoom + canvas.width / 2;
-      const screenY = (pos.y - camY) * zoom + canvas.height / 2;
+      const rawX = (pos.x - camX) * zoom + canvas.width / 2;
+      const rawY = (pos.y - camY) * zoom + canvas.height / 2;
+      const prev = espState.seenPlayers.get(stableId);
+      let screenX = rawX;
+      let screenY = rawY;
+      if (prev) {
+        const delta = Math.hypot(rawX - prev.x, rawY - prev.y);
+        if (delta < 300) {
+          const blend = 0.38;
+          screenX = prev.x + (rawX - prev.x) * blend;
+          screenY = prev.y + (rawY - prev.y) * blend;
+        }
+      }
+      espState.seenPlayers.set(stableId, { x: screenX, y: screenY, t: now });
       const onScreen = screenX >= 0 && screenX <= canvas.width && screenY >= 0 && screenY <= canvas.height;
       const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
       const hitboxColor = espCfg.hitboxColor || (isTeammate ? "green" : "red");
@@ -1323,6 +1340,12 @@
       const distanceText = `${Math.floor(distance)}`;
       const labelText = namesDistanceOnly ? distanceText : `${getCharacterName(character, characterId)} (${distanceText})`;
       ctx.fillText(labelText, labelX, labelY);
+    }
+
+    for (const [id, data] of espState.seenPlayers) {
+      if (!activeIds.has(id) && now - Number(data?.t ?? 0) > 900) {
+        espState.seenPlayers.delete(id);
+      }
     }
   }
 
@@ -1812,15 +1835,41 @@
     if (!ctx || !canvas) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!cfg.showTargetRing || !triggerAssistState.target) return;
+    const pulse = (Math.sin(performance.now() / 120) + 1) * 0.5;
+    const ringR = Math.max(10, Number(cfg.fovPx) || 85);
     ctx.save();
-    ctx.strokeStyle = "rgba(255, 80, 80, 0.95)";
+    const ringGradient = ctx.createRadialGradient(
+      crosshairState.mouseX,
+      crosshairState.mouseY,
+      Math.max(1, ringR * 0.1),
+      crosshairState.mouseX,
+      crosshairState.mouseY,
+      ringR
+    );
+    ringGradient.addColorStop(0, "rgba(255, 130, 130, 0.12)");
+    ringGradient.addColorStop(1, "rgba(255, 40, 40, 0.02)");
+    ctx.fillStyle = ringGradient;
+    ctx.beginPath();
+    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, ringR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(255, 70, 70, ${0.7 + pulse * 0.25})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, Math.max(8, Number(cfg.fovPx) || 85), 0, Math.PI * 2);
+    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, ringR, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(255, 255, 0, 0.95)";
+
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = `rgba(255, 225, 120, ${0.55 + pulse * 0.35})`;
     ctx.beginPath();
-    ctx.arc(triggerAssistState.target.screenX, triggerAssistState.target.screenY, 10, 0, Math.PI * 2);
+    ctx.moveTo(crosshairState.mouseX, crosshairState.mouseY);
+    ctx.lineTo(triggerAssistState.target.screenX, triggerAssistState.target.screenY);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(255, 255, 120, ${0.8 + pulse * 0.2})`;
+    ctx.beginPath();
+    ctx.arc(triggerAssistState.target.screenX, triggerAssistState.target.screenY, 10 + pulse * 2.5, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
   }
@@ -3612,47 +3661,42 @@
       statusCard.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
           <span style="font-weight:600;">Status</span>
-          <span class="ta-status-value" style="opacity:0.85;font-size:0.92em;">${triggerAssistState.statusText}</span>
+          <span class="zyrox-trigger-status" style="opacity:0.85;font-size:0.92em;">${triggerAssistState.statusText}</span>
         </div>
       `;
       configBody.appendChild(statusCard);
 
-      const makeCard = (setting, inputHtml) => {
-        const card = document.createElement("div");
-        card.className = "zyrox-setting-card";
-        card.innerHTML = `
-          <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-            <span>${setting.label}</span>
-            ${inputHtml}
-          </label>
-        `;
-        configBody.appendChild(card);
-        return card;
-      };
-
       for (const setting of moduleLayout?.settings || []) {
         if (setting.type === "checkbox") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = Boolean(setting.default);
           const checked = cfg[setting.id] ? "checked" : "";
-          const card = makeCard(setting, `<input type="checkbox" class="ta-cb" data-id="${setting.id}" ${checked} />`);
-          card.querySelector(".ta-cb")?.addEventListener("change", (event) => {
+          const card = document.createElement("div");
+          card.className = "zyrox-setting-card";
+          card.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${setting.id}" ${checked} />
+          `;
+          configBody.appendChild(card);
+          const input = card.querySelector(".set-module-setting-checkbox");
+          input?.addEventListener("change", (event) => {
             cfg[setting.id] = Boolean(event.target.checked);
             syncTriggerAssist();
           });
         } else if (setting.type === "slider") {
           const value = Number(cfg[setting.id] ?? setting.default ?? setting.min ?? 0);
-          const unit = setting.unit ?? "";
+          const unit = setting.unit ?? "ms";
           const card = document.createElement("div");
           card.className = "zyrox-setting-card";
           card.innerHTML = `
-            <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+            <label style="display:flex;justify-content:space-between;align-items:center;">
               <span>${setting.label}</span>
-              <span class="ta-slider-value">${value}${unit}</span>
+              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${value}${unit}</span>
             </label>
-            <input type="range" class="ta-slider" data-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
+            <input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
           `;
           configBody.appendChild(card);
-          const slider = card.querySelector(".ta-slider");
-          const valueLabel = card.querySelector(".ta-slider-value");
+          const slider = card.querySelector(".set-module-setting");
+          const valueLabel = card.querySelector(".zyrox-slider-value");
           slider?.addEventListener("input", (event) => {
             const next = Number(event.target.value);
             cfg[setting.id] = next;
@@ -3662,7 +3706,7 @@
         }
       }
 
-      const statusValueEl = statusCard.querySelector(".ta-status-value");
+      const statusValueEl = statusCard.querySelector(".zyrox-trigger-status");
       const statusUpdater = setInterval(() => {
         if (openConfigModule !== "Trigger Assist") {
           clearInterval(statusUpdater);
