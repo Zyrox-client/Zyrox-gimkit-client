@@ -1045,6 +1045,21 @@
     }
   }
 
+  function primeSharedPlayerData() {
+    if (espState.stores || espState.storesPromise) return;
+    const attemptResolve = () => {
+      resolveEspStores().catch((error) => {
+        espLog("Shared stores resolve failed; retrying", error);
+        setTimeout(() => {
+          if (!espState.stores) attemptResolve();
+        }, 1500);
+      });
+    };
+    attemptResolve();
+  }
+
+  primeSharedPlayerData();
+
   function getCharacterPosition(character) {
     const x = Number(character?.x ?? character?.position?.x ?? character?.body?.x);
     const y = Number(character?.y ?? character?.position?.y ?? character?.body?.y);
@@ -1361,14 +1376,14 @@
   function getCrosshairConfig() {
     const defaults = {
       enabled: true,
-      style: "cross",
+      style: "x",
       color: "#ff3b3b",
-      crosshairSize: 10,
-      lineSize: 2,
+      crosshairSize: 25,
+      lineSize: 4,
       showLine: false,
       lineColor: "#ff3b3b",
       tracerLineSize: 1.5,
-      hoverHighlight: false,
+      hoverHighlight: true,
       hoverColor: "#ffff00",
     };
     const stored = window.__zyroxCrosshairConfig;
@@ -1415,8 +1430,8 @@
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    const crosshairSize = typeof cfg.crosshairSize === "number" ? cfg.crosshairSize : 10;
-    const lineSize      = typeof cfg.lineSize      === "number" ? cfg.lineSize      : 2;
+    const crosshairSize = typeof cfg.crosshairSize === "number" ? cfg.crosshairSize : 25;
+    const lineSize      = typeof cfg.lineSize      === "number" ? cfg.lineSize      : 4;
     const tracerSize    = typeof cfg.tracerLineSize === "number" ? cfg.tracerLineSize : 1.5;
 
     // --- Player hover detection ---
@@ -1430,7 +1445,7 @@
           const camX = Number(camera?.midPoint?.x);
           const camY = Number(camera?.midPoint?.y);
           const zoom = Number(camera?.zoom ?? 1) || 1;
-          const hitRadius = Math.max(20, 80 / zoom) / 2;
+          const hitRadius = (Math.max(20, 120 / zoom) / 2) * 3;
           if (Number.isFinite(camX) && Number.isFinite(camY)) {
             for (const { character } of getCharacterEntries(stores)) {
               if (!character || character === me) continue;
@@ -1549,6 +1564,7 @@
 
   function startCrosshair() {
     if (crosshairState.enabled) return;
+    primeSharedPlayerData();
     crosshairState.enabled = true;
     createCrosshairCanvas();
     renderCrosshairFrame();
@@ -1606,7 +1622,7 @@
               name: "ESP",
               settings: [
                 { id: "hitbox", label: "Hitbox", type: "checkbox", default: true },
-                { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 180, step: 2, default: 80, unit: "px" },
+                { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 270, step: 2, default: 80, unit: "px" },
                 { id: "hitboxWidth", label: "Hitbox Width", type: "slider", min: 1, max: 10, step: 1, default: 3, unit: "px" },
                 { id: "hitboxColor", label: "Hitbox Color", type: "color", default: "#ff3b3b" },
                 { id: "names", label: "Names", type: "checkbox", default: true },
@@ -1668,7 +1684,7 @@
               name: "Crosshair",
               settings: [
                 { id: "enabled",       label: "Show Crosshair",  type: "checkbox", default: true },
-                { id: "style",         label: "Style",            type: "select",   default: "cross",
+                { id: "style",         label: "Style",            type: "select",   default: "x",
                   options: [
                     { value: "cross",       label: "Cross (gap)" },
                     { value: "solid",       label: "Solid Cross" },
@@ -1681,12 +1697,12 @@
                   ],
                 },
                 { id: "color",         label: "Crosshair Color",  type: "color",    default: "#ff3b3b" },
-                { id: "crosshairSize", label: "Crosshair Size",   type: "slider",   default: 10, min: 4, max: 40, step: 1, unit: "px" },
-                { id: "lineSize",      label: "Cursor Width",      type: "slider",   default: 2,  min: 1, max: 6,  step: 0.5, unit: "px" },
+                { id: "crosshairSize", label: "Crosshair Size",   type: "slider",   default: 25, min: 4, max: 40, step: 1, unit: "px" },
+                { id: "lineSize",      label: "Cursor Width",      type: "slider",   default: 4,  min: 1, max: 6,  step: 0.5, unit: "px" },
                 { id: "showLine",       label: "Show Line",         type: "checkbox", default: false },
                 { id: "lineColor",      label: "Line Color",        type: "color",    default: "#ff3b3b" },
                 { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
-                { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: false },
+                { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: true },
                 { id: "hoverColor",     label: "Hover Color",       type: "color",    default: "#ffff00" },
               ],
             },
@@ -2940,7 +2956,7 @@
       const hitboxRow = makeRow("Hitbox", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-hitbox-enabled" ${cfg.hitbox ? "checked" : ""} /> Enabled</label>
-          <label>Size <input type="range" class="esp-hitbox-size" min="24" max="180" step="2" value="${cfg.hitboxSize}" /></label>
+          <label>Size <input type="range" class="esp-hitbox-size" min="24" max="270" step="2" value="${cfg.hitboxSize}" /></label>
           <span class="esp-hitbox-size-value esp-value-text">${cfg.hitboxSize}px</span>
           <label>Width <input type="range" class="esp-hitbox-width" min="1" max="10" step="1" value="${cfg.hitboxWidth}" /></label>
           <span class="esp-hitbox-width-value esp-value-text">${cfg.hitboxWidth}px</span>
@@ -3136,15 +3152,15 @@
 
       const sizeRow = makeRow("Crosshair Size", `
         <div style="display:flex;align-items:center;gap:10px;">
-          <input type="range" class="xh-crosshair-size" min="4" max="40" step="1" value="${cfg.crosshairSize ?? 10}" style="flex:1;" />
-          <span class="xh-crosshair-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.crosshairSize ?? 10}px</span>
+          <input type="range" class="xh-crosshair-size" min="4" max="40" step="1" value="${cfg.crosshairSize ?? 25}" style="flex:1;" />
+          <span class="xh-crosshair-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.crosshairSize ?? 25}px</span>
         </div>
       `);
 
       const lineSizeRow = makeRow("Cursor Width", `
         <div style="display:flex;align-items:center;gap:10px;">
-          <input type="range" class="xh-line-size" min="0.5" max="6" step="0.5" value="${cfg.lineSize ?? 2}" style="flex:1;" />
-          <span class="xh-line-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.lineSize ?? 2}px</span>
+          <input type="range" class="xh-line-size" min="0.5" max="6" step="0.5" value="${cfg.lineSize ?? 4}" style="flex:1;" />
+          <span class="xh-line-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.lineSize ?? 4}px</span>
         </div>
       `);
 
