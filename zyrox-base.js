@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.0
+// @version      1.3.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.0";
+    const CLIENT_VERSION = "1.3.1";
     return CLIENT_VERSION;
   }
 
@@ -1368,6 +1368,8 @@
       showLine: false,
       lineColor: "#ff3b3b",
       tracerLineSize: 1.5,
+      hoverHighlight: false,
+      hoverColor: "#ffff00",
     };
     const stored = window.__zyroxCrosshairConfig;
     return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
@@ -1412,11 +1414,41 @@
     const my = crosshairState.mouseY;
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
-    const col = cfg.color || "#ff3b3b";
 
     const crosshairSize = typeof cfg.crosshairSize === "number" ? cfg.crosshairSize : 10;
     const lineSize      = typeof cfg.lineSize      === "number" ? cfg.lineSize      : 2;
     const tracerSize    = typeof cfg.tracerLineSize === "number" ? cfg.tracerLineSize : 1.5;
+
+    // --- Player hover detection ---
+    let hoveringPlayer = false;
+    if (cfg.hoverHighlight) {
+      try {
+        const stores = espState.stores ?? window.stores ?? null;
+        const camera = stores?.phaser?.scene?.cameras?.cameras?.[0];
+        const me = stores ? getMainCharacter(stores) : null;
+        if (camera && me) {
+          const camX = Number(camera?.midPoint?.x);
+          const camY = Number(camera?.midPoint?.y);
+          const zoom = Number(camera?.zoom ?? 1) || 1;
+          const hitRadius = Math.max(20, 80 / zoom) / 2;
+          if (Number.isFinite(camX) && Number.isFinite(camY)) {
+            for (const { character } of getCharacterEntries(stores)) {
+              if (!character || character === me) continue;
+              const pos = getCharacterPosition(character);
+              if (!pos) continue;
+              const sx = (pos.x - camX) * zoom + canvas.width / 2;
+              const sy = (pos.y - camY) * zoom + canvas.height / 2;
+              if (Math.hypot(mx - sx, my - sy) <= hitRadius) {
+                hoveringPlayer = true;
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) { /* stores not ready yet */ }
+    }
+
+    const col = hoveringPlayer ? (cfg.hoverColor || "#ffff00") : (cfg.color || "#ff3b3b");
 
     // Draw line from center to cursor if enabled
     if (cfg.showLine) {
@@ -1651,9 +1683,11 @@
                 { id: "color",         label: "Crosshair Color",  type: "color",    default: "#ff3b3b" },
                 { id: "crosshairSize", label: "Crosshair Size",   type: "slider",   default: 10, min: 4, max: 40, step: 1, unit: "px" },
                 { id: "lineSize",      label: "Cursor Width",      type: "slider",   default: 2,  min: 1, max: 6,  step: 0.5, unit: "px" },
-                { id: "showLine",      label: "Show Line",         type: "checkbox", default: false },
-                { id: "lineColor",     label: "Line Color",        type: "color",    default: "#ff3b3b" },
-                { id: "tracerLineSize", label: "Tracer Thickness", type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
+                { id: "showLine",       label: "Show Line",         type: "checkbox", default: false },
+                { id: "lineColor",      label: "Line Color",        type: "color",    default: "#ff3b3b" },
+                { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
+                { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: false },
+                { id: "hoverColor",     label: "Hover Color",       type: "color",    default: "#ffff00" },
               ],
             },
           ],
@@ -3131,6 +3165,16 @@
         </div>
       `);
 
+      const hoverRow = makeRow("Player Hover", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="xh-hover-highlight" ${cfg.hoverHighlight ? "checked" : ""} />
+            Change color on player
+          </label>
+          <input type="color" class="xh-hover-color" value="${cfg.hoverColor || "#ffff00"}" title="Hover color" />
+        </div>
+      `);
+
       enabledRow.querySelector(".xh-enabled").addEventListener("change", (e) => {
         cfg.enabled = e.target.checked;
         syncCrosshair();
@@ -3167,6 +3211,14 @@
         const v = Number(e.target.value);
         cfg.tracerLineSize = v;
         tracerSizeRow.querySelector(".xh-tracer-size-label").textContent = `${v}px`;
+        syncCrosshair();
+      });
+      hoverRow.querySelector(".xh-hover-highlight").addEventListener("change", (e) => {
+        cfg.hoverHighlight = e.target.checked;
+        syncCrosshair();
+      });
+      hoverRow.querySelector(".xh-hover-color").addEventListener("input", (e) => {
+        cfg.hoverColor = e.target.value;
         syncCrosshair();
       });
 
