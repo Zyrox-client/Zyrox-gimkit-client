@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.6
+// @version      1.3.7
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.6";
+    const CLIENT_VERSION = "1.3.7";
     return CLIENT_VERSION;
   }
 
@@ -1719,17 +1719,58 @@
 
   function findTriggerTarget(cfg) {
     const shared = window.__zyroxEspShared;
-    if (!shared?.ready || !Array.isArray(shared.players) || !shared.camera) return null;
+    let localPlayerId = null;
+    let localTeamId = null;
+    let camera = null;
+    let players = null;
+
+    if (shared?.ready && Array.isArray(shared.players) && shared.camera) {
+      localPlayerId = shared.localPlayerId ?? null;
+      localTeamId = shared.localTeamId ?? null;
+      camera = shared.camera;
+      players = shared.players;
+    } else {
+      const stores = espState.stores ?? window.stores ?? null;
+      const me = stores ? getMainCharacter(stores) : null;
+      const cam = stores?.phaser?.scene?.cameras?.cameras?.[0];
+      if (me && cam) {
+        const mePos = getCharacterPosition(me);
+        const meId = String(getCharacterId(me) ?? stores?.phaser?.mainCharacter?.id ?? "");
+        const meTeam = getCharacterTeam(me);
+        const fallbackPlayers = [];
+        for (const { id, character } of getCharacterEntries(stores)) {
+          const pos = getCharacterPosition(character);
+          if (!pos) continue;
+          fallbackPlayers.push({
+            id: String(id ?? getCharacterId(character) ?? ""),
+            name: String(getCharacterName(character, id)),
+            teamId: getCharacterTeam(character),
+            x: pos.x,
+            y: pos.y,
+          });
+        }
+        localPlayerId = meId || (mePos ? `${mePos.x}:${mePos.y}` : null);
+        localTeamId = meTeam ?? null;
+        camera = {
+          midX: Number(cam?.midPoint?.x ?? 0),
+          midY: Number(cam?.midPoint?.y ?? 0),
+          zoom: Number(cam?.zoom ?? 1),
+        };
+        players = fallbackPlayers;
+      }
+    }
+
+    if (!Array.isArray(players) || !camera) return null;
     const mx = crosshairState.mouseX;
     const my = crosshairState.mouseY;
     const fov = Math.max(8, Number(cfg.fovPx) || 42);
     let best = null;
-    for (const player of shared.players) {
+    for (const player of players) {
       if (!player) continue;
       const pid = String(player.id ?? "");
-      if (!pid || pid === String(shared.localPlayerId ?? "")) continue;
-      if (cfg.teamCheck && shared.localTeamId != null && player.teamId === shared.localTeamId) continue;
-      const screen = projectWorldToScreen(player, shared.camera, window.innerWidth, window.innerHeight);
+      if (!pid || (localPlayerId != null && pid === String(localPlayerId))) continue;
+      if (cfg.teamCheck && localTeamId != null && player.teamId === localTeamId) continue;
+      const screen = projectWorldToScreen(player, camera, window.innerWidth, window.innerHeight);
       if (!screen) continue;
       if (screen.x < -80 || screen.x > window.innerWidth + 80 || screen.y < -80 || screen.y > window.innerHeight + 80) continue;
       const dist = Math.hypot(mx - screen.x, my - screen.y);
@@ -1775,18 +1816,13 @@
       renderTriggerAssistOverlay(cfg);
       return;
     }
-    if (!window.__zyroxEspShared?.ready) {
-      triggerAssistState.statusText = "Waiting for match data";
-      triggerAssistState.target = null;
-      releaseFireHold();
-      renderTriggerAssistOverlay(cfg);
-      return;
-    }
 
     const target = findTriggerTarget(cfg);
     triggerAssistState.target = target;
     if (!target) {
-      triggerAssistState.statusText = "No target";
+      const hasShared = window.__zyroxEspShared?.ready;
+      const hasStores = Boolean((espState.stores ?? window.stores)?.phaser?.scene);
+      triggerAssistState.statusText = (!hasShared && !hasStores) ? "Waiting for match data" : "No target";
       releaseFireHold();
       renderTriggerAssistOverlay(cfg);
       return;
