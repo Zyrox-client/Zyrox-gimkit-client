@@ -1593,6 +1593,7 @@
       onDisable: stopCrosshair,
     },
   };
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair"]);
 
   // --- End of Core Utilities ---
 
@@ -1751,6 +1752,7 @@
     listeningForBind: null,
     listeningForMenuBind: false,
     searchAutofocus: true,
+    hideBrokenModules: true,
     displayMode: "loose",
     looseInitialized: false,
     loosePositions: {
@@ -2518,6 +2520,10 @@
             <label>Auto Focus Search</label>
             <input type="checkbox" class="set-search-autofocus" checked />
           </div>
+          <div class="zyrox-setting-card">
+            <label>Hide Non-Working Modules</label>
+            <input type="checkbox" class="set-hide-broken-modules" checked />
+          </div>
         </div>
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="theme">
@@ -2743,6 +2749,7 @@
   const settingsSaveBtn = settingsMenu.querySelector(".settings-save");
   const presetButtons = [...settingsMenu.querySelectorAll(".zyrox-preset-btn")];
   const searchAutofocusInput = settingsMenu.querySelector(".set-search-autofocus");
+  const hideBrokenModulesInput = settingsMenu.querySelector(".set-hide-broken-modules");
   const accentInput = settingsMenu.querySelector(".set-accent");
   const shellBgStartInput = settingsMenu.querySelector(".set-shell-bg-start");
   const shellBgEndInput = settingsMenu.querySelector(".set-shell-bg-end");
@@ -2804,6 +2811,10 @@
     currentBindTextEl.textContent = bind ? `Keybind: ${bind}` : "Keybind: none";
   }
 
+  function isModuleHiddenByWorkState(moduleName) {
+    return state.hideBrokenModules && !WORKING_MODULES.has(moduleName);
+  }
+
   function getModuleLayoutConfig(moduleName) {
     const allGroups = [...MENU_LAYOUT.general.groups, ...MENU_LAYOUT.gamemodeSpecific.groups];
     const found = allGroups
@@ -2854,6 +2865,7 @@
   }
 
   function toggleModule(moduleName) {
+    if (isModuleHiddenByWorkState(moduleName)) return;
     const item = state.moduleItems.get(moduleName);
     const moduleInstance = state.modules.get(moduleName);
     if (!item || !moduleInstance) return;
@@ -3350,6 +3362,7 @@
     return {
       toggleKey: CONFIG.toggleKey,
       searchAutofocus: searchAutofocusInput.checked,
+      hideBrokenModules: hideBrokenModulesInput.checked,
       accent: accentInput.value,
       shellBgStart: shellBgStartInput.value,
       shellBgEnd: shellBgEndInput.value,
@@ -3725,7 +3738,9 @@
     const query = state.searchQuery.trim().toLowerCase();
 
     for (const entry of state.moduleEntries) {
-      const visible = !query || entry.name.toLowerCase().includes(query);
+      const hiddenByWorkState = isModuleHiddenByWorkState(entry.name);
+      const visibleByQuery = !query || entry.name.toLowerCase().includes(query);
+      const visible = !hiddenByWorkState && visibleByQuery;
       entry.item.style.display = visible ? "" : "none";
     }
 
@@ -3769,9 +3784,11 @@
     const list = document.createElement("ul");
     list.className = "zyrox-module-list";
 
+    const moduleNames = [];
     for (const moduleDef of modules) {
       const moduleName = typeof moduleDef === "string" ? moduleDef : moduleDef?.name;
       if (!moduleName) continue;
+      moduleNames.push(moduleName);
       const item = document.createElement("li");
       item.className = "zyrox-module";
       item.innerHTML = `<span>${moduleName}</span><span class="zyrox-bind-label"></span>`;
@@ -3811,7 +3828,7 @@
     panel.appendChild(list);
     panelByName.set(name, panel);
     panelCollapseButtons.set(name, collapseButton);
-    state.modulePanels.set(panel, { modules: [...modules] });
+    state.modulePanels.set(panel, { modules: moduleNames });
     return panel;
   }
 
@@ -3901,6 +3918,16 @@
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
   });
+  hideBrokenModulesInput.addEventListener("change", () => {
+    state.hideBrokenModules = hideBrokenModulesInput.checked;
+    if (state.hideBrokenModules) {
+      for (const moduleName of [...state.enabledModules]) {
+        if (isModuleHiddenByWorkState(moduleName)) toggleModule(moduleName);
+      }
+      if (openConfigModule && isModuleHiddenByWorkState(openConfigModule)) closeConfig();
+    }
+    applySearchFilter();
+  });
 
   settingsResetBtn.addEventListener("click", () => {
     accentInput.value = "#ff3d3d";
@@ -3937,6 +3964,8 @@
     espValueTextColorInput.value = "#ffffff";
     searchAutofocusInput.checked = true;
     state.searchAutofocus = true;
+    hideBrokenModulesInput.checked = true;
+    state.hideBrokenModules = true;
     scaleInput.value = "100";
     radiusInput.value = "14";
     blurInput.value = "10";
@@ -4027,6 +4056,8 @@
     // Reset search autofocus
     state.searchAutofocus = true;
     searchAutofocusInput.checked = true;
+    state.hideBrokenModules = true;
+    hideBrokenModulesInput.checked = true;
 
     // Trigger the full appearance reset too
     settingsResetBtn.click();
@@ -4110,6 +4141,10 @@
           state.searchAutofocus = saved.searchAutofocus;
           searchAutofocusInput.checked = saved.searchAutofocus;
         }
+        if (typeof saved.hideBrokenModules === "boolean") {
+          state.hideBrokenModules = saved.hideBrokenModules;
+          hideBrokenModulesInput.checked = saved.hideBrokenModules;
+        }
         const assign = (input, key) => {
           if (saved[key] !== undefined && input) input.value = String(saved[key]);
         };
@@ -4180,6 +4215,7 @@
   syncCollapseButtons();
   applyAppearance();
   setDisplayMode(state.displayMode);
+  applySearchFilter();
 
   const isTypingTarget = (target) => {
     if (!(target instanceof Element)) return false;
