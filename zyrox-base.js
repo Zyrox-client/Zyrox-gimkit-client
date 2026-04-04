@@ -1145,6 +1145,20 @@
       ?? "Player";
   }
 
+  function projectWorldToScreen(position, cameraSnapshot, viewportWidth, viewportHeight) {
+    const x = Number(position?.x);
+    const y = Number(position?.y);
+    const camX = Number(cameraSnapshot?.midX);
+    const camY = Number(cameraSnapshot?.midY);
+    const zoom = Number(cameraSnapshot?.zoom ?? 1) || 1;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(camX) || !Number.isFinite(camY)) return null;
+    return {
+      x: (x - camX) * zoom + viewportWidth / 2,
+      y: (y - camY) * zoom + viewportHeight / 2,
+      zoom,
+    };
+  }
+
   function getEspRenderConfig() {
     const defaults = {
       hitbox: true,
@@ -1201,16 +1215,33 @@
     const zoom = Number(camera?.zoom ?? 1) || 1;
     if (!Number.isFinite(camX) || !Number.isFinite(camY)) return;
 
+    const activeIds = new Set();
+    const now = performance.now();
+
     for (const entry of getCharacterEntries(stores)) {
       const character = entry.character;
       const characterId = entry.id ?? getCharacterId(character);
       if (!character || character === me) continue;
       const pos = getCharacterPosition(character);
       if (!pos) continue;
+      const stableId = String(characterId ?? `${Math.round(pos.x)}:${Math.round(pos.y)}`);
+      activeIds.add(stableId);
       const angle = Math.atan2(pos.y - camY, pos.x - camX);
       const distance = Math.hypot(pos.x - camX, pos.y - camY) * zoom;
-      const screenX = (pos.x - camX) * zoom + canvas.width / 2;
-      const screenY = (pos.y - camY) * zoom + canvas.height / 2;
+      const rawX = (pos.x - camX) * zoom + canvas.width / 2;
+      const rawY = (pos.y - camY) * zoom + canvas.height / 2;
+      const prev = espState.seenPlayers.get(stableId);
+      let screenX = rawX;
+      let screenY = rawY;
+      if (prev) {
+        const delta = Math.hypot(rawX - prev.x, rawY - prev.y);
+        if (delta < 300) {
+          const blend = 0.38;
+          screenX = prev.x + (rawX - prev.x) * blend;
+          screenY = prev.y + (rawY - prev.y) * blend;
+        }
+      }
+      espState.seenPlayers.set(stableId, { x: screenX, y: screenY, t: now });
       const onScreen = screenX >= 0 && screenX <= canvas.width && screenY >= 0 && screenY <= canvas.height;
       const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
       const hitboxColor = espCfg.hitboxColor || (isTeammate ? "green" : "red");
@@ -1309,6 +1340,13 @@
       const distanceText = `${Math.floor(distance)}`;
       const labelText = namesDistanceOnly ? distanceText : `${getCharacterName(character, characterId)} (${distanceText})`;
       ctx.fillText(labelText, labelX, labelY);
+
+    }
+
+    for (const [id, data] of espState.seenPlayers) {
+      if (!activeIds.has(id) && now - Number(data?.t ?? 0) > 900) {
+        espState.seenPlayers.delete(id);
+      }
     }
   }
 
@@ -1583,6 +1621,342 @@
 
   window.addEventListener("resize", resizeCrosshairCanvas);
 
+  // ---------------------------------------------------------------------------
+  // TRIGGER ASSIST MODULE
+  // Uses shared ESP bridge data and cursor position to trigger fire when
+  // player targets are within a configurable cursor radius.
+  // ---------------------------------------------------------------------------
+  const triggerAssistState = {
+    enabled: false,
+    loopId: null,
+    canvas: null,
+    ctx: null,
+    lastFireAt: 0,
+    mouseHeld: false,
+    releaseTimeoutId: null,
+    target: null,
+    statusText: "Idle",
+  };
+
+  function getTriggerAssistConfig() {
+    const defaults = {
+      enabled: true,
+      teamCheck: true,
+      fovPx: 85,
+      holdToFire: false,
+      fireRateMs: 45,
+      requireLOS: false,
+      onlyWhenGameFocused: true,
+      showTargetRing: true,
+      debugStatus: true,
+    };
+    const stored = window.__zyroxTriggerAssistConfig;
+    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+  }
+
+  function createTriggerAssistCanvas() {
+    if (triggerAssistState.canvas?.parentNode) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:10001;pointer-events:none;user-select:none;";
+    document.body.appendChild(canvas);
+    triggerAssistState.canvas = canvas;
+    triggerAssistState.ctx = canvas.getContext("2d");
+  }
+
+  function destroyTriggerAssistCanvas() {
+    triggerAssistState.canvas?.remove();
+    triggerAssistState.canvas = null;
+    triggerAssistState.ctx = null;
+  }
+
+  function resizeTriggerAssistCanvas() {
+    if (!triggerAssistState.canvas) return;
+    triggerAssistState.canvas.width = window.innerWidth;
+    triggerAssistState.canvas.height = window.innerHeight;
+  }
+
+  function getGameCanvas() {
+    const stores = espState.stores ?? window.stores;
+    return stores?.phaser?.game?.canvas
+      ?? stores?.phaser?.scene?.game?.canvas
+      ?? document.querySelector("canvas");
+  }
+
+  function fireCanvasPointerEvent(type, canvas, x, y) {
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = rect.left + Math.max(0, Math.min(rect.width, x));
+    const clientY = rect.top + Math.max(0, Math.min(rect.height, y));
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons: type === "pointerup" || type === "mouseup" ? 0 : 1,
+      clientX,
+      clientY,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+    };
+    canvas.dispatchEvent(new PointerEvent(type, init));
+  }
+
+  function fireCanvasMouseEvent(type, canvas, x, y, buttons = 0) {
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = rect.left + Math.max(0, Math.min(rect.width, x));
+    const clientY = rect.top + Math.max(0, Math.min(rect.height, y));
+    canvas.dispatchEvent(new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons,
+      clientX,
+      clientY,
+    }));
+  }
+
+  function syncAimPointer(canvas, x, y, buttons = 0) {
+    fireCanvasPointerEvent("pointermove", canvas, x, y);
+    fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
+  }
+
+  function releaseFireHold() {
+    if (!triggerAssistState.mouseHeld) return;
+    const canvas = getGameCanvas();
+    if (canvas) {
+      syncAimPointer(canvas, crosshairState.mouseX, crosshairState.mouseY, 0);
+      fireCanvasPointerEvent("pointerup", canvas, crosshairState.mouseX, crosshairState.mouseY);
+      fireCanvasMouseEvent("mouseup", canvas, crosshairState.mouseX, crosshairState.mouseY, 0);
+    }
+    triggerAssistState.mouseHeld = false;
+  }
+
+  function attemptFire(hold, forceRelease = false, point = null) {
+    const canvas = getGameCanvas();
+    if (!canvas) return false;
+    canvas.focus?.({ preventScroll: true });
+    const aimX = Number(point?.x ?? crosshairState.mouseX);
+    const aimY = Number(point?.y ?? crosshairState.mouseY);
+
+    if (forceRelease) {
+      releaseFireHold();
+      return true;
+    }
+
+    if (hold) {
+      syncAimPointer(canvas, aimX, aimY, 1);
+      if (!triggerAssistState.mouseHeld) {
+        fireCanvasPointerEvent("pointerdown", canvas, aimX, aimY);
+        fireCanvasMouseEvent("mousedown", canvas, aimX, aimY, 1);
+        triggerAssistState.mouseHeld = true;
+      }
+      return true;
+    }
+
+    syncAimPointer(canvas, aimX, aimY, 1);
+    fireCanvasPointerEvent("pointerdown", canvas, aimX, aimY);
+    fireCanvasMouseEvent("mousedown", canvas, aimX, aimY, 1);
+    setTimeout(() => {
+      syncAimPointer(canvas, aimX, aimY, 0);
+      fireCanvasPointerEvent("pointerup", canvas, aimX, aimY);
+      fireCanvasMouseEvent("mouseup", canvas, aimX, aimY, 0);
+    }, 12);
+    return true;
+  }
+
+  function findTriggerTarget(cfg) {
+    const shared = window.__zyroxEspShared;
+    let localPlayerId = null;
+    let localTeamId = null;
+    let camera = null;
+    let players = null;
+
+    if (shared?.ready && Array.isArray(shared.players) && shared.camera) {
+      localPlayerId = shared.localPlayerId ?? null;
+      localTeamId = shared.localTeamId ?? null;
+      camera = shared.camera;
+      players = shared.players;
+    } else {
+      const stores = espState.stores ?? window.stores ?? null;
+      const me = stores ? getMainCharacter(stores) : null;
+      const cam = stores?.phaser?.scene?.cameras?.cameras?.[0];
+      if (me && cam) {
+        const mePos = getCharacterPosition(me);
+        const meId = String(getCharacterId(me) ?? stores?.phaser?.mainCharacter?.id ?? "");
+        const meTeam = getCharacterTeam(me);
+        const fallbackPlayers = [];
+        for (const { id, character } of getCharacterEntries(stores)) {
+          const pos = getCharacterPosition(character);
+          if (!pos) continue;
+          fallbackPlayers.push({
+            id: String(id ?? getCharacterId(character) ?? ""),
+            name: String(getCharacterName(character, id)),
+            teamId: getCharacterTeam(character),
+            x: pos.x,
+            y: pos.y,
+          });
+        }
+        localPlayerId = meId || (mePos ? `${mePos.x}:${mePos.y}` : null);
+        localTeamId = meTeam ?? null;
+        camera = {
+          midX: Number(cam?.midPoint?.x ?? 0),
+          midY: Number(cam?.midPoint?.y ?? 0),
+          zoom: Number(cam?.zoom ?? 1),
+        };
+        players = fallbackPlayers;
+      }
+    }
+
+    if (!Array.isArray(players) || !camera) return null;
+    const mx = crosshairState.mouseX;
+    const my = crosshairState.mouseY;
+    const fov = Math.max(8, Number(cfg.fovPx) || 85);
+    let best = null;
+    for (const player of players) {
+      if (!player) continue;
+      const pid = String(player.id ?? "");
+      if (!pid || (localPlayerId != null && pid === String(localPlayerId))) continue;
+      if (cfg.teamCheck && localTeamId != null && player.teamId === localTeamId) continue;
+      const screen = projectWorldToScreen(player, camera, window.innerWidth, window.innerHeight);
+      if (!screen) continue;
+      if (screen.x < -80 || screen.x > window.innerWidth + 80 || screen.y < -80 || screen.y > window.innerHeight + 80) continue;
+      const dist = Math.hypot(mx - screen.x, my - screen.y);
+      if (dist > fov) continue;
+      if (!best || dist < best.distancePx) best = { player, screenX: screen.x, screenY: screen.y, distancePx: dist };
+    }
+    return best;
+  }
+
+  function renderTriggerAssistOverlay(cfg) {
+    const ctx = triggerAssistState.ctx;
+    const canvas = triggerAssistState.canvas;
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!cfg.showTargetRing || !triggerAssistState.target) return;
+    const pulse = (Math.sin(performance.now() / 120) + 1) * 0.5;
+    const ringR = Math.max(10, Number(cfg.fovPx) || 85);
+    ctx.save();
+    const ringGradient = ctx.createRadialGradient(
+      crosshairState.mouseX,
+      crosshairState.mouseY,
+      Math.max(1, ringR * 0.1),
+      crosshairState.mouseX,
+      crosshairState.mouseY,
+      ringR
+    );
+    ringGradient.addColorStop(0, "rgba(255, 130, 130, 0.12)");
+    ringGradient.addColorStop(1, "rgba(255, 40, 40, 0.02)");
+    ctx.fillStyle = ringGradient;
+    ctx.beginPath();
+    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, ringR, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(255, 70, 70, ${0.7 + pulse * 0.25})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = `rgba(255, 225, 120, ${0.55 + pulse * 0.35})`;
+    ctx.beginPath();
+    ctx.moveTo(crosshairState.mouseX, crosshairState.mouseY);
+    ctx.lineTo(triggerAssistState.target.screenX, triggerAssistState.target.screenY);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.strokeStyle = `rgba(255, 255, 120, ${0.8 + pulse * 0.2})`;
+    ctx.beginPath();
+    ctx.arc(triggerAssistState.target.screenX, triggerAssistState.target.screenY, 10 + pulse * 2.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function triggerAssistTick() {
+    if (!triggerAssistState.enabled) return;
+    const cfg = getTriggerAssistConfig();
+    if (!cfg.enabled) {
+      triggerAssistState.statusText = "Disabled in config";
+      triggerAssistState.target = null;
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
+      triggerAssistState.statusText = "Waiting for focus";
+      triggerAssistState.target = null;
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+
+    const target = findTriggerTarget(cfg);
+    triggerAssistState.target = target;
+    if (!target) {
+      const hasShared = window.__zyroxEspShared?.ready;
+      const hasStores = Boolean((espState.stores ?? window.stores)?.phaser?.scene);
+      triggerAssistState.statusText = (!hasShared && !hasStores) ? "Waiting for match data" : "No target";
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+
+    triggerAssistState.statusText = `Target Acquired: ${target.player?.name ?? "Player"}`;
+    const now = Date.now();
+    const minDelay = Math.max(16, Number(cfg.fireRateMs) || 45);
+    const aimPoint = { x: target.screenX, y: target.screenY };
+    if (cfg.holdToFire) {
+      attemptFire(true, false, aimPoint);
+    } else if (now - triggerAssistState.lastFireAt >= minDelay && attemptFire(false, false, aimPoint)) {
+      triggerAssistState.lastFireAt = now;
+    }
+
+    if (triggerAssistState.releaseTimeoutId != null) clearTimeout(triggerAssistState.releaseTimeoutId);
+    triggerAssistState.releaseTimeoutId = setTimeout(() => {
+      if (!document.hasFocus() || document.visibilityState !== "visible") releaseFireHold();
+    }, Math.max(160, minDelay * 2));
+
+    renderTriggerAssistOverlay(cfg);
+  }
+
+  function startTriggerAssist() {
+    if (triggerAssistState.enabled) return;
+    primeSharedPlayerData();
+    triggerAssistState.enabled = true;
+    createTriggerAssistCanvas();
+    triggerAssistState.statusText = "Armed";
+    if (triggerAssistState.loopId != null) clearInterval(triggerAssistState.loopId);
+    triggerAssistState.loopId = setInterval(triggerAssistTick, 1000 / 60);
+  }
+
+  function stopTriggerAssist() {
+    if (!triggerAssistState.enabled) return;
+    triggerAssistState.enabled = false;
+    if (triggerAssistState.loopId != null) {
+      clearInterval(triggerAssistState.loopId);
+      triggerAssistState.loopId = null;
+    }
+    if (triggerAssistState.releaseTimeoutId != null) {
+      clearTimeout(triggerAssistState.releaseTimeoutId);
+      triggerAssistState.releaseTimeoutId = null;
+    }
+    releaseFireHold();
+    triggerAssistState.target = null;
+    triggerAssistState.statusText = "Idle";
+    destroyTriggerAssistCanvas();
+  }
+
+  window.addEventListener("blur", () => {
+    releaseFireHold();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") releaseFireHold();
+  });
+  window.addEventListener("resize", resizeTriggerAssistCanvas);
+
   const MODULE_BEHAVIORS = {
     "ESP": {
       onEnable: startEsp,
@@ -1592,8 +1966,12 @@
       onEnable: startCrosshair,
       onDisable: stopCrosshair,
     },
+    "Trigger Assist": {
+      onEnable: startTriggerAssist,
+      onDisable: stopTriggerAssist,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Trigger Assist"]);
 
   // --- End of Core Utilities ---
 
@@ -1705,6 +2083,20 @@
                 { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
                 { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: true },
                 { id: "hoverColor",     label: "Hover Color",       type: "color",    default: "#ffff00" },
+              ],
+            },
+            {
+              name: "Trigger Assist",
+              settings: [
+                { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
+                { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
+                { id: "fovPx",               label: "FOV Radius",               type: "slider",   default: 85, min: 8, max: 220, step: 1, unit: "px" },
+                { id: "holdToFire",          label: "Hold Fire While Targeted", type: "checkbox", default: false },
+                { id: "fireRateMs",          label: "Fire Rate Limit",          type: "slider",   default: 45, min: 16, max: 500, step: 1, unit: "ms" },
+                { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
+                { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
+                { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
+                { id: "debugStatus",         label: "Show Debug Status",        type: "checkbox", default: true },
               ],
             },
           ],
@@ -2853,6 +3245,8 @@
     const cfg = store.get(name);
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
+    } else if (name === "Trigger Assist") {
+      window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
     }
     return cfg;
   }
@@ -3255,6 +3649,74 @@
         syncCrosshair();
       });
 
+    } else if (moduleName === "Trigger Assist") {
+      const defaults = getTriggerAssistConfig();
+      Object.assign(cfg, { ...defaults, ...cfg });
+      window.__zyroxTriggerAssistConfig = { ...cfg };
+
+      const syncTriggerAssist = () => { window.__zyroxTriggerAssistConfig = { ...cfg }; };
+      syncTriggerAssist();
+
+      const statusCard = document.createElement("div");
+      statusCard.className = "zyrox-setting-card";
+      statusCard.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span style="font-weight:600;">Status</span>
+          <span class="zyrox-trigger-status" style="opacity:0.85;font-size:0.92em;">${triggerAssistState.statusText}</span>
+        </div>
+      `;
+      configBody.appendChild(statusCard);
+
+      for (const setting of moduleLayout?.settings || []) {
+        if (setting.type === "checkbox") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = Boolean(setting.default);
+          const checked = cfg[setting.id] ? "checked" : "";
+          const card = document.createElement("div");
+          card.className = "zyrox-setting-card";
+          card.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${setting.id}" ${checked} />
+          `;
+          configBody.appendChild(card);
+          const input = card.querySelector(".set-module-setting-checkbox");
+          input?.addEventListener("change", (event) => {
+            cfg[setting.id] = Boolean(event.target.checked);
+            syncTriggerAssist();
+          });
+        } else if (setting.type === "slider") {
+          const value = Number(cfg[setting.id] ?? setting.default ?? setting.min ?? 0);
+          const unit = setting.unit ?? "ms";
+          const card = document.createElement("div");
+          card.className = "zyrox-setting-card";
+          card.innerHTML = `
+            <label style="display:flex;justify-content:space-between;align-items:center;">
+              <span>${setting.label}</span>
+              <span class="zyrox-slider-value" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${value}${unit}</span>
+            </label>
+            <input type="range" class="set-module-setting" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
+          `;
+          configBody.appendChild(card);
+          const slider = card.querySelector(".set-module-setting");
+          const valueLabel = card.querySelector(".zyrox-slider-value");
+          slider?.addEventListener("input", (event) => {
+            const next = Number(event.target.value);
+            cfg[setting.id] = next;
+            if (valueLabel) valueLabel.textContent = `${next}${unit}`;
+            syncTriggerAssist();
+          });
+        }
+      }
+
+      const statusValueEl = statusCard.querySelector(".zyrox-trigger-status");
+      const statusUpdater = setInterval(() => {
+        if (openConfigModule !== "Trigger Assist") {
+          clearInterval(statusUpdater);
+          return;
+        }
+        if (statusValueEl) {
+          statusValueEl.textContent = cfg.debugStatus ? triggerAssistState.statusText : "Hidden";
+        }
+      }, 120);
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
         const settingCard = document.createElement("div");
