@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.2.2
+// @version      1.2.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.2.2";
+    const CLIENT_VERSION = "1.2.3";
     return CLIENT_VERSION;
   }
 
@@ -1502,33 +1502,6 @@
   // --- End of Core Utilities ---
 
   const MENU_LAYOUT = {
-    combat: {
-      title: "Combat",
-      groups: [
-        {
-          name: "Visuals",
-          modules: [
-            {
-              name: "Crosshair",
-              settings: [
-                { id: "enabled",     label: "Show Crosshair", type: "checkbox", default: true },
-                { id: "style",       label: "Style",          type: "select",   default: "cross",
-                  options: [
-                    { value: "cross",   label: "Cross" },
-                    { value: "dot",     label: "Dot" },
-                    { value: "circle",  label: "Circle" },
-                    { value: "plus",    label: "Plus (thick)" },
-                  ],
-                },
-                { id: "color",       label: "Crosshair Color", type: "color", default: "#ff3b3b" },
-                { id: "showLine",    label: "Show Line",        type: "checkbox", default: false },
-                { id: "lineColor",   label: "Line Color",       type: "color",   default: "#ff3b3b" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
     general: {
       title: "General",
       groups: [
@@ -1609,6 +1582,28 @@
           name: "Quality of Life",
           modules: ["Notifications", "Session Timer", "Hotkeys", "Clipboard Tools"],
         },
+        {
+          name: "Combat",
+          modules: [
+            {
+              name: "Crosshair",
+              settings: [
+                { id: "enabled",   label: "Show Crosshair", type: "checkbox", default: true },
+                { id: "style",     label: "Style",          type: "select",   default: "cross",
+                  options: [
+                    { value: "cross",  label: "Cross" },
+                    { value: "dot",    label: "Dot" },
+                    { value: "circle", label: "Circle" },
+                    { value: "plus",   label: "Plus (thick)" },
+                  ],
+                },
+                { id: "color",     label: "Crosshair Color", type: "color",    default: "#ff3b3b" },
+                { id: "showLine",  label: "Show Line",        type: "checkbox", default: false },
+                { id: "lineColor", label: "Line Color",       type: "color",    default: "#ff3b3b" },
+              ],
+            },
+          ],
+        },
       ],
     },
     gamemodeSpecific: {
@@ -1652,7 +1647,7 @@
     listeningForBind: null,
     listeningForMenuBind: false,
     searchAutofocus: true,
-    displayMode: "merged",
+    displayMode: "loose",
     looseInitialized: false,
     loosePositions: {
       topbar: { x: 12, y: 12 },
@@ -2346,10 +2341,6 @@
   const settingsBtn = topbar.querySelector(".zyrox-settings-btn");
   const collapseRow = topbar.querySelector(".zyrox-collapse-row");
 
-  const combatSection = document.createElement("section");
-  combatSection.className = "zyrox-section";
-  combatSection.innerHTML = `<div class="zyrox-section-label">Combat</div>`;
-
   const generalSection = document.createElement("section");
   generalSection.className = "zyrox-section";
   generalSection.innerHTML = `<div class="zyrox-section-label">General</div>`;
@@ -2701,7 +2692,7 @@
   }
 
   function getModuleLayoutConfig(moduleName) {
-    const allGroups = [...MENU_LAYOUT.combat.groups, ...MENU_LAYOUT.general.groups, ...MENU_LAYOUT.gamemodeSpecific.groups];
+    const allGroups = [...MENU_LAYOUT.general.groups, ...MENU_LAYOUT.gamemodeSpecific.groups];
     const found = allGroups
       .flatMap((group) => group.modules || [])
       .find((mod) => typeof mod === "object" && mod && mod.name === moduleName);
@@ -3855,13 +3846,6 @@
   configCloseBtn.addEventListener("click", () => closeConfig());
   settingsTopCloseBtn.addEventListener("click", () => closeConfig());
 
-  const combatPanels = document.createElement("div");
-  combatPanels.className = "zyrox-panels";
-  for (const combatGroup of MENU_LAYOUT.combat.groups) {
-    combatPanels.appendChild(buildPanel(combatGroup.name, combatGroup.modules));
-  }
-  combatSection.appendChild(combatPanels);
-
   const generalPanels = document.createElement("div");
   generalPanels.className = "zyrox-panels";
   for (const generalGroup of MENU_LAYOUT.general.groups) {
@@ -3890,7 +3874,6 @@
   }
 
   shell.appendChild(topbar);
-  shell.appendChild(combatSection);
   shell.appendChild(generalSection);
   shell.appendChild(gamemodeSection);
   shell.appendChild(footer);
