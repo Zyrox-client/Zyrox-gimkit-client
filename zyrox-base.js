@@ -1145,6 +1145,20 @@
       ?? "Player";
   }
 
+  function projectWorldToScreen(position, cameraSnapshot, viewportWidth, viewportHeight) {
+    const x = Number(position?.x);
+    const y = Number(position?.y);
+    const camX = Number(cameraSnapshot?.midX);
+    const camY = Number(cameraSnapshot?.midY);
+    const zoom = Number(cameraSnapshot?.zoom ?? 1) || 1;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(camX) || !Number.isFinite(camY)) return null;
+    return {
+      x: (x - camX) * zoom + viewportWidth / 2,
+      y: (y - camY) * zoom + viewportHeight / 2,
+      zoom,
+    };
+  }
+
   function getEspRenderConfig() {
     const defaults = {
       hitbox: true,
@@ -1583,6 +1597,253 @@
 
   window.addEventListener("resize", resizeCrosshairCanvas);
 
+  // ---------------------------------------------------------------------------
+  // TRIGGER ASSIST MODULE
+  // Uses shared ESP bridge data and cursor position to trigger fire when
+  // player targets are within a configurable cursor radius.
+  // ---------------------------------------------------------------------------
+  const triggerAssistState = {
+    enabled: false,
+    loopId: null,
+    canvas: null,
+    ctx: null,
+    lastFireAt: 0,
+    mouseHeld: false,
+    releaseTimeoutId: null,
+    target: null,
+    statusText: "Idle",
+  };
+
+  function getTriggerAssistConfig() {
+    const defaults = {
+      enabled: true,
+      teamCheck: true,
+      fovPx: 42,
+      holdToFire: true,
+      fireRateMs: 120,
+      requireLOS: false,
+      onlyWhenGameFocused: true,
+      showTargetRing: true,
+      debugStatus: true,
+    };
+    const stored = window.__zyroxTriggerAssistConfig;
+    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+  }
+
+  function createTriggerAssistCanvas() {
+    if (triggerAssistState.canvas?.parentNode) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    canvas.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:10001;pointer-events:none;user-select:none;";
+    document.body.appendChild(canvas);
+    triggerAssistState.canvas = canvas;
+    triggerAssistState.ctx = canvas.getContext("2d");
+  }
+
+  function destroyTriggerAssistCanvas() {
+    triggerAssistState.canvas?.remove();
+    triggerAssistState.canvas = null;
+    triggerAssistState.ctx = null;
+  }
+
+  function resizeTriggerAssistCanvas() {
+    if (!triggerAssistState.canvas) return;
+    triggerAssistState.canvas.width = window.innerWidth;
+    triggerAssistState.canvas.height = window.innerHeight;
+  }
+
+  function getGameCanvas() {
+    const stores = espState.stores ?? window.stores;
+    return stores?.phaser?.game?.canvas
+      ?? stores?.phaser?.scene?.game?.canvas
+      ?? document.querySelector("canvas");
+  }
+
+  function fireCanvasPointerEvent(type, canvas, x, y) {
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = rect.left + Math.max(0, Math.min(rect.width, x));
+    const clientY = rect.top + Math.max(0, Math.min(rect.height, y));
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons: type === "pointerup" || type === "mouseup" ? 0 : 1,
+      clientX,
+      clientY,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+    };
+    canvas.dispatchEvent(new PointerEvent(type, init));
+  }
+
+  function releaseFireHold() {
+    if (!triggerAssistState.mouseHeld) return;
+    const canvas = getGameCanvas();
+    if (canvas) {
+      fireCanvasPointerEvent("pointerup", canvas, crosshairState.mouseX, crosshairState.mouseY);
+      canvas.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+    }
+    triggerAssistState.mouseHeld = false;
+  }
+
+  function attemptFire(hold, forceRelease = false) {
+    const canvas = getGameCanvas();
+    if (!canvas) return false;
+    canvas.focus?.({ preventScroll: true });
+
+    if (forceRelease) {
+      releaseFireHold();
+      return true;
+    }
+
+    if (hold) {
+      if (!triggerAssistState.mouseHeld) {
+        fireCanvasPointerEvent("pointerdown", canvas, crosshairState.mouseX, crosshairState.mouseY);
+        canvas.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+        triggerAssistState.mouseHeld = true;
+      }
+      return true;
+    }
+
+    fireCanvasPointerEvent("pointerdown", canvas, crosshairState.mouseX, crosshairState.mouseY);
+    canvas.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    setTimeout(() => {
+      fireCanvasPointerEvent("pointerup", canvas, crosshairState.mouseX, crosshairState.mouseY);
+      canvas.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+    }, 12);
+    return true;
+  }
+
+  function findTriggerTarget(cfg) {
+    const shared = window.__zyroxEspShared;
+    if (!shared?.ready || !Array.isArray(shared.players) || !shared.camera) return null;
+    const mx = crosshairState.mouseX;
+    const my = crosshairState.mouseY;
+    const fov = Math.max(8, Number(cfg.fovPx) || 42);
+    let best = null;
+    for (const player of shared.players) {
+      if (!player) continue;
+      const pid = String(player.id ?? "");
+      if (!pid || pid === String(shared.localPlayerId ?? "")) continue;
+      if (cfg.teamCheck && shared.localTeamId != null && player.teamId === shared.localTeamId) continue;
+      const screen = projectWorldToScreen(player, shared.camera, window.innerWidth, window.innerHeight);
+      if (!screen) continue;
+      if (screen.x < -80 || screen.x > window.innerWidth + 80 || screen.y < -80 || screen.y > window.innerHeight + 80) continue;
+      const dist = Math.hypot(mx - screen.x, my - screen.y);
+      if (dist > fov) continue;
+      if (!best || dist < best.distancePx) best = { player, screenX: screen.x, screenY: screen.y, distancePx: dist };
+    }
+    return best;
+  }
+
+  function renderTriggerAssistOverlay(cfg) {
+    const ctx = triggerAssistState.ctx;
+    const canvas = triggerAssistState.canvas;
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!cfg.showTargetRing || !triggerAssistState.target) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 80, 80, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(crosshairState.mouseX, crosshairState.mouseY, Math.max(8, Number(cfg.fovPx) || 42), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255, 255, 0, 0.95)";
+    ctx.beginPath();
+    ctx.arc(triggerAssistState.target.screenX, triggerAssistState.target.screenY, 10, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function triggerAssistTick() {
+    if (!triggerAssistState.enabled) return;
+    const cfg = getTriggerAssistConfig();
+    if (!cfg.enabled) {
+      triggerAssistState.statusText = "Disabled in config";
+      triggerAssistState.target = null;
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
+      triggerAssistState.statusText = "Waiting for focus";
+      triggerAssistState.target = null;
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+    if (!window.__zyroxEspShared?.ready) {
+      triggerAssistState.statusText = "Waiting for match data";
+      triggerAssistState.target = null;
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+
+    const target = findTriggerTarget(cfg);
+    triggerAssistState.target = target;
+    if (!target) {
+      triggerAssistState.statusText = "No target";
+      releaseFireHold();
+      renderTriggerAssistOverlay(cfg);
+      return;
+    }
+
+    triggerAssistState.statusText = `Target Acquired: ${target.player?.name ?? "Player"}`;
+    const now = Date.now();
+    const minDelay = Math.max(35, Number(cfg.fireRateMs) || 120);
+    if (cfg.holdToFire) {
+      attemptFire(true);
+    } else if (now - triggerAssistState.lastFireAt >= minDelay && attemptFire(false)) {
+      triggerAssistState.lastFireAt = now;
+    }
+
+    if (triggerAssistState.releaseTimeoutId != null) clearTimeout(triggerAssistState.releaseTimeoutId);
+    triggerAssistState.releaseTimeoutId = setTimeout(() => {
+      if (!document.hasFocus() || document.visibilityState !== "visible") releaseFireHold();
+    }, Math.max(160, minDelay * 2));
+
+    renderTriggerAssistOverlay(cfg);
+  }
+
+  function startTriggerAssist() {
+    if (triggerAssistState.enabled) return;
+    primeSharedPlayerData();
+    triggerAssistState.enabled = true;
+    createTriggerAssistCanvas();
+    triggerAssistState.statusText = "Armed";
+    if (triggerAssistState.loopId != null) clearInterval(triggerAssistState.loopId);
+    triggerAssistState.loopId = setInterval(triggerAssistTick, 1000 / 60);
+  }
+
+  function stopTriggerAssist() {
+    if (!triggerAssistState.enabled) return;
+    triggerAssistState.enabled = false;
+    if (triggerAssistState.loopId != null) {
+      clearInterval(triggerAssistState.loopId);
+      triggerAssistState.loopId = null;
+    }
+    if (triggerAssistState.releaseTimeoutId != null) {
+      clearTimeout(triggerAssistState.releaseTimeoutId);
+      triggerAssistState.releaseTimeoutId = null;
+    }
+    releaseFireHold();
+    triggerAssistState.target = null;
+    triggerAssistState.statusText = "Idle";
+    destroyTriggerAssistCanvas();
+  }
+
+  window.addEventListener("blur", () => {
+    releaseFireHold();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible") releaseFireHold();
+  });
+  window.addEventListener("resize", resizeTriggerAssistCanvas);
+
   const MODULE_BEHAVIORS = {
     "ESP": {
       onEnable: startEsp,
@@ -1592,8 +1853,12 @@
       onEnable: startCrosshair,
       onDisable: stopCrosshair,
     },
+    "Trigger Assist": {
+      onEnable: startTriggerAssist,
+      onDisable: stopTriggerAssist,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Trigger Assist"]);
 
   // --- End of Core Utilities ---
 
@@ -1705,6 +1970,20 @@
                 { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
                 { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: true },
                 { id: "hoverColor",     label: "Hover Color",       type: "color",    default: "#ffff00" },
+              ],
+            },
+            {
+              name: "Trigger Assist",
+              settings: [
+                { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
+                { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
+                { id: "fovPx",               label: "FOV Radius",               type: "slider",   default: 42, min: 8, max: 220, step: 1, unit: "px" },
+                { id: "holdToFire",          label: "Hold Fire While Targeted", type: "checkbox", default: true },
+                { id: "fireRateMs",          label: "Fire Rate Limit",          type: "slider",   default: 120, min: 35, max: 500, step: 5, unit: "ms" },
+                { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
+                { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
+                { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
+                { id: "debugStatus",         label: "Show Debug Status",        type: "checkbox", default: true },
               ],
             },
           ],
@@ -2853,6 +3132,8 @@
     const cfg = store.get(name);
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
+    } else if (name === "Trigger Assist") {
+      window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
     }
     return cfg;
   }
@@ -3255,6 +3536,79 @@
         syncCrosshair();
       });
 
+    } else if (moduleName === "Trigger Assist") {
+      const defaults = getTriggerAssistConfig();
+      Object.assign(cfg, { ...defaults, ...cfg });
+      window.__zyroxTriggerAssistConfig = { ...cfg };
+
+      const syncTriggerAssist = () => { window.__zyroxTriggerAssistConfig = { ...cfg }; };
+      syncTriggerAssist();
+
+      const statusCard = document.createElement("div");
+      statusCard.className = "zyrox-setting-card";
+      statusCard.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <span style="font-weight:600;">Status</span>
+          <span class="ta-status-value" style="opacity:0.85;font-size:0.92em;">${triggerAssistState.statusText}</span>
+        </div>
+      `;
+      configBody.appendChild(statusCard);
+
+      const makeCard = (setting, inputHtml) => {
+        const card = document.createElement("div");
+        card.className = "zyrox-setting-card";
+        card.innerHTML = `
+          <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+            <span>${setting.label}</span>
+            ${inputHtml}
+          </label>
+        `;
+        configBody.appendChild(card);
+        return card;
+      };
+
+      for (const setting of moduleLayout?.settings || []) {
+        if (setting.type === "checkbox") {
+          const checked = cfg[setting.id] ? "checked" : "";
+          const card = makeCard(setting, `<input type="checkbox" class="ta-cb" data-id="${setting.id}" ${checked} />`);
+          card.querySelector(".ta-cb")?.addEventListener("change", (event) => {
+            cfg[setting.id] = Boolean(event.target.checked);
+            syncTriggerAssist();
+          });
+        } else if (setting.type === "slider") {
+          const value = Number(cfg[setting.id] ?? setting.default ?? setting.min ?? 0);
+          const unit = setting.unit ?? "";
+          const card = document.createElement("div");
+          card.className = "zyrox-setting-card";
+          card.innerHTML = `
+            <label style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <span>${setting.label}</span>
+              <span class="ta-slider-value">${value}${unit}</span>
+            </label>
+            <input type="range" class="ta-slider" data-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
+          `;
+          configBody.appendChild(card);
+          const slider = card.querySelector(".ta-slider");
+          const valueLabel = card.querySelector(".ta-slider-value");
+          slider?.addEventListener("input", (event) => {
+            const next = Number(event.target.value);
+            cfg[setting.id] = next;
+            if (valueLabel) valueLabel.textContent = `${next}${unit}`;
+            syncTriggerAssist();
+          });
+        }
+      }
+
+      const statusValueEl = statusCard.querySelector(".ta-status-value");
+      const statusUpdater = setInterval(() => {
+        if (openConfigModule !== "Trigger Assist") {
+          clearInterval(statusUpdater);
+          return;
+        }
+        if (statusValueEl) {
+          statusValueEl.textContent = cfg.debugStatus ? triggerAssistState.statusText : "Hidden";
+        }
+      }, 120);
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
         const settingCard = document.createElement("div");
