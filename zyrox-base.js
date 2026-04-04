@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.1
+// @version      1.3.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.1";
+    const CLIENT_VERSION = "1.3.2";
     return CLIENT_VERSION;
   }
 
@@ -1361,10 +1361,10 @@
   function getCrosshairConfig() {
     const defaults = {
       enabled: true,
-      style: "cross",
+      style: "x",
       color: "#ff3b3b",
-      crosshairSize: 10,
-      lineSize: 2,
+      crosshairSize: 25,
+      lineSize: 4,
       showLine: false,
       lineColor: "#ff3b3b",
       tracerLineSize: 1.5,
@@ -1415,8 +1415,8 @@
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    const crosshairSize = typeof cfg.crosshairSize === "number" ? cfg.crosshairSize : 10;
-    const lineSize      = typeof cfg.lineSize      === "number" ? cfg.lineSize      : 2;
+    const crosshairSize = typeof cfg.crosshairSize === "number" ? cfg.crosshairSize : 25;
+    const lineSize      = typeof cfg.lineSize      === "number" ? cfg.lineSize      : 4;
     const tracerSize    = typeof cfg.tracerLineSize === "number" ? cfg.tracerLineSize : 1.5;
 
     // --- Player hover detection ---
@@ -1430,7 +1430,7 @@
           const camX = Number(camera?.midPoint?.x);
           const camY = Number(camera?.midPoint?.y);
           const zoom = Number(camera?.zoom ?? 1) || 1;
-          const hitRadius = Math.max(20, 80 / zoom) / 2;
+          const hitRadius = (Math.max(20, 80 / zoom) / 2) * 3;
           if (Number.isFinite(camX) && Number.isFinite(camY)) {
             for (const { character } of getCharacterEntries(stores)) {
               if (!character || character === me) continue;
@@ -1668,7 +1668,7 @@
               name: "Crosshair",
               settings: [
                 { id: "enabled",       label: "Show Crosshair",  type: "checkbox", default: true },
-                { id: "style",         label: "Style",            type: "select",   default: "cross",
+                { id: "style",         label: "Style",            type: "select",   default: "x",
                   options: [
                     { value: "cross",       label: "Cross (gap)" },
                     { value: "solid",       label: "Solid Cross" },
@@ -1681,8 +1681,8 @@
                   ],
                 },
                 { id: "color",         label: "Crosshair Color",  type: "color",    default: "#ff3b3b" },
-                { id: "crosshairSize", label: "Crosshair Size",   type: "slider",   default: 10, min: 4, max: 40, step: 1, unit: "px" },
-                { id: "lineSize",      label: "Cursor Width",      type: "slider",   default: 2,  min: 1, max: 6,  step: 0.5, unit: "px" },
+                { id: "crosshairSize", label: "Crosshair Size",   type: "slider",   default: 25, min: 4, max: 40, step: 1, unit: "px" },
+                { id: "lineSize",      label: "Cursor Width",      type: "slider",   default: 4,  min: 1, max: 6,  step: 0.5, unit: "px" },
                 { id: "showLine",       label: "Show Line",         type: "checkbox", default: false },
                 { id: "lineColor",      label: "Line Color",        type: "color",    default: "#ff3b3b" },
                 { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
@@ -3136,15 +3136,15 @@
 
       const sizeRow = makeRow("Crosshair Size", `
         <div style="display:flex;align-items:center;gap:10px;">
-          <input type="range" class="xh-crosshair-size" min="4" max="40" step="1" value="${cfg.crosshairSize ?? 10}" style="flex:1;" />
-          <span class="xh-crosshair-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.crosshairSize ?? 10}px</span>
+          <input type="range" class="xh-crosshair-size" min="4" max="40" step="1" value="${cfg.crosshairSize ?? 25}" style="flex:1;" />
+          <span class="xh-crosshair-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.crosshairSize ?? 25}px</span>
         </div>
       `);
 
       const lineSizeRow = makeRow("Cursor Width", `
         <div style="display:flex;align-items:center;gap:10px;">
-          <input type="range" class="xh-line-size" min="0.5" max="6" step="0.5" value="${cfg.lineSize ?? 2}" style="flex:1;" />
-          <span class="xh-line-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.lineSize ?? 2}px</span>
+          <input type="range" class="xh-line-size" min="0.5" max="6" step="0.5" value="${cfg.lineSize ?? 4}" style="flex:1;" />
+          <span class="xh-line-size-label" style="min-width:36px;text-align:right;font-size:0.85em;opacity:0.75;">${cfg.lineSize ?? 4}px</span>
         </div>
       `);
 
