@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.3.2
+// @version      1.3.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -376,7 +376,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.3.2";
+    const CLIENT_VERSION = "1.3.3";
     return CLIENT_VERSION;
   }
 
@@ -1045,6 +1045,21 @@
     }
   }
 
+  function primeSharedPlayerData() {
+    if (espState.stores || espState.storesPromise) return;
+    const attemptResolve = () => {
+      resolveEspStores().catch((error) => {
+        espLog("Shared stores resolve failed; retrying", error);
+        setTimeout(() => {
+          if (!espState.stores) attemptResolve();
+        }, 1500);
+      });
+    };
+    attemptResolve();
+  }
+
+  primeSharedPlayerData();
+
   function getCharacterPosition(character) {
     const x = Number(character?.x ?? character?.position?.x ?? character?.body?.x);
     const y = Number(character?.y ?? character?.position?.y ?? character?.body?.y);
@@ -1368,7 +1383,7 @@
       showLine: false,
       lineColor: "#ff3b3b",
       tracerLineSize: 1.5,
-      hoverHighlight: false,
+      hoverHighlight: true,
       hoverColor: "#ffff00",
     };
     const stored = window.__zyroxCrosshairConfig;
@@ -1430,7 +1445,7 @@
           const camX = Number(camera?.midPoint?.x);
           const camY = Number(camera?.midPoint?.y);
           const zoom = Number(camera?.zoom ?? 1) || 1;
-          const hitRadius = (Math.max(20, 80 / zoom) / 2) * 3;
+          const hitRadius = (Math.max(20, 120 / zoom) / 2) * 3;
           if (Number.isFinite(camX) && Number.isFinite(camY)) {
             for (const { character } of getCharacterEntries(stores)) {
               if (!character || character === me) continue;
@@ -1549,6 +1564,7 @@
 
   function startCrosshair() {
     if (crosshairState.enabled) return;
+    primeSharedPlayerData();
     crosshairState.enabled = true;
     createCrosshairCanvas();
     renderCrosshairFrame();
@@ -1606,7 +1622,7 @@
               name: "ESP",
               settings: [
                 { id: "hitbox", label: "Hitbox", type: "checkbox", default: true },
-                { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 180, step: 2, default: 80, unit: "px" },
+                { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 270, step: 2, default: 80, unit: "px" },
                 { id: "hitboxWidth", label: "Hitbox Width", type: "slider", min: 1, max: 10, step: 1, default: 3, unit: "px" },
                 { id: "hitboxColor", label: "Hitbox Color", type: "color", default: "#ff3b3b" },
                 { id: "names", label: "Names", type: "checkbox", default: true },
@@ -1686,7 +1702,7 @@
                 { id: "showLine",       label: "Show Line",         type: "checkbox", default: false },
                 { id: "lineColor",      label: "Line Color",        type: "color",    default: "#ff3b3b" },
                 { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
-                { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: false },
+                { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: true },
                 { id: "hoverColor",     label: "Hover Color",       type: "color",    default: "#ffff00" },
               ],
             },
@@ -2940,7 +2956,7 @@
       const hitboxRow = makeRow("Hitbox", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-hitbox-enabled" ${cfg.hitbox ? "checked" : ""} /> Enabled</label>
-          <label>Size <input type="range" class="esp-hitbox-size" min="24" max="180" step="2" value="${cfg.hitboxSize}" /></label>
+          <label>Size <input type="range" class="esp-hitbox-size" min="24" max="270" step="2" value="${cfg.hitboxSize}" /></label>
           <span class="esp-hitbox-size-value esp-value-text">${cfg.hitboxSize}px</span>
           <label>Width <input type="range" class="esp-hitbox-width" min="1" max="10" step="1" value="${cfg.hitboxWidth}" /></label>
           <span class="esp-hitbox-width-value esp-value-text">${cfg.hitboxWidth}px</span>
