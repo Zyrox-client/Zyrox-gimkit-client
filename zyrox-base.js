@@ -3827,6 +3827,7 @@
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
+    saveSettings();
   });
 
   settingsResetAllBtn.addEventListener("click", () => {
@@ -3861,19 +3862,27 @@
     settingsResetBtn.click();
   });
 
-  settingsSaveBtn.addEventListener("click", () => {
+  function saveSettings(showFeedback = false) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(collectSettings()));
-      settingsSaveBtn.textContent = "Saved";
-      setTimeout(() => {
-        settingsSaveBtn.textContent = "Save";
-      }, 850);
+      if (showFeedback) {
+        settingsSaveBtn.textContent = "Saved";
+        setTimeout(() => {
+          settingsSaveBtn.textContent = "Save";
+        }, 850);
+      }
     } catch (_) {
-      settingsSaveBtn.textContent = "Save failed";
-      setTimeout(() => {
-        settingsSaveBtn.textContent = "Save";
-      }, 1200);
+      if (showFeedback) {
+        settingsSaveBtn.textContent = "Save failed";
+        setTimeout(() => {
+          settingsSaveBtn.textContent = "Save";
+        }, 1200);
+      }
     }
+  }
+
+  settingsSaveBtn.addEventListener("click", () => {
+    saveSettings(true);
   });
 
   settingsCloseBtn.addEventListener("click", () => {
