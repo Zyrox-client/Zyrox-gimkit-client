@@ -1162,21 +1162,27 @@
 
   function getEspRenderConfig() {
     const defaults = {
+      showEnemies: true,
+      showTeammates: true,
       hitbox: true,
       hitboxSize: 150,
       hitboxWidth: 3,
       hitboxColor: "#ff4444",
+      teammateHitboxColor: "#36d17c",
       names: false,
       namesDistanceOnly: false,
       nameSize: 20,
       nameColor: "#ffffff",
+      teammateNameColor: "#baf7d2",
       offscreenStyle: "tracers",
       offscreenTheme: "classic",
       alwaysTracer: false,
       tracerWidth: 3,
       tracerColor: "#ff4444",
+      teammateTracerColor: "#36d17c",
       arrowSize: 14,
       arrowColor: "#ff4444",
+      teammateArrowColor: "#36d17c",
       arrowStyle: "regular",
       valueTextColor: window.__zyroxEspValueTextColor || "#ffffff",
     };
@@ -1295,10 +1301,20 @@
       espState.seenPlayers.set(stableId, { x: screenX, y: screenY, t: now });
       const onScreen = screenX >= 0 && screenX <= canvas.width && screenY >= 0 && screenY <= canvas.height;
       const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
-      const hitboxColor = espCfg.hitboxColor || (isTeammate ? "green" : "red");
-      const tracerColor = espCfg.tracerColor || (isTeammate ? "green" : "red");
-      const arrowColor = espCfg.arrowColor || (isTeammate ? "green" : "red");
-      const nameColor = espCfg.nameColor || "#000000";
+      if (isTeammate && espCfg.showTeammates === false) continue;
+      if (!isTeammate && espCfg.showEnemies === false) continue;
+      const hitboxColor = isTeammate
+        ? (espCfg.teammateHitboxColor || espCfg.hitboxColor || "green")
+        : (espCfg.hitboxColor || "red");
+      const tracerColor = isTeammate
+        ? (espCfg.teammateTracerColor || espCfg.tracerColor || "green")
+        : (espCfg.tracerColor || "red");
+      const arrowColor = isTeammate
+        ? (espCfg.teammateArrowColor || espCfg.arrowColor || "green")
+        : (espCfg.arrowColor || "red");
+      const nameColor = isTeammate
+        ? (espCfg.teammateNameColor || espCfg.nameColor || "#000000")
+        : (espCfg.nameColor || "#000000");
       const hitboxSize = Math.max(12, Number(espCfg.hitboxSize) || 80);
       const hitboxWidth = Math.max(1, Number(espCfg.hitboxWidth) || 3);
       const nameSize = Math.max(8, Number(espCfg.nameSize) || 20);
@@ -3677,7 +3693,43 @@
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxEspConfig = { ...cfg };
 
-      const makeRow = (title, html) => {
+      const tabButtons = document.createElement("div");
+      tabButtons.style.display = "flex";
+      tabButtons.style.gap = "8px";
+      tabButtons.style.marginBottom = "8px";
+      const enemiesTabBtn = document.createElement("button");
+      enemiesTabBtn.className = "zyrox-btn";
+      enemiesTabBtn.type = "button";
+      enemiesTabBtn.textContent = "ESP Enemies";
+      const teammatesTabBtn = document.createElement("button");
+      teammatesTabBtn.className = "zyrox-btn";
+      teammatesTabBtn.type = "button";
+      teammatesTabBtn.textContent = "ESP Teammates";
+      tabButtons.append(enemiesTabBtn, teammatesTabBtn);
+      configBody.appendChild(tabButtons);
+
+      const enemiesPane = document.createElement("div");
+      enemiesPane.style.display = "flex";
+      enemiesPane.style.flexDirection = "column";
+      enemiesPane.style.gap = "8px";
+      const teammatesPane = document.createElement("div");
+      teammatesPane.style.display = "none";
+      teammatesPane.style.flexDirection = "column";
+      teammatesPane.style.gap = "8px";
+      configBody.append(enemiesPane, teammatesPane);
+
+      const setEspTab = (tab) => {
+        const isEnemies = tab !== "teammates";
+        enemiesPane.style.display = isEnemies ? "flex" : "none";
+        teammatesPane.style.display = isEnemies ? "none" : "flex";
+        enemiesTabBtn.style.opacity = isEnemies ? "1" : "0.65";
+        teammatesTabBtn.style.opacity = isEnemies ? "0.65" : "1";
+      };
+      enemiesTabBtn.addEventListener("click", () => setEspTab("enemies"));
+      teammatesTabBtn.addEventListener("click", () => setEspTab("teammates"));
+      setEspTab("enemies");
+
+      const makeRow = (container, title, html) => {
         const row = document.createElement("div");
         row.className = "zyrox-setting-card";
         row.innerHTML = `
@@ -3686,11 +3738,20 @@
             ${html}
           </div>
         `;
-        configBody.appendChild(row);
+        container.appendChild(row);
         return row;
       };
 
-      const hitboxRow = makeRow("Hitbox", `
+      const enemyFilterRow = makeRow(enemiesPane, "Enemy Visibility", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="esp-show-enemies" ${cfg.showEnemies !== false ? "checked" : ""} />
+            Show enemies
+          </label>
+        </div>
+      `);
+
+      const hitboxRow = makeRow(enemiesPane, "Hitbox", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-hitbox-enabled" ${cfg.hitbox ? "checked" : ""} /> Enabled</label>
           <label>Size <input type="range" class="esp-hitbox-size" min="24" max="270" step="2" value="${cfg.hitboxSize}" /></label>
@@ -3701,7 +3762,7 @@
         </div>
       `);
 
-      const namesRow = makeRow("Names", `
+      const namesRow = makeRow(enemiesPane, "Names", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-enabled" ${cfg.names ? "checked" : ""} /> Enabled</label>
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-distance-only" ${cfg.namesDistanceOnly ? "checked" : ""} /> Distance Only</label>
@@ -3711,7 +3772,7 @@
         </div>
       `);
 
-      const offscreenRow = makeRow("Off-screen", `
+      const offscreenRow = makeRow(enemiesPane, "Off-screen", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label>Mode
             <select class="esp-offscreen-style">
@@ -3748,6 +3809,24 @@
               </select>
             </label>
           </span>
+        </div>
+      `);
+
+      const teammateFilterRow = makeRow(teammatesPane, "Teammate Visibility", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="esp-show-teammates" ${cfg.showTeammates !== false ? "checked" : ""} />
+            Show teammates
+          </label>
+        </div>
+      `);
+
+      const teammateColorsRow = makeRow(teammatesPane, "Teammate Colors", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label>Hitbox <input type="color" class="esp-teammate-hitbox-color" value="${cfg.teammateHitboxColor || "#36d17c"}" /></label>
+          <label>Tracer <input type="color" class="esp-teammate-tracer-color" value="${cfg.teammateTracerColor || "#36d17c"}" /></label>
+          <label>Arrow <input type="color" class="esp-teammate-arrow-color" value="${cfg.teammateArrowColor || "#36d17c"}" /></label>
+          <label>Name <input type="color" class="esp-teammate-name-color" value="${cfg.teammateNameColor || "#baf7d2"}" /></label>
         </div>
       `);
 
@@ -3790,6 +3869,7 @@
         });
       };
 
+      bindCheckbox(enemyFilterRow, ".esp-show-enemies", "showEnemies");
       bindCheckbox(hitboxRow, ".esp-hitbox-enabled", "hitbox");
       bindSlider(hitboxRow, ".esp-hitbox-size", "hitboxSize", ".esp-hitbox-size-value");
       bindSlider(hitboxRow, ".esp-hitbox-width", "hitboxWidth", ".esp-hitbox-width-value");
@@ -3840,6 +3920,11 @@
           syncEsp();
         });
       }
+      bindCheckbox(teammateFilterRow, ".esp-show-teammates", "showTeammates");
+      bindColor(teammateColorsRow, ".esp-teammate-hitbox-color", "teammateHitboxColor");
+      bindColor(teammateColorsRow, ".esp-teammate-tracer-color", "teammateTracerColor");
+      bindColor(teammateColorsRow, ".esp-teammate-arrow-color", "teammateArrowColor");
+      bindColor(teammateColorsRow, ".esp-teammate-name-color", "teammateNameColor");
       refreshIndicatorModeVisibility();
     } else if (moduleName === "Crosshair") {
       const defaults = getCrosshairConfig();
