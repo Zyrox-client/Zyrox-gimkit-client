@@ -1162,22 +1162,40 @@
 
   function getEspRenderConfig() {
     const defaults = {
+      showEnemies: true,
+      showTeammates: true,
       hitbox: true,
       hitboxSize: 150,
       hitboxWidth: 3,
       hitboxColor: "#ff4444",
+      teammateHitbox: true,
+      teammateHitboxSize: 150,
+      teammateHitboxWidth: 3,
+      teammateHitboxColor: "#36d17c",
       names: false,
       namesDistanceOnly: false,
       nameSize: 20,
       nameColor: "#ffffff",
+      teammateNames: false,
+      teammateNamesDistanceOnly: false,
+      teammateNameSize: 20,
+      teammateNameColor: "#baf7d2",
       offscreenStyle: "tracers",
       offscreenTheme: "classic",
       alwaysTracer: false,
       tracerWidth: 3,
       tracerColor: "#ff4444",
+      teammateOffscreenStyle: "tracers",
+      teammateOffscreenTheme: "classic",
+      teammateAlwaysTracer: false,
+      teammateTracerWidth: 3,
+      teammateTracerColor: "#36d17c",
       arrowSize: 14,
       arrowColor: "#ff4444",
+      teammateArrowSize: 14,
+      teammateArrowColor: "#36d17c",
       arrowStyle: "regular",
+      teammateArrowStyle: "regular",
       valueTextColor: window.__zyroxEspValueTextColor || "#ffffff",
     };
     const liveCfg = window.__zyroxEspConfig;
@@ -1251,16 +1269,7 @@
     const myTeam = getCharacterTeam(me);
     const espCfg = getEspRenderConfig();
     const healthCfg = getHealthBarsConfig();
-    const showHitbox = espCfg.hitbox !== false;
-    const showNames = espCfg.names !== false;
     const showHealthBars = state.enabledModules?.has("Health Bars") && healthCfg.enabled !== false;
-    const namesDistanceOnly = espCfg.namesDistanceOnly === true;
-    const offscreenStyle = espCfg.offscreenStyle === "arrows" || espCfg.offscreenStyle === "none"
-      ? espCfg.offscreenStyle
-      : "tracers";
-    const offscreenTheme = espCfg.offscreenTheme || "classic";
-    const alwaysTracer = espCfg.alwaysTracer === true;
-    const arrowStyle = ["regular", "dot", "modern"].includes(espCfg.arrowStyle) ? espCfg.arrowStyle : "regular";
     const camX = Number(camera?.midPoint?.x);
     const camY = Number(camera?.midPoint?.y);
     const zoom = Number(camera?.zoom ?? 1) || 1;
@@ -1295,15 +1304,36 @@
       espState.seenPlayers.set(stableId, { x: screenX, y: screenY, t: now });
       const onScreen = screenX >= 0 && screenX <= canvas.width && screenY >= 0 && screenY <= canvas.height;
       const isTeammate = myTeam !== null && getCharacterTeam(character) === myTeam;
-      const hitboxColor = espCfg.hitboxColor || (isTeammate ? "green" : "red");
-      const tracerColor = espCfg.tracerColor || (isTeammate ? "green" : "red");
-      const arrowColor = espCfg.arrowColor || (isTeammate ? "green" : "red");
-      const nameColor = espCfg.nameColor || "#000000";
-      const hitboxSize = Math.max(12, Number(espCfg.hitboxSize) || 80);
-      const hitboxWidth = Math.max(1, Number(espCfg.hitboxWidth) || 3);
-      const nameSize = Math.max(8, Number(espCfg.nameSize) || 20);
-      const tracerWidth = Math.max(1, Number(espCfg.tracerWidth) || 3);
-      const arrowSize = Math.max(6, Number(espCfg.arrowSize) || 14);
+      if (isTeammate && espCfg.showTeammates === false) continue;
+      if (!isTeammate && espCfg.showEnemies === false) continue;
+      const showHitbox = isTeammate ? espCfg.teammateHitbox !== false : espCfg.hitbox !== false;
+      const showNames = isTeammate ? espCfg.teammateNames !== false : espCfg.names !== false;
+      const namesDistanceOnly = isTeammate ? espCfg.teammateNamesDistanceOnly === true : espCfg.namesDistanceOnly === true;
+      const chosenOffscreenStyle = isTeammate ? espCfg.teammateOffscreenStyle : espCfg.offscreenStyle;
+      const offscreenStyle = chosenOffscreenStyle === "arrows" || chosenOffscreenStyle === "none"
+        ? chosenOffscreenStyle
+        : "tracers";
+      const offscreenTheme = String(isTeammate ? espCfg.teammateOffscreenTheme : espCfg.offscreenTheme || "classic");
+      const alwaysTracer = isTeammate ? espCfg.teammateAlwaysTracer === true : espCfg.alwaysTracer === true;
+      const chosenArrowStyle = isTeammate ? espCfg.teammateArrowStyle : espCfg.arrowStyle;
+      const arrowStyle = ["regular", "dot", "modern"].includes(chosenArrowStyle) ? chosenArrowStyle : "regular";
+      const hitboxColor = isTeammate
+        ? (espCfg.teammateHitboxColor || espCfg.hitboxColor || "green")
+        : (espCfg.hitboxColor || "red");
+      const tracerColor = isTeammate
+        ? (espCfg.teammateTracerColor || espCfg.tracerColor || "green")
+        : (espCfg.tracerColor || "red");
+      const arrowColor = isTeammate
+        ? (espCfg.teammateArrowColor || espCfg.arrowColor || "green")
+        : (espCfg.arrowColor || "red");
+      const nameColor = isTeammate
+        ? (espCfg.teammateNameColor || espCfg.nameColor || "#000000")
+        : (espCfg.nameColor || "#000000");
+      const hitboxSize = Math.max(12, Number(isTeammate ? espCfg.teammateHitboxSize : espCfg.hitboxSize) || 80);
+      const hitboxWidth = Math.max(1, Number(isTeammate ? espCfg.teammateHitboxWidth : espCfg.hitboxWidth) || 3);
+      const nameSize = Math.max(8, Number(isTeammate ? espCfg.teammateNameSize : espCfg.nameSize) || 20);
+      const tracerWidth = Math.max(1, Number(isTeammate ? espCfg.teammateTracerWidth : espCfg.tracerWidth) || 3);
+      const arrowSize = Math.max(6, Number(isTeammate ? espCfg.teammateArrowSize : espCfg.arrowSize) || 14);
 
       if (onScreen && showHitbox) {
         const boxSize = Math.max(24, hitboxSize / zoom);
@@ -3677,7 +3707,43 @@
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxEspConfig = { ...cfg };
 
-      const makeRow = (title, html) => {
+      const tabButtons = document.createElement("div");
+      tabButtons.style.display = "flex";
+      tabButtons.style.gap = "8px";
+      tabButtons.style.marginBottom = "8px";
+      const enemiesTabBtn = document.createElement("button");
+      enemiesTabBtn.className = "zyrox-btn";
+      enemiesTabBtn.type = "button";
+      enemiesTabBtn.textContent = "Enemies";
+      const teammatesTabBtn = document.createElement("button");
+      teammatesTabBtn.className = "zyrox-btn";
+      teammatesTabBtn.type = "button";
+      teammatesTabBtn.textContent = "Teammates";
+      tabButtons.append(enemiesTabBtn, teammatesTabBtn);
+      configBody.appendChild(tabButtons);
+
+      const enemiesPane = document.createElement("div");
+      enemiesPane.style.display = "flex";
+      enemiesPane.style.flexDirection = "column";
+      enemiesPane.style.gap = "8px";
+      const teammatesPane = document.createElement("div");
+      teammatesPane.style.display = "none";
+      teammatesPane.style.flexDirection = "column";
+      teammatesPane.style.gap = "8px";
+      configBody.append(enemiesPane, teammatesPane);
+
+      const setEspTab = (tab) => {
+        const isEnemies = tab !== "teammates";
+        enemiesPane.style.display = isEnemies ? "flex" : "none";
+        teammatesPane.style.display = isEnemies ? "none" : "flex";
+        enemiesTabBtn.style.opacity = isEnemies ? "1" : "0.65";
+        teammatesTabBtn.style.opacity = isEnemies ? "0.65" : "1";
+      };
+      enemiesTabBtn.addEventListener("click", () => setEspTab("enemies"));
+      teammatesTabBtn.addEventListener("click", () => setEspTab("teammates"));
+      setEspTab("enemies");
+
+      const makeRow = (container, title, html) => {
         const row = document.createElement("div");
         row.className = "zyrox-setting-card";
         row.innerHTML = `
@@ -3686,11 +3752,20 @@
             ${html}
           </div>
         `;
-        configBody.appendChild(row);
+        container.appendChild(row);
         return row;
       };
 
-      const hitboxRow = makeRow("Hitbox", `
+      const enemyFilterRow = makeRow(enemiesPane, "Enemy Visibility", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="esp-show-enemies" ${cfg.showEnemies !== false ? "checked" : ""} />
+            Show enemies
+          </label>
+        </div>
+      `);
+
+      const hitboxRow = makeRow(enemiesPane, "Hitbox", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-hitbox-enabled" ${cfg.hitbox ? "checked" : ""} /> Enabled</label>
           <label>Size <input type="range" class="esp-hitbox-size" min="24" max="270" step="2" value="${cfg.hitboxSize}" /></label>
@@ -3701,7 +3776,7 @@
         </div>
       `);
 
-      const namesRow = makeRow("Names", `
+      const namesRow = makeRow(enemiesPane, "Names", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-enabled" ${cfg.names ? "checked" : ""} /> Enabled</label>
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-distance-only" ${cfg.namesDistanceOnly ? "checked" : ""} /> Distance Only</label>
@@ -3711,7 +3786,7 @@
         </div>
       `);
 
-      const offscreenRow = makeRow("Off-screen", `
+      const offscreenRow = makeRow(enemiesPane, "Off-screen", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
           <label>Mode
             <select class="esp-offscreen-style">
@@ -3745,6 +3820,76 @@
                 <option value="regular" ${cfg.arrowStyle === "regular" ? "selected" : ""}>Regular Arrow</option>
                 <option value="dot" ${cfg.arrowStyle === "dot" ? "selected" : ""}>Dot</option>
                 <option value="modern" ${cfg.arrowStyle === "modern" ? "selected" : ""}>Modern Arrow</option>
+              </select>
+            </label>
+          </span>
+        </div>
+      `);
+
+      const teammateFilterRow = makeRow(teammatesPane, "Teammate Visibility", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="esp-show-teammates" ${cfg.showTeammates !== false ? "checked" : ""} />
+            Show teammates
+          </label>
+        </div>
+      `);
+
+      const teammateHitboxRow = makeRow(teammatesPane, "Hitbox", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-hitbox-enabled" ${cfg.teammateHitbox ? "checked" : ""} /> Enabled</label>
+          <label>Size <input type="range" class="esp-teammate-hitbox-size" min="24" max="270" step="2" value="${cfg.teammateHitboxSize}" /></label>
+          <span class="esp-teammate-hitbox-size-value esp-value-text">${cfg.teammateHitboxSize}px</span>
+          <label>Width <input type="range" class="esp-teammate-hitbox-width" min="1" max="10" step="1" value="${cfg.teammateHitboxWidth}" /></label>
+          <span class="esp-teammate-hitbox-width-value esp-value-text">${cfg.teammateHitboxWidth}px</span>
+          <input type="color" class="esp-teammate-hitbox-color" value="${cfg.teammateHitboxColor || "#36d17c"}" />
+        </div>
+      `);
+
+      const teammateNamesRow = makeRow(teammatesPane, "Names", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-names-enabled" ${cfg.teammateNames ? "checked" : ""} /> Enabled</label>
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-names-distance-only" ${cfg.teammateNamesDistanceOnly ? "checked" : ""} /> Distance Only</label>
+          <label>Size <input type="range" class="esp-teammate-name-size" min="10" max="32" step="1" value="${cfg.teammateNameSize}" /></label>
+          <span class="esp-teammate-name-size-value esp-value-text">${cfg.teammateNameSize}px</span>
+          <input type="color" class="esp-teammate-name-color" value="${cfg.teammateNameColor || "#baf7d2"}" />
+        </div>
+      `);
+
+      const teammateOffscreenRow = makeRow(teammatesPane, "Off-screen", `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label>Mode
+            <select class="esp-teammate-offscreen-style">
+              <option value="none" ${cfg.teammateOffscreenStyle === "none" ? "selected" : ""}>None</option>
+              <option value="tracers" ${cfg.teammateOffscreenStyle === "tracers" ? "selected" : ""}>Tracers</option>
+              <option value="arrows" ${cfg.teammateOffscreenStyle === "arrows" ? "selected" : ""}>Arrows</option>
+            </select>
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;">
+            <input type="checkbox" class="esp-teammate-always-tracer" ${cfg.teammateAlwaysTracer ? "checked" : ""} />
+            Always Show Tracer
+          </label>
+          <label>Theme
+            <select class="esp-teammate-offscreen-theme">
+              <option value="classic" ${cfg.teammateOffscreenTheme === "classic" ? "selected" : ""}>Classic</option>
+              <option value="dashed" ${cfg.teammateOffscreenTheme === "dashed" ? "selected" : ""}>Dashed</option>
+              <option value="neon" ${cfg.teammateOffscreenTheme === "neon" ? "selected" : ""}>Neon</option>
+            </select>
+          </label>
+          <span class="esp-teammate-tracer-controls" style="display:flex;align-items:center;gap:10px;">
+            <label>Tracer Width <input type="range" class="esp-teammate-tracer-width" min="1" max="8" step="1" value="${cfg.teammateTracerWidth}" /></label>
+            <span class="esp-teammate-tracer-width-value esp-value-text">${cfg.teammateTracerWidth}px</span>
+            <input type="color" class="esp-teammate-tracer-color" value="${cfg.teammateTracerColor || "#36d17c"}" />
+          </span>
+          <span class="esp-teammate-arrow-controls" style="display:flex;align-items:center;gap:10px;">
+            <label>Arrow Size <input type="range" class="esp-teammate-arrow-size" min="8" max="30" step="1" value="${cfg.teammateArrowSize}" /></label>
+            <span class="esp-teammate-arrow-size-value esp-value-text">${cfg.teammateArrowSize}px</span>
+            <input type="color" class="esp-teammate-arrow-color" value="${cfg.teammateArrowColor || "#36d17c"}" />
+            <label>Arrow Style
+              <select class="esp-teammate-arrow-style">
+                <option value="regular" ${cfg.teammateArrowStyle === "regular" ? "selected" : ""}>Regular Arrow</option>
+                <option value="dot" ${cfg.teammateArrowStyle === "dot" ? "selected" : ""}>Dot</option>
+                <option value="modern" ${cfg.teammateArrowStyle === "modern" ? "selected" : ""}>Modern Arrow</option>
               </select>
             </label>
           </span>
@@ -3790,6 +3935,7 @@
         });
       };
 
+      bindCheckbox(enemyFilterRow, ".esp-show-enemies", "showEnemies");
       bindCheckbox(hitboxRow, ".esp-hitbox-enabled", "hitbox");
       bindSlider(hitboxRow, ".esp-hitbox-size", "hitboxSize", ".esp-hitbox-size-value");
       bindSlider(hitboxRow, ".esp-hitbox-width", "hitboxWidth", ".esp-hitbox-width-value");
@@ -3840,7 +3986,59 @@
           syncEsp();
         });
       }
+      bindCheckbox(teammateFilterRow, ".esp-show-teammates", "showTeammates");
+      bindCheckbox(teammateHitboxRow, ".esp-teammate-hitbox-enabled", "teammateHitbox");
+      bindSlider(teammateHitboxRow, ".esp-teammate-hitbox-size", "teammateHitboxSize", ".esp-teammate-hitbox-size-value");
+      bindSlider(teammateHitboxRow, ".esp-teammate-hitbox-width", "teammateHitboxWidth", ".esp-teammate-hitbox-width-value");
+      bindColor(teammateHitboxRow, ".esp-teammate-hitbox-color", "teammateHitboxColor");
+      bindCheckbox(teammateNamesRow, ".esp-teammate-names-enabled", "teammateNames");
+      bindCheckbox(teammateNamesRow, ".esp-teammate-names-distance-only", "teammateNamesDistanceOnly");
+      bindSlider(teammateNamesRow, ".esp-teammate-name-size", "teammateNameSize", ".esp-teammate-name-size-value");
+      bindColor(teammateNamesRow, ".esp-teammate-name-color", "teammateNameColor");
+      const teammateStyleInput = teammateOffscreenRow.querySelector(".esp-teammate-offscreen-style");
+      const teammateTracerControls = teammateOffscreenRow.querySelector(".esp-teammate-tracer-controls");
+      const teammateArrowControls = teammateOffscreenRow.querySelector(".esp-teammate-arrow-controls");
+      const teammateAlwaysTracerInput = teammateOffscreenRow.querySelector(".esp-teammate-always-tracer");
+      const refreshTeammateIndicatorModeVisibility = () => {
+        const mode = cfg.teammateOffscreenStyle === "arrows" || cfg.teammateOffscreenStyle === "none"
+          ? cfg.teammateOffscreenStyle
+          : "tracers";
+        if (teammateTracerControls) teammateTracerControls.style.display = mode === "tracers" ? "flex" : "none";
+        if (teammateArrowControls) teammateArrowControls.style.display = mode === "arrows" ? "flex" : "none";
+      };
+      if (teammateStyleInput) {
+        teammateStyleInput.addEventListener("change", (event) => {
+          cfg.teammateOffscreenStyle = String(event.target.value || "tracers");
+          refreshTeammateIndicatorModeVisibility();
+          syncEsp();
+        });
+      }
+      const teammateThemeInput = teammateOffscreenRow.querySelector(".esp-teammate-offscreen-theme");
+      if (teammateThemeInput) {
+        teammateThemeInput.addEventListener("change", (event) => {
+          cfg.teammateOffscreenTheme = String(event.target.value || "classic");
+          syncEsp();
+        });
+      }
+      if (teammateAlwaysTracerInput) {
+        teammateAlwaysTracerInput.addEventListener("change", (event) => {
+          cfg.teammateAlwaysTracer = Boolean(event.target.checked);
+          syncEsp();
+        });
+      }
+      bindSlider(teammateOffscreenRow, ".esp-teammate-tracer-width", "teammateTracerWidth", ".esp-teammate-tracer-width-value");
+      bindColor(teammateOffscreenRow, ".esp-teammate-tracer-color", "teammateTracerColor");
+      bindSlider(teammateOffscreenRow, ".esp-teammate-arrow-size", "teammateArrowSize", ".esp-teammate-arrow-size-value");
+      bindColor(teammateOffscreenRow, ".esp-teammate-arrow-color", "teammateArrowColor");
+      const teammateArrowStyleInput = teammateOffscreenRow.querySelector(".esp-teammate-arrow-style");
+      if (teammateArrowStyleInput) {
+        teammateArrowStyleInput.addEventListener("change", (event) => {
+          cfg.teammateArrowStyle = String(event.target.value || "regular");
+          syncEsp();
+        });
+      }
       refreshIndicatorModeVisibility();
+      refreshTeammateIndicatorModeVisibility();
     } else if (moduleName === "Crosshair") {
       const defaults = getCrosshairConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
