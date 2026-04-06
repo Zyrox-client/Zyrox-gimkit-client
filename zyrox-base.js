@@ -387,7 +387,7 @@
     title: "Zyrox",
     subtitle: "Client",
     version: readUserscriptVersion(),
-    logoUrl: "https://raw.githubusercontent.com/Bob-alt-828100/zyrox-gimkit-client/refs/heads/main/images/logo.png",
+    logoUrl: "https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/images/logo.png",
   };
 
   // --- Core Utilities & Networking (Extracted from Gimkit Cheat) ---
