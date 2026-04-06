@@ -5,7 +5,7 @@
     <h3>A modern userscript hacked client for <a href=https://www.gimkit.com>gimkit</a>.</h3>
 </div>
 
-<h3>Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.</h3>
+Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.
 
 ## Download/Install
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
