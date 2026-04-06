@@ -33,7 +33,9 @@ otherwise the client will not open/load.\
 - ~~Fix new issues from adding crosshair~~
 - Improve default settings
 - ~~Add reset button for all setting~~
-- Improve ESP & Crosshair module
-- Add more module (functionality); ~~triggerbot~~, ~~aimbot~~, etc.
+- Improve ESP & aimbot modules
+- Store enabled modules
+- Fix hiding non working modules
+- Add more module (functionality); ~~triggerbot, aimbot, etc.~~
 
    
