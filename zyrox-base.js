@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.2
+// @version      1.5.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.2";
+    const CLIENT_VERSION = "1.5.3";
     return CLIENT_VERSION;
   }
 
@@ -1153,7 +1153,11 @@
   function formatEspLabel(playerName, distance, namesDistanceOnly, style) {
     const safeName = String(playerName || "Player");
     const distanceText = `${Math.floor(Number(distance) || 0)}m`;
-    if (namesDistanceOnly) return distanceText;
+    const showName = namesDistanceOnly?.showName !== undefined ? namesDistanceOnly.showName : true;
+    const showDistance = namesDistanceOnly?.showDistance !== undefined ? namesDistanceOnly.showDistance : true;
+    if (!showName && !showDistance) return "";
+    if (showName && !showDistance) return safeName;
+    if (!showName && showDistance) return distanceText;
     switch (style) {
       case "dash":
         return `${safeName} - ${distanceText}`;
@@ -1167,6 +1171,24 @@
       default:
         return `${safeName} • ${distanceText}`;
     }
+  }
+
+  function resolveNameDistanceVisibility(cfg, isTeammate) {
+    const nameKey = isTeammate ? "teammateNameTextEnabled" : "nameTextEnabled";
+    const distanceKey = isTeammate ? "teammateDistanceTextEnabled" : "distanceTextEnabled";
+    const explicitName = cfg?.[nameKey];
+    const explicitDistance = cfg?.[distanceKey];
+    if (typeof explicitName === "boolean" || typeof explicitDistance === "boolean") {
+      return {
+        showName: explicitName !== false,
+        showDistance: explicitDistance !== false,
+      };
+    }
+    const legacyNamesEnabled = isTeammate ? (cfg?.teammateNames !== false) : (cfg?.names !== false);
+    const legacyDistanceOnly = isTeammate ? (cfg?.teammateNamesDistanceOnly === true) : (cfg?.namesDistanceOnly === true);
+    if (!legacyNamesEnabled) return { showName: false, showDistance: false };
+    if (legacyDistanceOnly) return { showName: false, showDistance: true };
+    return { showName: true, showDistance: true };
   }
 
   function projectWorldToScreen(position, cameraSnapshot, viewportWidth, viewportHeight) {
@@ -1197,6 +1219,8 @@
       teammateHitboxColor: "#36d17c",
       names: true,
       namesDistanceOnly: false,
+      nameTextEnabled: true,
+      distanceTextEnabled: true,
       nameSize: 22,
       nameColor: "#7a0c0c",
       nameOutline: true,
@@ -1205,6 +1229,8 @@
       nameDistanceStyle: "dot",
       teammateNames: true,
       teammateNamesDistanceOnly: false,
+      teammateNameTextEnabled: true,
+      teammateDistanceTextEnabled: true,
       teammateNameSize: 22,
       teammateNameColor: "#baf7d2",
       teammateNameOutline: true,
@@ -1338,8 +1364,7 @@
       if (isTeammate && espCfg.showTeammates === false) continue;
       if (!isTeammate && espCfg.showEnemies === false) continue;
       const showHitbox = isTeammate ? espCfg.teammateHitbox !== false : espCfg.hitbox !== false;
-      const showNames = isTeammate ? espCfg.teammateNames !== false : espCfg.names !== false;
-      const namesDistanceOnly = isTeammate ? espCfg.teammateNamesDistanceOnly === true : espCfg.namesDistanceOnly === true;
+      const nameDistanceVisibility = resolveNameDistanceVisibility(espCfg, isTeammate);
       const chosenDistanceStyle = isTeammate ? espCfg.teammateNameDistanceStyle : espCfg.nameDistanceStyle;
       const distanceStyle = ["dot", "dash", "pipe", "paren", "distanceFirst"].includes(chosenDistanceStyle)
         ? chosenDistanceStyle
@@ -1456,12 +1481,12 @@
         }
       }
 
-      if (!showNames) continue;
+      if (!nameDistanceVisibility.showName && !nameDistanceVisibility.showDistance) continue;
       ctx.fillStyle = nameColor;
       ctx.font = `${nameSize}px ${espCfg.font || "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const labelText = formatEspLabel(getCharacterName(character, characterId), distance, namesDistanceOnly, distanceStyle);
+      const labelText = formatEspLabel(getCharacterName(character, characterId), distance, nameDistanceVisibility, distanceStyle);
       const textWidth = Math.max(1, ctx.measureText(labelText).width);
       const pad = Math.max(8, nameSize * 0.35);
       const halfText = textWidth / 2;
@@ -3831,8 +3856,8 @@
 
       const namesRow = makeRow(enemiesPane, "Names", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-enabled" ${cfg.names ? "checked" : ""} /> Enabled</label>
-          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-names-distance-only" ${cfg.namesDistanceOnly ? "checked" : ""} /> Distance Only</label>
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-name-show-name" ${resolveNameDistanceVisibility(cfg, false).showName ? "checked" : ""} /> Name</label>
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-name-show-distance" ${resolveNameDistanceVisibility(cfg, false).showDistance ? "checked" : ""} /> Distance</label>
           <label>Size <input type="range" class="esp-name-size" min="10" max="32" step="1" value="${cfg.nameSize}" /></label>
           <span class="esp-name-size-value esp-value-text">${cfg.nameSize}px</span>
           <input type="color" class="esp-name-color" value="${cfg.nameColor}" />
@@ -3914,8 +3939,8 @@
 
       const teammateNamesRow = makeRow(teammatesPane, "Names", `
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-names-enabled" ${cfg.teammateNames ? "checked" : ""} /> Enabled</label>
-          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-names-distance-only" ${cfg.teammateNamesDistanceOnly ? "checked" : ""} /> Distance Only</label>
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-name-show-name" ${resolveNameDistanceVisibility(cfg, true).showName ? "checked" : ""} /> Name</label>
+          <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-name-show-distance" ${resolveNameDistanceVisibility(cfg, true).showDistance ? "checked" : ""} /> Distance</label>
           <label>Size <input type="range" class="esp-teammate-name-size" min="10" max="32" step="1" value="${cfg.teammateNameSize}" /></label>
           <span class="esp-teammate-name-size-value esp-value-text">${cfg.teammateNameSize}px</span>
           <input type="color" class="esp-teammate-name-color" value="${cfg.teammateNameColor || "#baf7d2"}" />
@@ -4020,8 +4045,8 @@
       bindSlider(hitboxRow, ".esp-hitbox-width", "hitboxWidth", ".esp-hitbox-width-value");
       bindColor(hitboxRow, ".esp-hitbox-color", "hitboxColor");
 
-      bindCheckbox(namesRow, ".esp-names-enabled", "names");
-      bindCheckbox(namesRow, ".esp-names-distance-only", "namesDistanceOnly");
+      bindCheckbox(namesRow, ".esp-name-show-name", "nameTextEnabled");
+      bindCheckbox(namesRow, ".esp-name-show-distance", "distanceTextEnabled");
       bindSlider(namesRow, ".esp-name-size", "nameSize", ".esp-name-size-value");
       bindColor(namesRow, ".esp-name-color", "nameColor");
       bindCheckbox(namesRow, ".esp-name-outline-enabled", "nameOutline");
@@ -4080,8 +4105,8 @@
       bindSlider(teammateHitboxRow, ".esp-teammate-hitbox-size", "teammateHitboxSize", ".esp-teammate-hitbox-size-value");
       bindSlider(teammateHitboxRow, ".esp-teammate-hitbox-width", "teammateHitboxWidth", ".esp-teammate-hitbox-width-value");
       bindColor(teammateHitboxRow, ".esp-teammate-hitbox-color", "teammateHitboxColor");
-      bindCheckbox(teammateNamesRow, ".esp-teammate-names-enabled", "teammateNames");
-      bindCheckbox(teammateNamesRow, ".esp-teammate-names-distance-only", "teammateNamesDistanceOnly");
+      bindCheckbox(teammateNamesRow, ".esp-teammate-name-show-name", "teammateNameTextEnabled");
+      bindCheckbox(teammateNamesRow, ".esp-teammate-name-show-distance", "teammateDistanceTextEnabled");
       bindSlider(teammateNamesRow, ".esp-teammate-name-size", "teammateNameSize", ".esp-teammate-name-size-value");
       bindColor(teammateNamesRow, ".esp-teammate-name-color", "teammateNameColor");
       bindCheckbox(teammateNamesRow, ".esp-teammate-name-outline-enabled", "teammateNameOutline");
