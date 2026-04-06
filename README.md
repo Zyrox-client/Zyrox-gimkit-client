@@ -12,6 +12,9 @@ Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-cl
 2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit).
 3. Open [gimkit.com/join](https://www.gimkit.com/join).
 
+> [!NOTE]
+Make sure to enable developer mode (if on chrome) and allow the userscript manager to run userscripts,\
+otherwise the client will not open/load.
 
 ## Files
 - `example.js`: Reference/example userscript from a different hacked client.
