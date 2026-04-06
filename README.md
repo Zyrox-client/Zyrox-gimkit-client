@@ -17,7 +17,9 @@ Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-cl
 
 > [!NOTE]
 Make sure to enable developer mode (if on chrome) and allow the userscript manager to run userscripts,\
-otherwise the client will not open/load.
+otherwise the client will not open/load.\
+\
+(if you dont want to download the script from greasyfork, you can download it [here](https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/zyrox-base.js))
 
 <br>
 
@@ -31,7 +33,9 @@ otherwise the client will not open/load.
 - ~~Fix new issues from adding crosshair~~
 - Improve default settings
 - ~~Add reset button for all setting~~
-- Improve ESP & Crosshair module
-- Add more module (functionality); ~~triggerbot~~, ~~aimbot~~, etc.
+- Improve ESP & aimbot modules
+- Store enabled modules
+- Fix hiding non working modules
+- Add more module (functionality); ~~triggerbot, aimbot, etc.~~
 
    
