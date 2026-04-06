@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.8
+// @version      1.5.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.8";
+    const CLIENT_VERSION = "1.5.9";
     return CLIENT_VERSION;
   }
 
@@ -2441,6 +2441,33 @@
     const el = target instanceof Element ? target : null;
     return Boolean(el?.closest(".zyrox-root, .zyrox-config-backdrop, .zyrox-settings, .zyrox-config"));
   }
+
+  function shouldRerouteManualShot(event) {
+    if (!event || event.button !== 0) return false;
+    if (isEventInsideUi(event.target)) return false;
+    if (!autoAimState.enabled || !autoAimState.target) return false;
+    if (triggerAssistState.enabled) return false;
+    const cfg = getAutoAimConfig();
+    if (!cfg.enabled) return false;
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) return false;
+    return true;
+  }
+
+  window.addEventListener("mousedown", (event) => {
+    if (!shouldRerouteManualShot(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    autoAimInputState.leftMouseDown = true;
+    attemptFire(false, false, { x: crosshairState.mouseX, y: crosshairState.mouseY });
+  }, true);
+
+  window.addEventListener("mouseup", (event) => {
+    if (event.button !== 0 || isEventInsideUi(event.target)) return;
+    if (!autoAimState.enabled || triggerAssistState.enabled || !autoAimInputState.leftMouseDown) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    autoAimInputState.leftMouseDown = false;
+  }, true);
 
   window.addEventListener("mousedown", (event) => {
     if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
