@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.0
+// @version      1.5.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.0";
+    const CLIENT_VERSION = "1.5.1";
     return CLIENT_VERSION;
   }
 
@@ -1201,15 +1201,15 @@
       nameColor: "#7a0c0c",
       nameOutline: true,
       nameOutlineColor: "#000000",
-      nameOutlineWidth: 3,
+      nameOutlineWidth: 1,
       nameDistanceStyle: "dot",
       teammateNames: true,
       teammateNamesDistanceOnly: false,
       teammateNameSize: 20,
       teammateNameColor: "#14532d",
       teammateNameOutline: true,
-      teammateNameOutlineColor: "#000000",
-      teammateNameOutlineWidth: 3,
+      teammateNameOutlineColor: "#ffffff",
+      teammateNameOutlineWidth: 1,
       teammateNameDistanceStyle: "dot",
       offscreenStyle: "tracers",
       offscreenTheme: "classic",
@@ -1386,6 +1386,9 @@
       const shouldDrawOffscreen = !onScreen && offscreenStyle !== "none";
       const shouldDrawTracer = offscreenStyle === "tracers" && (alwaysTracer || !onScreen);
 
+      let labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
+      let labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, distance) + canvas.height / 2;
+
       if (shouldDrawOffscreen || shouldDrawTracer) {
         const margin = 20;
         const halfW = canvas.width / 2 - margin;
@@ -1448,6 +1451,8 @@
           if (arrowStyle === "dot" || arrowStyle === "modern") ctx.fill();
           else ctx.stroke();
           ctx.restore();
+          labelX = endX;
+          labelY = endY - Math.max(16, headLength * 1.2);
         }
       }
 
@@ -1456,8 +1461,6 @@
       ctx.font = `${nameSize}px ${espCfg.font || "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
-      const labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, distance) + canvas.height / 2;
       const labelText = formatEspLabel(getCharacterName(character, characterId), distance, namesDistanceOnly, distanceStyle);
       if (nameOutlineEnabled) {
         ctx.lineWidth = nameOutlineWidth;
@@ -3923,7 +3926,7 @@
           <label style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="esp-teammate-name-outline-enabled" ${cfg.teammateNameOutline !== false ? "checked" : ""} /> Outline</label>
           <label>Outline Width <input type="range" class="esp-teammate-name-outline-width" min="1" max="6" step="1" value="${cfg.teammateNameOutlineWidth}" /></label>
           <span class="esp-teammate-name-outline-width-value esp-value-text">${cfg.teammateNameOutlineWidth}px</span>
-          <input type="color" class="esp-teammate-name-outline-color" value="${cfg.teammateNameOutlineColor || "#000000"}" />
+          <input type="color" class="esp-teammate-name-outline-color" value="${cfg.teammateNameOutlineColor || "#ffffff"}" />
         </div>
       `);
 
