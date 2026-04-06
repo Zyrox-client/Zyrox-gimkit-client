@@ -3656,7 +3656,7 @@
       event.stopPropagation();
     };
     ["pointerdown", "mousedown", "mouseup", "click", "dblclick", "contextmenu"].forEach((type) => {
-      node.addEventListener(type, block, true);
+      node.addEventListener(type, block, false);
     });
   }
   absorbMenuInputEvents(root);
