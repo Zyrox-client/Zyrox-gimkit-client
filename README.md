@@ -5,7 +5,7 @@ A hacked client for [gimkit](https://www.gimkit.com).
 <h3>Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.</h3>
 
 ## Instalation
-1. Install a userscript manager (Tampermonkey/Violentmonkey). (Make sure to enabled userscripts & dev mode)
+1. Install a userscript manager (Tampermonkey/Violentmonkey). (Make sure to enable userscripts & dev mode)
 2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit).
 3. Open [gimkit.com/join](https://www.gimkit.com/join).
 
@@ -16,10 +16,10 @@ A hacked client for [gimkit](https://www.gimkit.com).
 
 
 ## Roadmap/todo
-- Fix new issues from adding crosshair
+- ~~Fix new issues from adding crosshair~~
 - Improve default settings
-- Add reset button for all setting
+- ~~Add reset button for all setting~~
 - Improve ESP & Crosshair module
-- Add more module functionality's; triggerbot, aimbot,
+- Add more module (functionality); ~~triggerbot~~, ~~aimbot~~, etc.
 
    
