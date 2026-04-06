@@ -7,19 +7,25 @@
 
 Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.
 
+
 ## Download/Install
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
 2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit).
 3. Open [gimkit.com/join](https://www.gimkit.com/join).
 
+<br>
+
 > [!NOTE]
 Make sure to enable developer mode (if on chrome) and allow the userscript manager to run userscripts,\
 otherwise the client will not open/load.
+
+<br>
 
 ## Files
 - `example.js`: Reference/example userscript from a different hacked client.
 - `zyrox-base.js`: The main userscript file.
 
+<br>
 
 ## Roadmap/todo
 - ~~Fix new issues from adding crosshair~~
