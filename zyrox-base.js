@@ -6,8 +6,8 @@
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/example.js
-// @downloadURL  https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/example.js
+// @updateURL    https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/zyrox-base.js
+// @downloadURL  https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/zyrox-base.js
 // @icon         https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/images/logo.png
 // @license      MIT
 // @grant        none
