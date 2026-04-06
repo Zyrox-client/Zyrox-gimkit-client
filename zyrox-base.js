@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.4
+// @version      1.5.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.4";
+    const CLIENT_VERSION = "1.5.5";
     return CLIENT_VERSION;
   }
 
@@ -1846,14 +1846,14 @@
     const defaults = {
       enabled: true,
       teamCheck: true,
-      fovDeg: 120,
+      fovDeg: 180,
       smoothing: 0.2,
       maxStepPx: 32,
       minStepPx: 0.75,
       deadzonePx: 1.8,
       predictionMs: 70,
-      lockMs: 220,
-      stickToTarget: true,
+      lockMs: 0,
+      stickToTarget: false,
       onlyWhenGameFocused: true,
       requireMouseDown: false,
       showDebugDot: true,
@@ -2119,7 +2119,7 @@
       if (screen.x < -margin || screen.x > width + margin || screen.y < -margin || screen.y > height + margin) continue;
       const dist = Math.hypot(mx - screen.x, my - screen.y);
       const angleDelta = angleToAimDir(screen.x - mx, screen.y - my);
-      const score = (dist * 0.72) + (angleDelta * 6.2);
+      const score = dist;
       if (angleDelta <= fovDeg && (!best || score < best.score)) {
         best = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta, score };
       }
@@ -2431,16 +2431,16 @@
       onEnable: startCrosshair,
       onDisable: stopCrosshair,
     },
-    "Trigger Assist": {
+    "Triggerbot": {
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
     },
-    "Auto Aim": {
+    "Aimbot": {
       onEnable: startAutoAim,
       onDisable: stopAutoAim,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Trigger Assist", "Auto Aim"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot", "Aimbot"]);
 
   // --- End of Core Utilities ---
 
@@ -2565,7 +2565,7 @@
               ],
             },
             {
-              name: "Trigger Assist",
+              name: "Triggerbot",
               settings: [
                 { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
@@ -2578,18 +2578,18 @@
               ],
             },
             {
-              name: "Auto Aim",
+              name: "Aimbot",
               settings: [
                 { id: "enabled",             label: "Enabled",               type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",      type: "checkbox", default: true },
-                { id: "fovDeg",              label: "Aim FOV",               type: "slider",   default: 120, min: 15, max: 180, step: 1, unit: "°" },
+                { id: "fovDeg",              label: "Aim FOV",               type: "slider",   default: 180, min: 15, max: 180, step: 1, unit: "°" },
                 { id: "smoothing",           label: "Smoothing",             type: "slider",   default: 0.2, min: 0, max: 1, step: 0.01 },
                 { id: "maxStepPx",           label: "Max Step",              type: "slider",   default: 32, min: 2, max: 120, step: 1, unit: "px" },
                 { id: "minStepPx",           label: "Min Step",              type: "slider",   default: 0.75, min: 0, max: 8, step: 0.05, unit: "px" },
                 { id: "deadzonePx",          label: "Deadzone",              type: "slider",   default: 1.8, min: 0, max: 12, step: 0.1, unit: "px" },
                 { id: "predictionMs",        label: "Prediction",            type: "slider",   default: 70, min: 0, max: 220, step: 1, unit: "ms" },
-                { id: "lockMs",              label: "Target Lock",           type: "slider",   default: 220, min: 0, max: 800, step: 5, unit: "ms" },
-                { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: true },
+                { id: "lockMs",              label: "Target Lock",           type: "slider",   default: 0, min: 0, max: 800, step: 5, unit: "ms" },
+                { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
                 { id: "requireMouseDown",    label: "Require Left Mouse",    type: "checkbox", default: false },
                 { id: "showDebugDot",        label: "Show Debug Dot",        type: "checkbox", default: true },
@@ -3741,9 +3741,9 @@
     const cfg = store.get(name);
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
-    } else if (name === "Trigger Assist") {
+    } else if (name === "Triggerbot") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
-    } else if (name === "Auto Aim") {
+    } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
     }
     return cfg;
@@ -4361,7 +4361,7 @@
         syncCrosshair();
       });
 
-    } else if (moduleName === "Trigger Assist") {
+    } else if (moduleName === "Triggerbot") {
       const defaults = getTriggerAssistConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxTriggerAssistConfig = { ...cfg };
@@ -4408,7 +4408,7 @@
           });
         }
       }
-    } else if (moduleName === "Auto Aim") {
+    } else if (moduleName === "Aimbot") {
       const defaults = getAutoAimConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxAutoAimConfig = { ...cfg };
