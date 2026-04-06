@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.4.5
+// @version      1.5.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
-// @updateURL    https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/example.js
-// @downloadURL  https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/example.js
+// @updateURL    https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/zyrox-base.js
+// @downloadURL  https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/zyrox-base.js
 // @icon         https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/images/logo.png
 // @license      MIT
 // @grant        none
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.4.5";
+    const CLIENT_VERSION = "1.5.1";
     return CLIENT_VERSION;
   }
 
