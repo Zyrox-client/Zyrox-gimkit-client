@@ -1806,7 +1806,7 @@
 
   const autoAimState = {
     enabled: false,
-    loopId: null,
+    rafId: null,
     canvas: null,
     ctx: null,
     target: null,
@@ -1815,10 +1815,17 @@
     lastAimY: 0,
     aimDirX: 1,
     aimDirY: 0,
+    lastTickAt: 0,
+    lastTargetId: null,
+    targetLockUntil: 0,
+    targetVelX: 0,
+    targetVelY: 0,
+    lastTargetSampleAt: 0,
   };
 
   const autoAimInputState = {
     leftMouseDown: false,
+    reroutedShotActive: false,
   };
 
   function getTriggerAssistConfig() {
@@ -1840,10 +1847,14 @@
     const defaults = {
       enabled: true,
       teamCheck: true,
-      fovDeg: 120,
+      fovDeg: 180,
       smoothing: 0.2,
       maxStepPx: 32,
-      stickToTarget: true,
+      minStepPx: 0.75,
+      deadzonePx: 1.8,
+      predictionMs: 70,
+      lockMs: 0,
+      stickToTarget: false,
       onlyWhenGameFocused: true,
       requireMouseDown: false,
       showDebugDot: true,
@@ -1949,6 +1960,28 @@
   function syncAimPointer(canvas, x, y, buttons = 0) {
     fireCanvasPointerEvent("pointermove", canvas, x, y);
     fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
+    const clientX = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
+    const clientY = Math.max(0, Math.min(window.innerHeight, Number(y) || 0));
+    const moveInit = {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons,
+      clientX,
+      clientY,
+    };
+    document.dispatchEvent(new MouseEvent("mousemove", moveInit));
+    window.dispatchEvent(new MouseEvent("mousemove", moveInit));
+    try {
+      const pointerInit = {
+        ...moveInit,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      };
+      document.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+      window.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+    } catch (_) { }
   }
 
   function releaseFireHold() {
@@ -2094,6 +2127,8 @@
       return Math.acos(dot) * (180 / Math.PI);
     };
     const canUseSticky = cfg.stickToTarget && autoAimState.target?.player;
+    const now = performance.now();
+    const isWithinLockWindow = autoAimState.lastTargetId != null && now < autoAimState.targetLockUntil;
     let stickyCandidate = null;
     let best = null;
 
@@ -2107,11 +2142,14 @@
       if (screen.x < -margin || screen.x > width + margin || screen.y < -margin || screen.y > height + margin) continue;
       const dist = Math.hypot(mx - screen.x, my - screen.y);
       const angleDelta = angleToAimDir(screen.x - mx, screen.y - my);
-      if (angleDelta <= fovDeg && (!best || dist < best.distancePx)) {
-        best = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta };
+      const score = dist;
+      if (angleDelta <= fovDeg && (!best || score < best.score)) {
+        best = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta, score };
       }
       if (canUseSticky && pid === String(autoAimState.target.playerId) && angleDelta <= stickyFovDeg) {
-        stickyCandidate = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta };
+        stickyCandidate = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta, score };
+      } else if (isWithinLockWindow && pid === String(autoAimState.lastTargetId) && angleDelta <= stickyFovDeg) {
+        stickyCandidate = { player, playerId: pid, screenX: screen.x, screenY: screen.y, distancePx: dist, angleDelta, score };
       }
     }
     return stickyCandidate || best;
@@ -2141,6 +2179,10 @@
 
   function autoAimTick() {
     if (!autoAimState.enabled) return;
+    const now = performance.now();
+    const dtMs = autoAimState.lastTickAt > 0 ? (now - autoAimState.lastTickAt) : (1000 / 60);
+    autoAimState.lastTickAt = now;
+    const dtFactor = Math.max(0.45, Math.min(2.2, dtMs / (1000 / 60)));
     const cfg = getAutoAimConfig();
     if (!cfg.enabled) {
       autoAimState.target = null;
@@ -2174,12 +2216,38 @@
     const canvas = getGameCanvas();
     const smoothing = Math.max(0, Math.min(1, Number(cfg.smoothing) || 0.2));
     const maxStep = Math.max(2, Number(cfg.maxStepPx) || 32);
-    const dx = target.screenX - crosshairState.mouseX;
-    const dy = target.screenY - crosshairState.mouseY;
+    const minStep = Math.max(0.05, Number(cfg.minStepPx) || 0.75);
+    const deadzone = Math.max(0, Number(cfg.deadzonePx) || 1.8);
+    const predictionMs = Math.max(0, Math.min(220, Number(cfg.predictionMs) || 70));
+    const lockMs = Math.max(0, Number(cfg.lockMs) || 220);
+
+    if (target.playerId != null) {
+      if (autoAimState.lastTargetId !== String(target.playerId)) {
+        autoAimState.targetVelX = 0;
+        autoAimState.targetVelY = 0;
+      }
+      if (autoAimState.target) {
+        const sampleDelta = Math.max(1, now - (autoAimState.lastTargetSampleAt || now));
+        const rawVelX = (target.screenX - autoAimState.target.screenX) / sampleDelta;
+        const rawVelY = (target.screenY - autoAimState.target.screenY) / sampleDelta;
+        const velBlend = 0.28;
+        autoAimState.targetVelX = autoAimState.targetVelX * (1 - velBlend) + rawVelX * velBlend;
+        autoAimState.targetVelY = autoAimState.targetVelY * (1 - velBlend) + rawVelY * velBlend;
+      }
+      autoAimState.lastTargetSampleAt = now;
+      autoAimState.lastTargetId = String(target.playerId);
+      autoAimState.targetLockUntil = now + lockMs;
+    }
+
+    const predictedX = target.screenX + autoAimState.targetVelX * predictionMs;
+    const predictedY = target.screenY + autoAimState.targetVelY * predictionMs;
+    const dx = predictedX - crosshairState.mouseX;
+    const dy = predictedY - crosshairState.mouseY;
     const dist = Math.hypot(dx, dy);
-    if (dist > 0.01) {
-      const baseStep = dist * smoothing;
-      const step = Math.min(maxStep, Math.max(0.1, baseStep));
+    if (dist > deadzone) {
+      const adaptiveSmoothing = Math.pow(smoothing, dtFactor);
+      const baseStep = dist * adaptiveSmoothing;
+      const step = Math.min(maxStep * dtFactor, Math.max(minStep, baseStep));
       const ratio = Math.min(1, step / dist);
       const nextX = crosshairState.mouseX + dx * ratio;
       const nextY = crosshairState.mouseY + dy * ratio;
@@ -2200,25 +2268,40 @@
     renderAutoAimOverlay(cfg);
   }
 
+  function autoAimLoop() {
+    if (!autoAimState.enabled) return;
+    autoAimTick();
+    autoAimState.rafId = requestAnimationFrame(autoAimLoop);
+  }
+
   function startAutoAim() {
     if (autoAimState.enabled) return;
     primeSharedPlayerData();
     autoAimState.enabled = true;
     autoAimState.target = null;
+    autoAimState.lastTargetId = null;
+    autoAimState.targetLockUntil = 0;
+    autoAimState.targetVelX = 0;
+    autoAimState.targetVelY = 0;
+    autoAimState.lastTickAt = 0;
     autoAimState.statusText = "Armed";
     createAutoAimCanvas();
-    if (autoAimState.loopId != null) clearInterval(autoAimState.loopId);
-    autoAimState.loopId = setInterval(autoAimTick, 1000 / 60);
+    if (autoAimState.rafId != null) cancelAnimationFrame(autoAimState.rafId);
+    autoAimState.rafId = requestAnimationFrame(autoAimLoop);
   }
 
   function stopAutoAim() {
     if (!autoAimState.enabled) return;
     autoAimState.enabled = false;
-    if (autoAimState.loopId != null) {
-      clearInterval(autoAimState.loopId);
-      autoAimState.loopId = null;
+    if (autoAimState.rafId != null) {
+      cancelAnimationFrame(autoAimState.rafId);
+      autoAimState.rafId = null;
     }
     autoAimState.target = null;
+    autoAimState.lastTargetId = null;
+    autoAimState.targetLockUntil = 0;
+    autoAimState.targetVelX = 0;
+    autoAimState.targetVelY = 0;
     autoAimState.statusText = "Idle";
     destroyAutoAimCanvas();
   }
@@ -2343,23 +2426,62 @@
 
   window.addEventListener("blur", () => {
     autoAimInputState.leftMouseDown = false;
+    autoAimInputState.reroutedShotActive = false;
     autoAimState.target = null;
     releaseFireHold();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") {
       autoAimInputState.leftMouseDown = false;
+      autoAimInputState.reroutedShotActive = false;
       autoAimState.target = null;
       releaseFireHold();
     }
   });
   window.addEventListener("resize", resizeTriggerAssistCanvas);
   window.addEventListener("resize", resizeAutoAimCanvas);
+  function isEventInsideUi(target) {
+    const el = target instanceof Element ? target : null;
+    return Boolean(el?.closest(".zyrox-root, .zyrox-config-backdrop, .zyrox-settings, .zyrox-config"));
+  }
+
+  function shouldRerouteManualShot(event) {
+    if (!event || event.button !== 0) return false;
+    if (isEventInsideUi(event.target)) return false;
+    if (!autoAimState.enabled || !autoAimState.target) return false;
+    if (triggerAssistState.enabled) return false;
+    const cfg = getAutoAimConfig();
+    if (!cfg.enabled) return false;
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) return false;
+    return true;
+  }
+
   window.addEventListener("mousedown", (event) => {
-    if (event.button === 0) autoAimInputState.leftMouseDown = true;
+    if (!shouldRerouteManualShot(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    autoAimInputState.leftMouseDown = true;
+    autoAimInputState.reroutedShotActive = true;
+    attemptFire(false, false, { x: crosshairState.mouseX, y: crosshairState.mouseY });
+  }, true);
+
+  window.addEventListener("mouseup", (event) => {
+    if (event.button !== 0 || isEventInsideUi(event.target)) return;
+    if (!autoAimInputState.reroutedShotActive) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    autoAimInputState.leftMouseDown = false;
+    autoAimInputState.reroutedShotActive = false;
+  }, true);
+
+  window.addEventListener("mousedown", (event) => {
+    if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
   }, { passive: true });
   window.addEventListener("mouseup", (event) => {
-    if (event.button === 0) autoAimInputState.leftMouseDown = false;
+    if (event.button === 0) {
+      autoAimInputState.leftMouseDown = false;
+      autoAimInputState.reroutedShotActive = false;
+    }
   }, { passive: true });
 
   const MODULE_BEHAVIORS = {
@@ -2371,16 +2493,16 @@
       onEnable: startCrosshair,
       onDisable: stopCrosshair,
     },
-    "Trigger Assist": {
+    "Triggerbot (Autoshoot)": {
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
     },
-    "Auto Aim": {
+    "Aimbot": {
       onEnable: startAutoAim,
       onDisable: stopAutoAim,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Trigger Assist", "Auto Aim"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot"]);
 
   // --- End of Core Utilities ---
 
@@ -2505,7 +2627,7 @@
               ],
             },
             {
-              name: "Trigger Assist",
+              name: "Triggerbot (Autoshoot)",
               settings: [
                 { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
@@ -2518,14 +2640,18 @@
               ],
             },
             {
-              name: "Auto Aim",
+              name: "Aimbot",
               settings: [
                 { id: "enabled",             label: "Enabled",               type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",      type: "checkbox", default: true },
-                { id: "fovDeg",              label: "Aim FOV",               type: "slider",   default: 120, min: 15, max: 180, step: 1, unit: "°" },
+                { id: "fovDeg",              label: "Aim FOV",               type: "slider",   default: 180, min: 15, max: 180, step: 1, unit: "°" },
                 { id: "smoothing",           label: "Smoothing",             type: "slider",   default: 0.2, min: 0, max: 1, step: 0.01 },
                 { id: "maxStepPx",           label: "Max Step",              type: "slider",   default: 32, min: 2, max: 120, step: 1, unit: "px" },
-                { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: true },
+                { id: "minStepPx",           label: "Min Step",              type: "slider",   default: 0.75, min: 0, max: 8, step: 0.05, unit: "px" },
+                { id: "deadzonePx",          label: "Deadzone",              type: "slider",   default: 1.8, min: 0, max: 12, step: 0.1, unit: "px" },
+                { id: "predictionMs",        label: "Prediction",            type: "slider",   default: 70, min: 0, max: 220, step: 1, unit: "ms" },
+                { id: "lockMs",              label: "Target Lock",           type: "slider",   default: 0, min: 0, max: 800, step: 5, unit: "ms" },
+                { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
                 { id: "requireMouseDown",    label: "Require Left Mouse",    type: "checkbox", default: false },
                 { id: "showDebugDot",        label: "Show Debug Dot",        type: "checkbox", default: true },
@@ -3559,6 +3685,20 @@
   `;
   configBackdrop.appendChild(settingsMenu);
 
+  function absorbMenuInputEvents(node) {
+    if (!node) return;
+    const block = (event) => {
+      event.stopPropagation();
+    };
+    ["pointerdown", "mousedown", "click", "dblclick", "contextmenu"].forEach((type) => {
+      node.addEventListener(type, block, false);
+    });
+  }
+  absorbMenuInputEvents(root);
+  absorbMenuInputEvents(configBackdrop);
+  absorbMenuInputEvents(configMenu);
+  absorbMenuInputEvents(settingsMenu);
+
   const configTitleEl = configMenu.querySelector(".zyrox-config-title");
   const configSubEl = configMenu.querySelector(".zyrox-config-sub");
   const configCloseBtn = configMenu.querySelector(".config-close-btn");
@@ -3677,9 +3817,9 @@
     const cfg = store.get(name);
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
-    } else if (name === "Trigger Assist") {
+    } else if (name === "Triggerbot (Autoshoot)") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
-    } else if (name === "Auto Aim") {
+    } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
     }
     return cfg;
@@ -4297,7 +4437,7 @@
         syncCrosshair();
       });
 
-    } else if (moduleName === "Trigger Assist") {
+    } else if (moduleName === "Triggerbot (Autoshoot)") {
       const defaults = getTriggerAssistConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxTriggerAssistConfig = { ...cfg };
@@ -4344,7 +4484,7 @@
           });
         }
       }
-    } else if (moduleName === "Auto Aim") {
+    } else if (moduleName === "Aimbot") {
       const defaults = getAutoAimConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxAutoAimConfig = { ...cfg };
