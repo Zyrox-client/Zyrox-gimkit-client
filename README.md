@@ -1,3 +1,11 @@
+<div id="logo" align="center">
+    <br />
+    <img src="./images/logo_transparent.png" alt="Logo" width="200"/>
+    <h1>Zyrox client</h1>
+    <h3>A modern userscript hacked client for <a href=https://www.gimkit.com>gimkit</a>.</h3>
+</div>
+
+
 # zyrox gimkit hacked client
 
 A hacked client for [gimkit](https://www.gimkit.com).
