@@ -10,7 +10,8 @@ Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-cl
 
 ## Download/Install
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
-2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit). 
+2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit).
+3. Open [gimkit.com/join](https://www.gimkit.com/join).
 
 <br>
 
