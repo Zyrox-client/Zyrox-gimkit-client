@@ -1,6 +1,6 @@
 # zyrox gimkit hacked client
 
-A hacked client for [gimkit](https://www.gimkit.com
+A hacked client for [gimkit](https://www.gimkit.com).
 
 <h3>Install the usercript <a href="https://update.greasyfork.org/scripts/572408/Zyrox%20client%20%28gimkit%29.user.js">here</a>.</h3>
 
