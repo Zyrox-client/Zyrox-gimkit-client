@@ -1133,14 +1133,18 @@
     const id = getCharacterId(character) ?? fallbackId;
     const serializerCharacter = getSerializerCharacterById(id) ?? findSerializerCharacterByPosition(character);
     return character?.name
+      ?? character?.nametag?.name
       ?? character?.displayName
       ?? character?.state?.name
+      ?? character?.state?.nametag?.name
       ?? character?.username
       ?? character?.playerName
       ?? character?.profile?.name
       ?? character?.meta?.name
       ?? character?.data?.name
+      ?? character?.data?.nametag?.name
       ?? serializerCharacter?.name
+      ?? serializerCharacter?.nametag?.name
       ?? serializerCharacter?.displayName
       ?? serializerCharacter?.username
       ?? "Player";
