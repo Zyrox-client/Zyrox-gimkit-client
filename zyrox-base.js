@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.1
+// @version      1.5.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.1";
+    const CLIENT_VERSION = "1.5.2";
     return CLIENT_VERSION;
   }
 
@@ -1197,7 +1197,7 @@
       teammateHitboxColor: "#36d17c",
       names: true,
       namesDistanceOnly: false,
-      nameSize: 20,
+      nameSize: 22,
       nameColor: "#7a0c0c",
       nameOutline: true,
       nameOutlineColor: "#000000",
@@ -1205,8 +1205,8 @@
       nameDistanceStyle: "dot",
       teammateNames: true,
       teammateNamesDistanceOnly: false,
-      teammateNameSize: 20,
-      teammateNameColor: "#14532d",
+      teammateNameSize: 22,
+      teammateNameColor: "#baf7d2",
       teammateNameOutline: true,
       teammateNameOutlineColor: "#ffffff",
       teammateNameOutlineWidth: 1,
@@ -1462,13 +1462,18 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const labelText = formatEspLabel(getCharacterName(character, characterId), distance, namesDistanceOnly, distanceStyle);
+      const textWidth = Math.max(1, ctx.measureText(labelText).width);
+      const pad = Math.max(8, nameSize * 0.35);
+      const halfText = textWidth / 2;
+      const drawX = Math.min(canvas.width - halfText - pad, Math.max(halfText + pad, labelX));
+      const drawY = Math.min(canvas.height - nameSize - pad, Math.max(nameSize * 0.7 + pad, labelY));
       if (nameOutlineEnabled) {
         ctx.lineWidth = nameOutlineWidth;
         ctx.strokeStyle = nameOutlineColor;
         ctx.lineJoin = "round";
-        ctx.strokeText(labelText, labelX, labelY);
+        ctx.strokeText(labelText, drawX, drawY);
       }
-      ctx.fillText(labelText, labelX, labelY);
+      ctx.fillText(labelText, drawX, drawY);
 
     }
 
@@ -2385,7 +2390,7 @@
                 { id: "hitboxColor", label: "Hitbox Color", type: "color", default: "#ff3b3b" },
                 { id: "names", label: "Names", type: "checkbox", default: true },
                 { id: "namesDistanceOnly", label: "Distance Only", type: "checkbox", default: false },
-                { id: "nameSize", label: "Name Size", type: "slider", min: 10, max: 32, step: 1, default: 20, unit: "px" },
+                { id: "nameSize", label: "Name Size", type: "slider", min: 10, max: 32, step: 1, default: 22, unit: "px" },
                 { id: "nameColor", label: "Name Color", type: "color", default: "#7a0c0c" },
                 {
                   id: "offscreenStyle",
