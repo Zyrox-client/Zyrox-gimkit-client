@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.9
+// @version      1.6.0
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.9";
+    const CLIENT_VERSION = "1.6.0";
     return CLIENT_VERSION;
   }
 
@@ -1825,6 +1825,7 @@
 
   const autoAimInputState = {
     leftMouseDown: false,
+    reroutedShotActive: false,
   };
 
   function getTriggerAssistConfig() {
@@ -2425,12 +2426,14 @@
 
   window.addEventListener("blur", () => {
     autoAimInputState.leftMouseDown = false;
+    autoAimInputState.reroutedShotActive = false;
     autoAimState.target = null;
     releaseFireHold();
   });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") {
       autoAimInputState.leftMouseDown = false;
+      autoAimInputState.reroutedShotActive = false;
       autoAimState.target = null;
       releaseFireHold();
     }
@@ -2458,22 +2461,27 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = true;
+    autoAimInputState.reroutedShotActive = true;
     attemptFire(false, false, { x: crosshairState.mouseX, y: crosshairState.mouseY });
   }, true);
 
   window.addEventListener("mouseup", (event) => {
     if (event.button !== 0 || isEventInsideUi(event.target)) return;
-    if (!autoAimState.enabled || triggerAssistState.enabled || !autoAimInputState.leftMouseDown) return;
+    if (!autoAimInputState.reroutedShotActive) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = false;
+    autoAimInputState.reroutedShotActive = false;
   }, true);
 
   window.addEventListener("mousedown", (event) => {
     if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
   }, { passive: true });
   window.addEventListener("mouseup", (event) => {
-    if (event.button === 0) autoAimInputState.leftMouseDown = false;
+    if (event.button === 0) {
+      autoAimInputState.leftMouseDown = false;
+      autoAimInputState.reroutedShotActive = false;
+    }
   }, { passive: true });
 
   const MODULE_BEHAVIORS = {
