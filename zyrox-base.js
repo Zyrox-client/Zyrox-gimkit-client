@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.5.5
+// @version      1.5.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.5.5";
+    const CLIENT_VERSION = "1.5.6";
     return CLIENT_VERSION;
   }
 
@@ -1959,6 +1959,28 @@
   function syncAimPointer(canvas, x, y, buttons = 0) {
     fireCanvasPointerEvent("pointermove", canvas, x, y);
     fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
+    const clientX = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
+    const clientY = Math.max(0, Math.min(window.innerHeight, Number(y) || 0));
+    const moveInit = {
+      bubbles: true,
+      cancelable: true,
+      button: 0,
+      buttons,
+      clientX,
+      clientY,
+    };
+    document.dispatchEvent(new MouseEvent("mousemove", moveInit));
+    window.dispatchEvent(new MouseEvent("mousemove", moveInit));
+    try {
+      const pointerInit = {
+        ...moveInit,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      };
+      document.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+      window.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+    } catch (_) { }
   }
 
   function releaseFireHold() {
@@ -2415,8 +2437,13 @@
   });
   window.addEventListener("resize", resizeTriggerAssistCanvas);
   window.addEventListener("resize", resizeAutoAimCanvas);
+  function isEventInsideUi(target) {
+    const el = target instanceof Element ? target : null;
+    return Boolean(el?.closest(".zyrox-root, .zyrox-config-backdrop, .zyrox-settings, .zyrox-config"));
+  }
+
   window.addEventListener("mousedown", (event) => {
-    if (event.button === 0) autoAimInputState.leftMouseDown = true;
+    if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
   }, { passive: true });
   window.addEventListener("mouseup", (event) => {
     if (event.button === 0) autoAimInputState.leftMouseDown = false;
@@ -2431,7 +2458,7 @@
       onEnable: startCrosshair,
       onDisable: stopCrosshair,
     },
-    "Triggerbot": {
+    "Triggerbot (Autoshoot)": {
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
     },
@@ -2440,7 +2467,7 @@
       onDisable: stopAutoAim,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot", "Aimbot"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot"]);
 
   // --- End of Core Utilities ---
 
@@ -2565,7 +2592,7 @@
               ],
             },
             {
-              name: "Triggerbot",
+              name: "Triggerbot (Autoshoot)",
               settings: [
                 { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
@@ -3623,6 +3650,20 @@
   `;
   configBackdrop.appendChild(settingsMenu);
 
+  function absorbMenuInputEvents(node) {
+    if (!node) return;
+    const block = (event) => {
+      event.stopPropagation();
+    };
+    ["pointerdown", "mousedown", "mouseup", "click", "dblclick", "contextmenu"].forEach((type) => {
+      node.addEventListener(type, block, true);
+    });
+  }
+  absorbMenuInputEvents(root);
+  absorbMenuInputEvents(configBackdrop);
+  absorbMenuInputEvents(configMenu);
+  absorbMenuInputEvents(settingsMenu);
+
   const configTitleEl = configMenu.querySelector(".zyrox-config-title");
   const configSubEl = configMenu.querySelector(".zyrox-config-sub");
   const configCloseBtn = configMenu.querySelector(".config-close-btn");
@@ -3741,7 +3782,7 @@
     const cfg = store.get(name);
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
-    } else if (name === "Triggerbot") {
+    } else if (name === "Triggerbot (Autoshoot)") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
     } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
@@ -4361,7 +4402,7 @@
         syncCrosshair();
       });
 
-    } else if (moduleName === "Triggerbot") {
+    } else if (moduleName === "Triggerbot (Autoshoot)") {
       const defaults = getTriggerAssistConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxTriggerAssistConfig = { ...cfg };
