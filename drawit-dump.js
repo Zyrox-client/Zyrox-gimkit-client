@@ -15,6 +15,7 @@
     const ALWAYS_DUMP = new Set(["PLAYER_JOINS_STATIC_STATE", "DRAW_MODE_FEED_ITEM"]);
     // Skip these entirely
     const SKIP = new Set(["DRAW_MODE_LD"]);
+    const LOG_DUPLICATES = false;
 
     // ── Decoder (same as before) ─────────────────────────────────────────────────
     function bbDecode(buffer) {
@@ -96,6 +97,25 @@
                 }
             }
         }
+    }
+
+    function getRoundAnswer(stateUpdatePayload) {
+        if (!Array.isArray(stateUpdatePayload)) return null;
+
+        for (const entry of stateUpdatePayload) {
+            if (!entry || entry.type !== "DRAW_MODE_ROUND") continue;
+            if (!Array.isArray(entry.value)) continue;
+
+            for (const roundField of entry.value) {
+                const key = roundField?.value?.key;
+                if (key !== "term") continue;
+
+                const answer = roundField?.value?.value;
+                if (typeof answer === "string" && answer.trim()) return answer;
+            }
+        }
+
+        return null;
     }
 
     // ── Hook ─────────────────────────────────────────────────────────────────────
