@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Zyrox classic packet logger
 // @namespace    https://github.com/zyrox
-// @version      0.3.0
-// @description  Intercepts and logs Classic-mode packets (Colyseus/Blueboat 2D transport).
+// @version      0.4.0
+// @description  Intercepts/logs Classic packets and includes a test auto-answer utility.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
@@ -21,14 +21,20 @@
     playerId: null,
     sockets: new Set(),
     logEverything: true,
+    roomId: null,
+    questions: [],
+    questionIdList: [],
+    currentQuestionIndex: -1,
+    autoAnswer: {
+      enabled: false,
+      intervalMs: 700,
+      intervalId: null,
+      dryRun: true,
+    },
   };
 
   function safeJson(value) {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return String(value);
-    }
+    try { return JSON.stringify(value); } catch { return String(value); }
   }
 
   function preview(value, max = 320) {
@@ -79,21 +85,9 @@
         case 192: return null;
         case 194: return false;
         case 195: return true;
-        case 196: {
-          const n = view.getUint8(offset); offset += 1;
-          const out = buffer.slice(offset, offset + n); offset += n;
-          return out;
-        }
-        case 197: {
-          const n = view.getUint16(offset); offset += 2;
-          const out = buffer.slice(offset, offset + n); offset += n;
-          return out;
-        }
-        case 198: {
-          const n = view.getUint32(offset); offset += 4;
-          const out = buffer.slice(offset, offset + n); offset += n;
-          return out;
-        }
+        case 196: { const n = view.getUint8(offset); offset += 1; const out = buffer.slice(offset, offset + n); offset += n; return out; }
+        case 197: { const n = view.getUint16(offset); offset += 2; const out = buffer.slice(offset, offset + n); offset += n; return out; }
+        case 198: { const n = view.getUint32(offset); offset += 4; const out = buffer.slice(offset, offset + n); offset += n; return out; }
         case 202: { const v = view.getFloat32(offset); offset += 4; return v; }
         case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
         case 204: { const v = view.getUint8(offset); offset += 1; return v; }
@@ -116,15 +110,84 @@
     return { value: read(), offset };
   }
 
-  function parseDeviceChanges(message) {
-    const result = [];
-    for (const change of message?.changes || []) {
-      const row = {};
-      const keys = Array.isArray(change?.[1]) ? change[1].map((idx) => message.values[idx]) : [];
-      for (let i = 0; i < keys.length; i++) row[keys[i]] = change[2]?.[i];
-      result.push({ deviceId: change?.[0], data: row });
+  function msgpackEncode(value) {
+    const bytes = [];
+    const deferred = [];
+
+    const write = (input) => {
+      const type = typeof input;
+      if (type === "string") {
+        let len = 0;
+        for (let i = 0; i < input.length; i++) {
+          const code = input.charCodeAt(i);
+          if (code < 128) len++;
+          else if (code < 2048) len += 2;
+          else if (code < 55296 || code > 57343) len += 3;
+          else { i++; len += 4; }
+        }
+        if (len < 32) bytes.push(160 | len);
+        else if (len < 256) bytes.push(217, len);
+        else if (len < 65536) bytes.push(218, len >> 8, len & 255);
+        else bytes.push(219, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+        deferred.push({ type: "string", value: input, offset: bytes.length });
+        bytes.length += len;
+        return;
+      }
+      if (type === "number") {
+        if (Number.isInteger(input) && Number.isFinite(input) && input >= 0 && input < 128) {
+          bytes.push(input);
+          return;
+        }
+        if (Number.isInteger(input) && Number.isFinite(input) && input >= 0 && input < 65536) {
+          bytes.push(205, input >> 8, input & 255);
+          return;
+        }
+        bytes.push(203);
+        deferred.push({ type: "float64", value: input, offset: bytes.length });
+        bytes.length += 8;
+        return;
+      }
+      if (type === "boolean") { bytes.push(input ? 195 : 194); return; }
+      if (input == null) { bytes.push(192); return; }
+      if (Array.isArray(input)) {
+        const len = input.length;
+        if (len < 16) bytes.push(144 | len); else bytes.push(220, len >> 8, len & 255);
+        for (const item of input) write(item);
+        return;
+      }
+      const keys = Object.keys(input).filter((k) => typeof input[k] !== "function");
+      const len = keys.length;
+      if (len < 16) bytes.push(128 | len); else bytes.push(222, len >> 8, len & 255);
+      for (const key of keys) { write(key); write(input[key]); }
+    };
+
+    write(value);
+
+    const view = new DataView(new ArrayBuffer(bytes.length));
+    for (let i = 0; i < bytes.length; i++) view.setUint8(i, bytes[i] & 255);
+
+    for (const part of deferred) {
+      if (part.type === "float64") {
+        view.setFloat64(part.offset, part.value);
+        continue;
+      }
+      let at = part.offset;
+      const str = part.value;
+      for (let i = 0; i < str.length; i++) {
+        let code = str.charCodeAt(i);
+        if (code < 128) view.setUint8(at++, code);
+        else if (code < 2048) {
+          view.setUint8(at++, 192 | (code >> 6));
+          view.setUint8(at++, 128 | (code & 63));
+        } else {
+          view.setUint8(at++, 224 | (code >> 12));
+          view.setUint8(at++, 128 | ((code >> 6) & 63));
+          view.setUint8(at++, 128 | (code & 63));
+        }
+      }
     }
-    return result;
+
+    return view.buffer;
   }
 
   function decodeColyseusPacket(packet) {
@@ -192,11 +255,7 @@
     const jsonStart = payloadRaw.search(/[\[{]/);
     if (jsonStart >= 0) {
       const jsonCandidate = payloadRaw.slice(jsonStart);
-      try {
-        payload = JSON.parse(jsonCandidate);
-      } catch {
-        payload = payloadRaw;
-      }
+      try { payload = JSON.parse(jsonCandidate); } catch { payload = payloadRaw; }
     }
 
     return {
@@ -211,6 +270,88 @@
     };
   }
 
+  function parseQuestionAnswer(question) {
+    if (!question) return null;
+    if (question.type === "text") return question.answers?.[0]?.text || null;
+    const mcCorrect = question.answers?.find((a) => a?.correct)?.id || question.answers?.find((a) => a?.correct)?._id;
+    return mcCorrect || null;
+  }
+
+  function getCurrentQuestion() {
+    const currentId = state.questionIdList[state.currentQuestionIndex];
+    if (!currentId) return null;
+    return state.questions.find((q) => q?._id === currentId || q?.id === currentId) || null;
+  }
+
+  function sendBlueboatMessage(key, data) {
+    const socket = [...state.sockets].at(-1);
+    if (!socket || socket.readyState !== 1 || !state.roomId) return false;
+
+    const payload = {
+      type: 2,
+      data: ["blueboat_SEND_MESSAGE", { room: state.roomId, key, data }],
+      options: { compress: true },
+      nsp: "/",
+    };
+
+    const encoded = msgpackEncode(payload);
+    const out = new Uint8Array(1 + encoded.byteLength);
+    out[0] = 4;
+    out.set(new Uint8Array(encoded), 1);
+    socket.send(out.buffer);
+    return true;
+  }
+
+  function autoAnswerTick() {
+    if (!state.autoAnswer.enabled) return;
+
+    const question = getCurrentQuestion();
+    if (!question) return;
+
+    const answer = parseQuestionAnswer(question);
+    const questionId = question?._id || question?.id;
+    if (!answer || !questionId) return;
+
+    const payload = { questionId, answer };
+    if (state.autoAnswer.dryRun) {
+      console.log(LOG_PREFIX, "[AUTOANSWER][DRY_RUN] Would send QUESTION_ANSWERED", payload);
+      return;
+    }
+
+    const ok = sendBlueboatMessage("QUESTION_ANSWERED", payload);
+    if (ok) console.log(LOG_PREFIX, "[AUTOANSWER] Sent QUESTION_ANSWERED", payload);
+  }
+
+  function applyBlueboatStateUpdate(packet) {
+    const key = packet?.key;
+    const data = packet?.data;
+
+    if (typeof key !== "string") return;
+
+    if (key === "STATE_UPDATE") {
+      const type = data?.type;
+      if (type === "GAME_QUESTIONS") {
+        state.questions = Array.isArray(data?.value) ? data.value : [];
+      } else if (type === "PLAYER_QUESTION_LIST") {
+        state.questionIdList = data?.value?.questionList || [];
+        state.currentQuestionIndex = Number.isInteger(data?.value?.questionIndex) ? data.value.questionIndex : -1;
+      } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
+        state.currentQuestionIndex = Number.isInteger(data?.value) ? data.value : state.currentQuestionIndex;
+      }
+    }
+  }
+
+  function parseDeviceChanges(message) {
+    const result = [];
+    for (const change of message?.changes || []) {
+      const row = {};
+      const keys = Array.isArray(change?.[1]) ? change[1].map((idx) => message.values[idx]) : [];
+      for (let i = 0; i < keys.length; i++) row[keys[i]] = change[2]?.[i];
+      result.push({ deviceId: change?.[0], data: row });
+    }
+    return result;
+  }
+
   function logDecoded(direction, decoded) {
     if (!decoded) return;
 
@@ -218,15 +359,28 @@
       if (decoded.channel === "AUTH_ID") state.playerId = decoded.body;
       if (decoded.channel === "DEVICES_STATES_CHANGES") {
         console.log(LOG_PREFIX, `[${direction}] COLYSEUS DEVICES_STATES_CHANGES`, parseDeviceChanges(decoded.body));
-        return;
+      } else {
+        console.log(LOG_PREFIX, `[${direction}] COLYSEUS ${String(decoded.channel)}`, decoded.body);
       }
-      console.log(LOG_PREFIX, `[${direction}] COLYSEUS ${String(decoded.channel)}`, decoded.body);
+      autoAnswerTick();
       return;
     }
 
     if (decoded.transport === "blueboat-binary") {
+      if (typeof decoded.eventName === "string" && decoded.eventName.startsWith("message-")) {
+        state.roomId = decoded.eventName.slice("message-".length);
+      }
+      if (decoded.eventName === "blueboat_SEND_MESSAGE") {
+        state.roomId = decoded.payload?.room || state.roomId;
+      }
+
+      if (decoded.payload && typeof decoded.payload === "object") {
+        applyBlueboatStateUpdate(decoded.payload);
+      }
+
       const eventLabel = decoded.eventName ? ` ${decoded.eventName}` : "";
       console.log(LOG_PREFIX, `[${direction}] BLUEBOAT_BINARY${eventLabel}`, decoded.payload);
+      autoAnswerTick();
       return;
     }
 
@@ -252,21 +406,35 @@
     }
 
     const colyseus = decodeColyseusPacket(normalized);
-    if (colyseus) {
-      logDecoded(direction, colyseus);
-      return;
-    }
+    if (colyseus) return void logDecoded(direction, colyseus);
 
     const blueboatBinary = decodeBlueboatBinary(normalized);
-    if (blueboatBinary) {
-      logDecoded(direction, blueboatBinary);
-      return;
-    }
+    if (blueboatBinary) return void logDecoded(direction, blueboatBinary);
 
     if (state.logEverything) {
       const size = normalized instanceof ArrayBuffer ? normalized.byteLength : 0;
       console.log(LOG_PREFIX, `[${direction}] BINARY_RAW length=${size}`);
     }
+  }
+
+  function startAutoAnswerTest({ intervalMs = 700, dryRun = true } = {}) {
+    state.autoAnswer.enabled = true;
+    state.autoAnswer.intervalMs = Math.max(100, Number(intervalMs) || 700);
+    state.autoAnswer.dryRun = Boolean(dryRun);
+
+    if (state.autoAnswer.intervalId) clearInterval(state.autoAnswer.intervalId);
+    state.autoAnswer.intervalId = setInterval(autoAnswerTick, state.autoAnswer.intervalMs);
+
+    console.log(LOG_PREFIX, `[AUTOANSWER] Started test utility (dryRun=${state.autoAnswer.dryRun}, interval=${state.autoAnswer.intervalMs}ms)`);
+  }
+
+  function stopAutoAnswerTest() {
+    state.autoAnswer.enabled = false;
+    if (state.autoAnswer.intervalId) {
+      clearInterval(state.autoAnswer.intervalId);
+      state.autoAnswer.intervalId = null;
+    }
+    console.log(LOG_PREFIX, "[AUTOANSWER] Stopped test utility");
   }
 
   function install() {
@@ -293,20 +461,32 @@
       }
     };
 
-    console.log(LOG_PREFIX, "Classic logger ready (verbose mode). Logging Colyseus + Blueboat binary + Engine/Socket.IO frames.");
+    console.log(LOG_PREFIX, "Classic logger ready. Logging Colyseus + Blueboat + Engine/Socket.IO frames.");
+    console.log(LOG_PREFIX, "Auto-answer test API: __zyroxClassicLogger.startAutoAnswerTest({ dryRun: true|false, intervalMs })");
 
     window.__zyroxClassicLogger = {
       getState() {
         return {
           playerId: state.playerId,
+          roomId: state.roomId,
           activeSockets: state.sockets.size,
           logEverything: state.logEverything,
+          questions: state.questions.length,
+          questionListSize: state.questionIdList.length,
+          currentQuestionIndex: state.currentQuestionIndex,
+          autoAnswer: {
+            enabled: state.autoAnswer.enabled,
+            dryRun: state.autoAnswer.dryRun,
+            intervalMs: state.autoAnswer.intervalMs,
+          },
         };
       },
       setVerboseLogging(enabled) {
         state.logEverything = Boolean(enabled);
         console.log(LOG_PREFIX, "Verbose logging:", state.logEverything ? "ON" : "OFF");
       },
+      startAutoAnswerTest,
+      stopAutoAnswerTest,
       rawDecode(packet) {
         const decoded = decodeColyseusPacket(packet) || decodeBlueboatBinary(packet) || decodeEngineSocketString(packet);
         return safeJson(decoded);
