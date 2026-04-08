@@ -5,7 +5,7 @@
 // @match       https://www.gimkit.com/join*
 // @run-at      document-start
 // @grant       none
-// @version     1.2.0
+// @version     1.3.0
 // ==/UserScript==
 
 (function () {
