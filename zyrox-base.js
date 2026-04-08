@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.7.1
+// @version      1.7.2
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.7.1";
+    const CLIENT_VERSION = "1.7.2";
     return CLIENT_VERSION;
   }
 
@@ -2631,10 +2631,10 @@
   };
 
   const ANSWER_POPUP_PRESETS = {
-    default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600, background: "rgba(8, 10, 14, 0.92)" },
-    green: { accent: "#2dff75", textColor: "#e8fff1", durationMs: 2400, background: "rgba(7, 20, 12, 0.92)" },
-    ice: { accent: "#6cd8ff", textColor: "#eaf7ff", durationMs: 2400, background: "rgba(8, 17, 24, 0.92)" },
-    grayscale: { accent: "#d4d4d4", textColor: "#f1f1f1", durationMs: 2600, background: "rgba(18, 18, 18, 0.92)" },
+    default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600, panelBg: "rgba(8, 10, 14, 0.92)", headerStart: "rgba(255, 74, 74, 0.30)", headerEnd: "rgba(45, 12, 12, 0.95)" },
+    green: { accent: "#2dff75", textColor: "#e8fff1", durationMs: 2400, panelBg: "rgba(7, 20, 12, 0.92)", headerStart: "rgba(45, 255, 117, 0.30)", headerEnd: "rgba(15, 47, 27, 0.95)" },
+    ice: { accent: "#6cd8ff", textColor: "#eaf7ff", durationMs: 2400, panelBg: "rgba(8, 17, 24, 0.92)", headerStart: "rgba(108, 216, 255, 0.30)", headerEnd: "rgba(19, 48, 66, 0.95)" },
+    grayscale: { accent: "#d4d4d4", textColor: "#f1f1f1", durationMs: 2600, panelBg: "rgba(18, 18, 18, 0.92)", headerStart: "rgba(143, 143, 143, 0.30)", headerEnd: "rgba(29, 29, 29, 0.95)" },
   };
 
   function normalizePopupPresetName(name) {
@@ -2678,10 +2678,6 @@
     const effectivePresetName = getEffectivePopupPresetName(selectedPreset);
     const preset = ANSWER_POPUP_PRESETS[effectivePresetName] || ANSWER_POPUP_PRESETS.default;
     const usePresetOnly = selectedPreset === "default";
-    const rootStyles = typeof root !== "undefined" ? getComputedStyle(root) : null;
-    const headerStart = rootStyles?.getPropertyValue("--zyx-settings-header-start")?.trim() || "rgba(255, 61, 61, .3)";
-    const headerEnd = rootStyles?.getPropertyValue("--zyx-settings-header-end")?.trim() || "rgba(45, 12, 12, .95)";
-    const headerText = rootStyles?.getPropertyValue("--zyx-settings-text")?.trim() || "#ffe5e5";
     return {
       globalPreset: getGlobalPresetName(),
       preset: selectedPreset,
@@ -2693,10 +2689,10 @@
       ),
       accent: String(usePresetOnly ? preset.accent : (cfg.accent ?? preset.accent ?? defaults.accent)),
       textColor: String(usePresetOnly ? preset.textColor : (cfg.textColor ?? preset.textColor ?? defaults.textColor)),
-      background: String(preset.background ?? ANSWER_POPUP_PRESETS.default.background),
-      headerStart,
-      headerEnd,
-      headerText,
+      panelBg: String(preset.panelBg ?? ANSWER_POPUP_PRESETS.default.panelBg),
+      headerStart: String(preset.headerStart ?? ANSWER_POPUP_PRESETS.default.headerStart),
+      headerEnd: String(preset.headerEnd ?? ANSWER_POPUP_PRESETS.default.headerEnd),
+      headerText: String(usePresetOnly ? preset.textColor : (cfg.textColor ?? preset.textColor ?? defaults.textColor)),
     };
   }
 
@@ -2741,7 +2737,7 @@
 
     const popup = ensureAnswerPopupContainer();
     const cfg = getAnswerPopupConfig();
-    popup.style.background = cfg.background;
+    popup.style.background = cfg.panelBg;
     popup.style.color = cfg.textColor;
     popup.style.borderLeft = `4px solid ${cfg.accent}`;
     popup.style.border = "1px solid rgba(255,255,255,.14)";
@@ -2771,7 +2767,7 @@
     const answer = String(answerPopupState.lastRenderedAnswer || "").trim();
     if (!answer) return;
     const cfg = getAnswerPopupConfig();
-    answerPopupState.container.style.background = cfg.background;
+    answerPopupState.container.style.background = cfg.panelBg;
     answerPopupState.container.style.color = cfg.textColor;
     answerPopupState.container.style.borderLeft = `4px solid ${cfg.accent}`;
     const label = cfg.text.trim();
