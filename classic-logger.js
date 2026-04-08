@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox classic packet logger
 // @namespace    https://github.com/zyrox
-// @version      0.2.0
+// @version      0.3.0
 // @description  Intercepts and logs Classic-mode packets (Colyseus/Blueboat 2D transport).
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -14,24 +14,8 @@
 
   const LOG_PREFIX = "[ZyroxClassicLogger]";
   const COLYSEUS_ROOM_DATA = 13;
-  const ENGINE_PACKET_TYPES = {
-    "0": "OPEN",
-    "1": "CLOSE",
-    "2": "PING",
-    "3": "PONG",
-    "4": "MESSAGE",
-    "5": "UPGRADE",
-    "6": "NOOP",
-  };
-  const SOCKET_PACKET_TYPES = {
-    "0": "CONNECT",
-    "1": "DISCONNECT",
-    "2": "EVENT",
-    "3": "ACK",
-    "4": "ERROR",
-    "5": "BINARY_EVENT",
-    "6": "BINARY_ACK",
-  };
+  const ENGINE_PACKET_TYPES = { "0": "OPEN", "1": "CLOSE", "2": "PING", "3": "PONG", "4": "MESSAGE", "5": "UPGRADE", "6": "NOOP" };
+  const SOCKET_PACKET_TYPES = { "0": "CONNECT", "1": "DISCONNECT", "2": "EVENT", "3": "ACK", "4": "ERROR", "5": "BINARY_EVENT", "6": "BINARY_ACK" };
 
   const state = {
     playerId: null,
@@ -49,8 +33,7 @@
 
   function preview(value, max = 320) {
     const text = typeof value === "string" ? value : safeJson(value);
-    if (text.length <= max) return text;
-    return `${text.slice(0, max)}… (truncated, ${text.length} chars)`;
+    return text.length <= max ? text : `${text.slice(0, max)}… (truncated, ${text.length} chars)`;
   }
 
   function msgpackDecode(buffer, startOffset = 0) {
@@ -64,18 +47,9 @@
         const byte = view.getUint8(offset++);
         if ((byte & 0x80) === 0) out += String.fromCharCode(byte);
         else if ((byte & 0xe0) === 0xc0) out += String.fromCharCode(((byte & 0x1f) << 6) | (view.getUint8(offset++) & 0x3f));
-        else if ((byte & 0xf0) === 0xe0) {
-          out += String.fromCharCode(
-            ((byte & 0x0f) << 12) |
-              ((view.getUint8(offset++) & 0x3f) << 6) |
-              (view.getUint8(offset++) & 0x3f),
-          );
-        } else {
-          const codePoint =
-            ((byte & 0x07) << 18) |
-            ((view.getUint8(offset++) & 0x3f) << 12) |
-            ((view.getUint8(offset++) & 0x3f) << 6) |
-            (view.getUint8(offset++) & 0x3f);
+        else if ((byte & 0xf0) === 0xe0) out += String.fromCharCode(((byte & 0x0f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f));
+        else {
+          const codePoint = ((byte & 0x07) << 18) | ((view.getUint8(offset++) & 0x3f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f);
           const cp = codePoint - 0x10000;
           out += String.fromCharCode((cp >> 10) + 0xd800, (cp & 1023) + 0xdc00);
         }
@@ -100,10 +74,26 @@
       }
       if (token < 0xc0) return readString(token & 0x1f);
       if (token > 0xdf) return token - 256;
+
       switch (token) {
         case 192: return null;
         case 194: return false;
         case 195: return true;
+        case 196: {
+          const n = view.getUint8(offset); offset += 1;
+          const out = buffer.slice(offset, offset + n); offset += n;
+          return out;
+        }
+        case 197: {
+          const n = view.getUint16(offset); offset += 2;
+          const out = buffer.slice(offset, offset + n); offset += n;
+          return out;
+        }
+        case 198: {
+          const n = view.getUint32(offset); offset += 4;
+          const out = buffer.slice(offset, offset + n); offset += n;
+          return out;
+        }
         case 202: { const v = view.getFloat32(offset); offset += 4; return v; }
         case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
         case 204: { const v = view.getUint8(offset); offset += 1; return v; }
@@ -154,10 +144,29 @@
     return { transport: "colyseus", channel: first.value, body: message };
   }
 
+  function decodeBlueboatBinary(packet) {
+    if (!(packet instanceof ArrayBuffer)) return null;
+    const bytes = new Uint8Array(packet);
+    if (!bytes.byteLength || bytes[0] !== 4) return null;
+
+    const decoded = msgpackDecode(packet.slice(1), 0)?.value;
+    if (!decoded || typeof decoded !== "object") return null;
+
+    const data = decoded?.data;
+    const eventName = Array.isArray(data) ? data[0] : null;
+    const eventPayload = Array.isArray(data) ? data[1] : data;
+
+    return {
+      transport: "blueboat-binary",
+      socketPacketType: decoded.type,
+      eventName,
+      payload: eventPayload,
+      raw: decoded,
+    };
+  }
+
   function decodeEngineSocketString(text) {
     if (typeof text !== "string" || !text.length) return null;
-
-    // Engine.IO + Socket.IO framed text packet (e.g. 42["blueboat_SEND_MESSAGE",{...}])
     if (!/^[0-6]/.test(text[0])) return null;
 
     const engineCode = text[0];
@@ -180,7 +189,6 @@
 
     const payloadRaw = text.slice(cursor);
     let payload = payloadRaw;
-
     const jsonStart = payloadRaw.search(/[\[{]/);
     if (jsonStart >= 0) {
       const jsonCandidate = payloadRaw.slice(jsonStart);
@@ -209,11 +217,16 @@
     if (decoded.transport === "colyseus") {
       if (decoded.channel === "AUTH_ID") state.playerId = decoded.body;
       if (decoded.channel === "DEVICES_STATES_CHANGES") {
-        const parsed = parseDeviceChanges(decoded.body);
-        console.log(LOG_PREFIX, `[${direction}] COLYSEUS DEVICES_STATES_CHANGES`, parsed);
+        console.log(LOG_PREFIX, `[${direction}] COLYSEUS DEVICES_STATES_CHANGES`, parseDeviceChanges(decoded.body));
         return;
       }
       console.log(LOG_PREFIX, `[${direction}] COLYSEUS ${String(decoded.channel)}`, decoded.body);
+      return;
+    }
+
+    if (decoded.transport === "blueboat-binary") {
+      const eventLabel = decoded.eventName ? ` ${decoded.eventName}` : "";
+      console.log(LOG_PREFIX, `[${direction}] BLUEBOAT_BINARY${eventLabel}`, decoded.payload);
       return;
     }
 
@@ -223,13 +236,8 @@
 
   async function normalizeData(raw) {
     if (raw instanceof ArrayBuffer) return raw;
-    if (ArrayBuffer.isView(raw)) {
-      const slice = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
-      return slice;
-    }
-    if (typeof Blob !== "undefined" && raw instanceof Blob) {
-      return raw.arrayBuffer();
-    }
+    if (ArrayBuffer.isView(raw)) return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+    if (typeof Blob !== "undefined" && raw instanceof Blob) return raw.arrayBuffer();
     return raw;
   }
 
@@ -238,17 +246,20 @@
 
     if (typeof normalized === "string") {
       const decodedText = decodeEngineSocketString(normalized);
-      if (decodedText) {
-        logDecoded(direction, decodedText);
-      } else if (state.logEverything) {
-        console.log(LOG_PREFIX, `[${direction}] TEXT_RAW`, preview(normalized));
-      }
+      if (decodedText) logDecoded(direction, decodedText);
+      else if (state.logEverything) console.log(LOG_PREFIX, `[${direction}] TEXT_RAW`, preview(normalized));
       return;
     }
 
     const colyseus = decodeColyseusPacket(normalized);
     if (colyseus) {
       logDecoded(direction, colyseus);
+      return;
+    }
+
+    const blueboatBinary = decodeBlueboatBinary(normalized);
+    if (blueboatBinary) {
+      logDecoded(direction, blueboatBinary);
       return;
     }
 
@@ -272,21 +283,17 @@
         console.log(LOG_PREFIX, "Attached to Gimkit socket:", target);
 
         this.addEventListener("message", (event) => {
-          inspectPacket("IN", event.data).catch((err) => {
-            console.warn(LOG_PREFIX, "Failed to inspect incoming packet:", err);
-          });
+          inspectPacket("IN", event.data).catch((err) => console.warn(LOG_PREFIX, "Failed to inspect incoming packet:", err));
         });
       }
 
       send(data) {
-        inspectPacket("OUT", data).catch((err) => {
-          console.warn(LOG_PREFIX, "Failed to inspect outgoing packet:", err);
-        });
+        inspectPacket("OUT", data).catch((err) => console.warn(LOG_PREFIX, "Failed to inspect outgoing packet:", err));
         return super.send(data);
       }
     };
 
-    console.log(LOG_PREFIX, "Classic logger ready (verbose mode). Logging Colyseus + Engine/Socket.IO frames.");
+    console.log(LOG_PREFIX, "Classic logger ready (verbose mode). Logging Colyseus + Blueboat binary + Engine/Socket.IO frames.");
 
     window.__zyroxClassicLogger = {
       getState() {
@@ -301,7 +308,8 @@
         console.log(LOG_PREFIX, "Verbose logging:", state.logEverything ? "ON" : "OFF");
       },
       rawDecode(packet) {
-        return safeJson(decodeColyseusPacket(packet) || decodeEngineSocketString(packet));
+        const decoded = decodeColyseusPacket(packet) || decodeBlueboatBinary(packet) || decodeEngineSocketString(packet);
+        return safeJson(decoded);
       },
     };
   }
