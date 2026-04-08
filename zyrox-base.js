@@ -950,6 +950,14 @@
     }
   });
 
+  socketManager.addEventListener("blueboatMessage", (event) => {
+    if (!answerPopupState.enabled) return;
+    if (event.detail?.key !== "STATE_UPDATE") return;
+    const answers = extractDrawItAnswerCandidates(event.detail.data);
+    if (!answers.length) return;
+    showAnswerPopup(answers[answers.length - 1]);
+  });
+
   answerInterval = setInterval(() => {
     if (!autoAnswerEnabled) return;
     answerQuestion();
@@ -2501,8 +2509,12 @@
       onEnable: startAutoAim,
       onDisable: stopAutoAim,
     },
+    "Answer Popup": {
+      onEnable: startAnswerPopup,
+      onDisable: stopAnswerPopup,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup"]);
 
   // --- End of Core Utilities ---
 
@@ -2681,8 +2693,20 @@
           modules: ["Zone Priority", "Tag Timer Overlay", "Defense Rotation"],
         },
         {
-          name: "The Floor Is Lava",
-          modules: ["Safe Tile Highlight", "Lava Cycle Timer", "Route Assist"],
+          name: "Draw It",
+          modules: [
+            {
+              name: "Answer Popup",
+              settings: [
+                { id: "title", label: "Popup Title", type: "text", default: "Draw It Answer" },
+                { id: "prefix", label: "Answer Prefix", type: "text", default: "Answer:" },
+                { id: "durationMs", label: "Display Duration", type: "slider", min: 600, max: 8000, step: 100, default: 2600, unit: "ms" },
+                { id: "background", label: "Popup Background", type: "color", default: "#121525" },
+                { id: "accent", label: "Accent Color", type: "color", default: "#00e5ff" },
+                { id: "textColor", label: "Text Color", type: "color", default: "#ffffff" },
+              ],
+            },
+          ],
         },
       ],
     },
@@ -3870,6 +3894,123 @@
     if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
   }
 
+  const answerPopupState = {
+    enabled: false,
+    container: null,
+    timeoutId: null,
+    lastAnswer: "",
+    lastShownAt: 0,
+  };
+
+  function getAnswerPopupConfig() {
+    const cfg = moduleCfg("Answer Popup");
+    return {
+      title: String(cfg.title ?? "Draw It Answer"),
+      prefix: String(cfg.prefix ?? "Answer:"),
+      durationMs: Math.max(400, Number(cfg.durationMs) || 2600),
+      background: String(cfg.background ?? "#121525"),
+      accent: String(cfg.accent ?? "#00e5ff"),
+      textColor: String(cfg.textColor ?? "#ffffff"),
+    };
+  }
+
+  function ensureAnswerPopupContainer() {
+    if (answerPopupState.container?.isConnected) return answerPopupState.container;
+    const popup = document.createElement("div");
+    popup.className = "zyrox-answer-popup";
+    popup.style.cssText = [
+      "position:fixed",
+      "left:50%",
+      "top:92px",
+      "transform:translate(-50%, -18px)",
+      "min-width:260px",
+      "max-width:min(86vw,640px)",
+      "padding:12px 14px",
+      "border-radius:12px",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+      "z-index:2147483647",
+      "opacity:0",
+      "pointer-events:none",
+      "transition:opacity .18s ease, transform .18s ease",
+      "box-shadow:0 14px 34px rgba(0,0,0,.45)",
+      "border:1px solid rgba(255,255,255,.14)",
+      "display:none",
+      "white-space:normal",
+      "overflow-wrap:anywhere",
+    ].join(";");
+    document.documentElement.appendChild(popup);
+    answerPopupState.container = popup;
+    return popup;
+  }
+
+  function showAnswerPopup(answerText) {
+    if (!answerPopupState.enabled) return;
+    const answer = String(answerText || "").trim();
+    if (!answer) return;
+    const now = Date.now();
+    if (answer === answerPopupState.lastAnswer && now - answerPopupState.lastShownAt < 700) return;
+    answerPopupState.lastAnswer = answer;
+    answerPopupState.lastShownAt = now;
+
+    const popup = ensureAnswerPopupContainer();
+    const cfg = getAnswerPopupConfig();
+    popup.style.background = cfg.background;
+    popup.style.color = cfg.textColor;
+    popup.style.borderLeft = `4px solid ${cfg.accent}`;
+    popup.innerHTML = `
+      <div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:4px;">${cfg.title}</div>
+      <div style="font-size:16px;font-weight:700;line-height:1.25;">${cfg.prefix} <span style="color:${cfg.accent};">${answer}</span></div>
+    `;
+
+    popup.style.display = "block";
+    popup.style.opacity = "1";
+    popup.style.transform = "translate(-50%, 0)";
+    if (answerPopupState.timeoutId) clearTimeout(answerPopupState.timeoutId);
+    answerPopupState.timeoutId = setTimeout(() => {
+      popup.style.opacity = "0";
+      popup.style.transform = "translate(-50%, -18px)";
+      setTimeout(() => {
+        if (popup.style.opacity === "0") popup.style.display = "none";
+      }, 180);
+    }, cfg.durationMs);
+  }
+
+  function extractDrawItAnswerCandidates(stateUpdateData) {
+    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
+    const answers = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
+      for (const item of row.value) {
+        const directKey = item?.key;
+        const nestedKey = item?.value?.key;
+        const fieldKey = directKey ?? nestedKey;
+        const directValue = item?.value;
+        const nestedValue = item?.value?.value;
+        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
+        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
+        const answer = fieldValue.trim();
+        if (answer) answers.push(answer);
+      }
+    }
+    return answers;
+  }
+
+  function startAnswerPopup() {
+    answerPopupState.enabled = true;
+  }
+
+  function stopAnswerPopup() {
+    answerPopupState.enabled = false;
+    if (answerPopupState.timeoutId) {
+      clearTimeout(answerPopupState.timeoutId);
+      answerPopupState.timeoutId = null;
+    }
+    if (answerPopupState.container) {
+      answerPopupState.container.style.opacity = "0";
+      answerPopupState.container.style.display = "none";
+    }
+  }
+
   function closeConfig() {
     configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
@@ -4610,6 +4751,21 @@
           if (settingInput) {
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value || "#ffffff");
+            });
+          }
+        }
+
+        if (setting.type === "text") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = String(setting.default ?? "");
+          const safeValue = String(cfg[setting.id]).replace(/"/g, "&quot;");
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="text" class="set-module-setting-text" data-setting-id="${setting.id}" value="${safeValue}" />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-text");
+          if (settingInput) {
+            settingInput.addEventListener("input", (event) => {
+              cfg[setting.id] = String(event.target.value ?? "");
             });
           }
         }
