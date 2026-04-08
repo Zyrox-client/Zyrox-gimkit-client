@@ -877,6 +877,135 @@
 
   const socketManager = new SocketManager();
 
+  const DRAWIT_SKIP = new Set(["DRAW_MODE_LD"]);
+  const drawItHookedSockets = new WeakSet();
+  let drawItHookInstalled = false;
+
+  function bbDecodeDrawItExact(buffer) {
+    try {
+      const first = new Uint8Array(buffer)[0];
+      if (first >= 0x30 && first <= 0x36) return null;
+      function BB(buf) {
+        this.t = 0;
+        this.i = (buf instanceof ArrayBuffer ? buf : buf.buffer).slice(1);
+        this.s = new DataView(this.i);
+      }
+      BB.prototype.str = function(n) {
+        let s = "";
+        for (let i = this.t, e = this.t + n; i < e; i++) {
+          let a = this.s.getUint8(i);
+          if (a < 128) s += String.fromCharCode(a);
+          else if ((a & 0xe0) === 0xc0) s += String.fromCharCode((a & 0x1f) << 6 | (this.s.getUint8(++i) & 0x3f));
+          else if ((a & 0xf0) === 0xe0) s += String.fromCharCode((a & 0x0f) << 12 | (this.s.getUint8(++i) & 0x3f) << 6 | (this.s.getUint8(++i) & 0x3f));
+        }
+        this.t += n;
+        return s;
+      };
+      BB.prototype.arr = function(n) {
+        const a = [];
+        for (let i = 0; i < n; i++) a.push(this.p());
+        return a;
+      };
+      BB.prototype.map = function(n) {
+        const o = {};
+        for (let i = 0; i < n; i++) {
+          const k = this.p();
+          o[k] = this.p();
+        }
+        return o;
+      };
+      BB.prototype.bin = function(n) {
+        const v = this.i.slice(this.t, this.t + n);
+        this.t += n;
+        return v;
+      };
+      BB.prototype.p = function() {
+        if (this.t >= this.s.byteLength) return undefined;
+        const b = this.s.getUint8(this.t++);
+        if (b < 0x80) return b;
+        if (b < 0x90) return this.map(b & 0x0f);
+        if (b < 0xa0) return this.arr(b & 0x0f);
+        if (b < 0xc0) return this.str(b & 0x1f);
+        if (b > 0xdf) return -(0x100 - b);
+        switch (b) {
+          case 0xc0: return null;
+          case 0xc2: return false;
+          case 0xc3: return true;
+          case 0xc4: { const n = this.s.getUint8(this.t); this.t += 1; return this.bin(n); }
+          case 0xca: { const v = this.s.getFloat32(this.t); this.t += 4; return v; }
+          case 0xcb: { const v = this.s.getFloat64(this.t); this.t += 8; return v; }
+          case 0xcc: { const v = this.s.getUint8(this.t); this.t += 1; return v; }
+          case 0xcd: { const v = this.s.getUint16(this.t); this.t += 2; return v; }
+          case 0xce: { const v = this.s.getUint32(this.t); this.t += 4; return v; }
+          case 0xd0: { const v = this.s.getInt8(this.t); this.t += 1; return v; }
+          case 0xd1: { const v = this.s.getInt16(this.t); this.t += 2; return v; }
+          case 0xd2: { const v = this.s.getInt32(this.t); this.t += 4; return v; }
+          case 0xd9: { const n = this.s.getUint8(this.t); this.t += 1; return this.str(n); }
+          case 0xda: { const n = this.s.getUint16(this.t); this.t += 2; return this.str(n); }
+          case 0xdc: { const n = this.s.getUint16(this.t); this.t += 2; return this.arr(n); }
+          case 0xdd: { const n = this.s.getUint32(this.t); this.t += 4; return this.arr(n); }
+          case 0xde: { const n = this.s.getUint16(this.t); this.t += 2; return this.map(n); }
+          case 0xdf: { const n = this.s.getUint32(this.t); this.t += 4; return this.map(n); }
+          default: return `<0x${b.toString(16)}>`;
+        }
+      };
+      const parsed = new BB(buffer).p();
+      if (Array.isArray(parsed?.data)) {
+        const inner = parsed.data[1];
+        return { key: inner?.key ?? parsed.data[0], data: inner?.data ?? inner };
+      }
+      return parsed ?? null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function logAnswerCandidatesDrawItExact(stateUpdateData) {
+    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
+    for (const row of rows) {
+      if (!row || typeof row !== "object") continue;
+      if (!Array.isArray(row.value)) continue;
+      for (const item of row.value) {
+        const directKey = item?.key;
+        const nestedKey = item?.value?.key;
+        const fieldKey = directKey ?? nestedKey;
+        const directValue = item?.value;
+        const nestedValue = item?.value?.value;
+        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
+        if (!fieldKey) continue;
+        if (fieldKey !== "term") continue;
+        if (typeof fieldValue !== "string") continue;
+        const answer = fieldValue.trim();
+        if (!answer) continue;
+        console.log(answer);
+        if (answerPopupState.enabled) showAnswerPopup(answer);
+      }
+    }
+  }
+
+  function hookSocketDrawIt(ws) {
+    if (drawItHookedSockets.has(ws)) return;
+    drawItHookedSockets.add(ws);
+    ws.addEventListener("message", (e) => {
+      const decoded = bbDecodeDrawItExact(e.data);
+      if (!decoded?.key) return;
+      const key = decoded.key;
+      if (DRAWIT_SKIP.has(key)) return;
+      if (key === "STATE_UPDATE") logAnswerCandidatesDrawItExact(decoded.data);
+    });
+  }
+
+  function installDrawItAnswerHook() {
+    if (drawItHookInstalled) return;
+    drawItHookInstalled = true;
+    const originalSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+      if (!this.url?.startsWith("ws://localhost")) hookSocketDrawIt(this);
+      originalSend.call(this, data);
+    };
+  }
+  installDrawItAnswerHook();
+
   const autoAnswerState = {
     questions: [],
     answerDeviceId: null,
@@ -2484,6 +2613,108 @@
     }
   }, { passive: true });
 
+  const answerPopupState = {
+    enabled: false,
+    container: null,
+    timeoutId: null,
+    lastAnswer: "",
+    lastShownAt: 0,
+  };
+
+  function getAnswerPopupConfig() {
+    const defaults = {
+      durationMs: 2600,
+      accent: "#00e5ff",
+      textColor: "#ffffff",
+    };
+    let cfg = defaults;
+    if (typeof state !== "undefined" && state?.moduleConfig instanceof Map) {
+      const saved = state.moduleConfig.get("Answer Popup");
+      if (saved && typeof saved === "object") cfg = { ...defaults, ...saved };
+    }
+    return {
+      durationMs: Math.max(400, Number(cfg.durationMs) || defaults.durationMs),
+      accent: String(cfg.accent ?? defaults.accent),
+      textColor: String(cfg.textColor ?? defaults.textColor),
+    };
+  }
+
+  function ensureAnswerPopupContainer() {
+    if (answerPopupState.container?.isConnected) return answerPopupState.container;
+    const popup = document.createElement("div");
+    popup.className = "zyrox-answer-popup";
+    popup.style.cssText = [
+      "position:fixed",
+      "left:50%",
+      "top:92px",
+      "transform:translate(-50%, -18px)",
+      "min-width:260px",
+      "max-width:min(86vw,640px)",
+      "padding:12px 14px",
+      "border-radius:12px",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+      "z-index:2147483647",
+      "opacity:0",
+      "pointer-events:none",
+      "transition:opacity .18s ease, transform .18s ease",
+      "box-shadow:0 14px 34px rgba(0,0,0,.45)",
+      "border:1px solid rgba(255,255,255,.14)",
+      "display:none",
+      "white-space:normal",
+      "overflow-wrap:anywhere",
+    ].join(";");
+    document.documentElement.appendChild(popup);
+    answerPopupState.container = popup;
+    return popup;
+  }
+
+  function showAnswerPopup(answerText) {
+    if (!answerPopupState.enabled) return;
+    const answer = String(answerText || "").trim();
+    if (!answer) return;
+    const now = Date.now();
+    if (answer === answerPopupState.lastAnswer && now - answerPopupState.lastShownAt < 700) return;
+    answerPopupState.lastAnswer = answer;
+    answerPopupState.lastShownAt = now;
+
+    const popup = ensureAnswerPopupContainer();
+    const cfg = getAnswerPopupConfig();
+    popup.style.background = "transparent";
+    popup.style.color = cfg.textColor;
+    popup.style.borderLeft = "";
+    popup.style.border = "none";
+    popup.style.boxShadow = "none";
+    popup.innerHTML = `<div style="font-size:20px;font-weight:800;line-height:1.2;color:${cfg.accent};">${answer}</div>`;
+
+    popup.style.display = "block";
+    popup.style.opacity = "1";
+    popup.style.transform = "translate(-50%, 0)";
+    if (answerPopupState.timeoutId) clearTimeout(answerPopupState.timeoutId);
+    answerPopupState.timeoutId = setTimeout(() => {
+      popup.style.opacity = "0";
+      popup.style.transform = "translate(-50%, -18px)";
+      setTimeout(() => {
+        if (popup.style.opacity === "0") popup.style.display = "none";
+      }, 180);
+    }, cfg.durationMs);
+  }
+
+  function startAnswerPopup() {
+    answerPopupState.enabled = true;
+  }
+
+  function stopAnswerPopup() {
+    answerPopupState.enabled = false;
+    if (answerPopupState.timeoutId) {
+      clearTimeout(answerPopupState.timeoutId);
+      answerPopupState.timeoutId = null;
+    }
+    if (answerPopupState.container) {
+      answerPopupState.container.style.opacity = "0";
+      answerPopupState.container.style.display = "none";
+    }
+  }
+
   const MODULE_BEHAVIORS = {
     "ESP": {
       onEnable: startEsp,
@@ -2501,8 +2732,12 @@
       onEnable: startAutoAim,
       onDisable: stopAutoAim,
     },
+    "Answer Popup": {
+      onEnable: startAnswerPopup,
+      onDisable: stopAnswerPopup,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup"]);
 
   // --- End of Core Utilities ---
 
@@ -2669,10 +2904,6 @@
           modules: ["Classic Auto Buy", "Classic Streak Manager", "Classic Speed Round"],
         },
         {
-          name: "Team Mode",
-          modules: ["Team Comms Overlay", "Team Upgrade Sync", "Team Split Strategy"],
-        },
-        {
           name: "Capture The Flag",
           modules: ["Flag Pathing", "Flag Return Alert", "Carrier Tracker"],
         },
@@ -2681,8 +2912,17 @@
           modules: ["Zone Priority", "Tag Timer Overlay", "Defense Rotation"],
         },
         {
-          name: "The Floor Is Lava",
-          modules: ["Safe Tile Highlight", "Lava Cycle Timer", "Route Assist"],
+          name: "Draw It",
+          modules: [
+            {
+              name: "Answer Popup",
+              settings: [
+                { id: "durationMs", label: "Display Duration", type: "slider", min: 600, max: 8000, step: 100, default: 2600, unit: "ms" },
+                { id: "accent", label: "Accent Color", type: "color", default: "#00e5ff" },
+                { id: "textColor", label: "Text Color", type: "color", default: "#ffffff" },
+              ],
+            },
+          ],
         },
       ],
     },
@@ -4614,6 +4854,21 @@
           }
         }
 
+        if (setting.type === "text") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = String(setting.default ?? "");
+          const safeValue = String(cfg[setting.id]).replace(/"/g, "&quot;");
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="text" class="set-module-setting-text" data-setting-id="${setting.id}" value="${safeValue}" />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-text");
+          if (settingInput) {
+            settingInput.addEventListener("input", (event) => {
+              cfg[setting.id] = String(event.target.value ?? "");
+            });
+          }
+        }
+
         if (settingCard.innerHTML.trim()) configBody.appendChild(settingCard);
       }
     }
@@ -4787,7 +5042,11 @@
       topbar.style.top = `${clampedTopbar.y}px`;
 
       for (const [name, panel] of panelByName.entries()) {
-        const pos = state.loosePanelPositions[name] || { x: 0, y: 0 };
+        const existingRect = panel.getBoundingClientRect();
+        const pos = state.loosePanelPositions[name] || {
+          x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
+          y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
+        };
         const clamped = clampLoosePosition(pos.x, pos.y, panel, scale, shellRect);
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
@@ -5008,6 +5267,23 @@
     // FIX: derive button accent background from outlineColor so buttons always match the theme
     setThemeVar("--zyx-btn-bg", toRgba(outlineColor, 0.12));
     setThemeVar("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
+
+    if (state.displayMode === "loose") {
+      const shellRect = shell.getBoundingClientRect();
+      const looseScale = getShellScale();
+      for (const [name, panel] of panelByName.entries()) {
+        const existingRect = panel.getBoundingClientRect();
+        const fallback = {
+          x: Math.round((existingRect.left - shellRect.left) / Math.max(looseScale, 0.001)),
+          y: Math.round((existingRect.top - shellRect.top) / Math.max(looseScale, 0.001)),
+        };
+        const current = state.loosePanelPositions[name] || fallback;
+        const clamped = clampLoosePosition(current.x, current.y, panel, looseScale, shellRect);
+        state.loosePanelPositions[name] = clamped;
+        panel.style.left = `${clamped.x}px`;
+        panel.style.top = `${clamped.y}px`;
+      }
+    }
   }
 
   function applySearchFilter() {
