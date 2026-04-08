@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.6.4
+// @version      1.6.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.6.4";
+    const CLIENT_VERSION = "1.6.5";
     return CLIENT_VERSION;
   }
 
@@ -2630,14 +2630,26 @@
   };
 
   function getAnswerPopupConfig() {
-    const cfg = moduleCfg("Answer Popup");
+    const defaults = {
+      title: "Draw It Answer",
+      prefix: "Answer:",
+      durationMs: 2600,
+      background: "#121525",
+      accent: "#00e5ff",
+      textColor: "#ffffff",
+    };
+    let cfg = defaults;
+    if (typeof state !== "undefined" && state?.moduleConfig instanceof Map) {
+      const saved = state.moduleConfig.get("Answer Popup");
+      if (saved && typeof saved === "object") cfg = { ...defaults, ...saved };
+    }
     return {
-      title: String(cfg.title ?? "Draw It Answer"),
-      prefix: String(cfg.prefix ?? "Answer:"),
-      durationMs: Math.max(400, Number(cfg.durationMs) || 2600),
-      background: String(cfg.background ?? "#121525"),
-      accent: String(cfg.accent ?? "#00e5ff"),
-      textColor: String(cfg.textColor ?? "#ffffff"),
+      title: String(cfg.title ?? defaults.title),
+      prefix: String(cfg.prefix ?? defaults.prefix),
+      durationMs: Math.max(400, Number(cfg.durationMs) || defaults.durationMs),
+      background: String(cfg.background ?? defaults.background),
+      accent: String(cfg.accent ?? defaults.accent),
+      textColor: String(cfg.textColor ?? defaults.textColor),
     };
   }
 
