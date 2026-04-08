@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.6.8
+// @version      1.6.9
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.6.7";
+    const CLIENT_VERSION = "1.6.9";
     return CLIENT_VERSION;
   }
 
@@ -2676,13 +2676,17 @@
     const selectedPreset = normalizePopupPresetName(cfg.preset || "default");
     const effectivePresetName = getEffectivePopupPresetName(selectedPreset);
     const preset = ANSWER_POPUP_PRESETS[effectivePresetName] || ANSWER_POPUP_PRESETS.default;
+    const usePresetOnly = selectedPreset === "default";
     return {
       globalPreset: getGlobalPresetName(),
       preset: selectedPreset,
       effectivePreset: effectivePresetName,
-      durationMs: Math.max(400, Number(cfg.durationMs) || preset.durationMs || defaults.durationMs),
-      accent: String(cfg.accent ?? preset.accent ?? defaults.accent),
-      textColor: String(cfg.textColor ?? preset.textColor ?? defaults.textColor),
+      durationMs: Math.max(
+        400,
+        Number(usePresetOnly ? preset.durationMs : (cfg.durationMs ?? preset.durationMs ?? defaults.durationMs)) || defaults.durationMs,
+      ),
+      accent: String(usePresetOnly ? preset.accent : (cfg.accent ?? preset.accent ?? defaults.accent)),
+      textColor: String(usePresetOnly ? preset.textColor : (cfg.textColor ?? preset.textColor ?? defaults.textColor)),
       background: String(preset.background ?? ANSWER_POPUP_PRESETS.default.background),
     };
   }
