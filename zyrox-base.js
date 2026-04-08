@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.6.5
+// @version      1.6.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.6.5";
+    const CLIENT_VERSION = "1.6.6";
     return CLIENT_VERSION;
   }
 
@@ -2631,10 +2631,7 @@
 
   function getAnswerPopupConfig() {
     const defaults = {
-      title: "Draw It Answer",
-      prefix: "Answer:",
       durationMs: 2600,
-      background: "#121525",
       accent: "#00e5ff",
       textColor: "#ffffff",
     };
@@ -2644,10 +2641,7 @@
       if (saved && typeof saved === "object") cfg = { ...defaults, ...saved };
     }
     return {
-      title: String(cfg.title ?? defaults.title),
-      prefix: String(cfg.prefix ?? defaults.prefix),
       durationMs: Math.max(400, Number(cfg.durationMs) || defaults.durationMs),
-      background: String(cfg.background ?? defaults.background),
       accent: String(cfg.accent ?? defaults.accent),
       textColor: String(cfg.textColor ?? defaults.textColor),
     };
@@ -2693,13 +2687,12 @@
 
     const popup = ensureAnswerPopupContainer();
     const cfg = getAnswerPopupConfig();
-    popup.style.background = cfg.background;
+    popup.style.background = "transparent";
     popup.style.color = cfg.textColor;
-    popup.style.borderLeft = `4px solid ${cfg.accent}`;
-    popup.innerHTML = `
-      <div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:4px;">${cfg.title}</div>
-      <div style="font-size:16px;font-weight:700;line-height:1.25;">${cfg.prefix} <span style="color:${cfg.accent};">${answer}</span></div>
-    `;
+    popup.style.borderLeft = "";
+    popup.style.border = "none";
+    popup.style.boxShadow = "none";
+    popup.innerHTML = `<div style="font-size:20px;font-weight:800;line-height:1.2;color:${cfg.accent};">${answer}</div>`;
 
     popup.style.display = "block";
     popup.style.opacity = "1";
@@ -2932,10 +2925,7 @@
             {
               name: "Answer Popup",
               settings: [
-                { id: "title", label: "Popup Title", type: "text", default: "Draw It Answer" },
-                { id: "prefix", label: "Answer Prefix", type: "text", default: "Answer:" },
                 { id: "durationMs", label: "Display Duration", type: "slider", min: 600, max: 8000, step: 100, default: 2600, unit: "ms" },
-                { id: "background", label: "Popup Background", type: "color", default: "#121525" },
                 { id: "accent", label: "Accent Color", type: "color", default: "#00e5ff" },
                 { id: "textColor", label: "Text Color", type: "color", default: "#ffffff" },
               ],
