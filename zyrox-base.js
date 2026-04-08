@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.7.4
+// @version      1.7.5
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.7.4";
+    const CLIENT_VERSION = "1.7.5";
     return CLIENT_VERSION;
   }
 
@@ -2631,6 +2631,76 @@
     lastShownAt: 0,
     lastRenderedAnswer: "",
   };
+  const drawItAnswerRevealState = {
+    enabled: false,
+    selectorMode: "auto",
+  };
+
+  function getAnswerRevealConfig() {
+    if (typeof state !== "undefined" && state?.moduleConfig instanceof Map) {
+      const saved = state.moduleConfig.get("Answer Reveal");
+      if (saved && typeof saved === "object") {
+        return {
+          selectorMode: saved.selectorMode === "strict" ? "strict" : "auto",
+        };
+      }
+    }
+    return { selectorMode: "auto" };
+  }
+
+  function findDrawItMaskedTermElement(selectorMode = "auto") {
+    const strictSelectors = [
+      "[data-qa='term-mask']",
+      "[data-testid='term-mask']",
+      "[class*='term'][class*='mask']",
+    ];
+    const autoSelectors = [
+      ...strictSelectors,
+      "[class*='word'][class*='mask']",
+      "[class*='draw'][class*='term']",
+      "[data-qa*='term']",
+      "[data-testid*='term']",
+    ];
+    const selectors = selectorMode === "strict" ? strictSelectors : autoSelectors;
+    for (const selector of selectors) {
+      const hit = document.querySelector(selector);
+      if (hit && typeof hit.textContent === "string") return hit;
+    }
+    return null;
+  }
+
+  function applyDrawItAnswerReveal(answerText) {
+    if (!drawItAnswerRevealState.enabled) return;
+    const answer = String(answerText || "").trim();
+    if (!answer) return;
+    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
+    if (!target) return;
+    if (!target.dataset.zyroxOriginalMask) {
+      target.dataset.zyroxOriginalMask = String(target.textContent || "");
+    }
+    target.textContent = answer;
+  }
+
+  function restoreDrawItAnswerMask() {
+    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
+    if (!target) return;
+    const originalMask = target.dataset.zyroxOriginalMask;
+    if (typeof originalMask === "string" && originalMask.length) {
+      target.textContent = originalMask;
+      delete target.dataset.zyroxOriginalMask;
+    }
+  }
+
+  function startDrawItAnswerReveal() {
+    const cfg = getAnswerRevealConfig();
+    drawItAnswerRevealState.selectorMode = cfg.selectorMode;
+    drawItAnswerRevealState.enabled = true;
+  }
+
+  function stopDrawItAnswerReveal() {
+    drawItAnswerRevealState.enabled = false;
+    restoreDrawItAnswerMask();
+  }
 
   const ANSWER_POPUP_PRESETS = {
     default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600, panelBg: "rgba(8, 10, 14, 0.92)", headerStart: "rgba(255, 74, 74, 0.30)", headerEnd: "rgba(45, 12, 12, 0.95)" },
@@ -4245,72 +4315,6 @@
 
   function refreshAutoAnswerLoopIfEnabled() {
     if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
-  }
-
-  const answerPopupState = {
-    enabled: false,
-    container: null,
-    timeoutId: null,
-    lastAnswer: "",
-    lastShownAt: 0,
-  };
-  const drawItAnswerRevealState = {
-    enabled: false,
-    selectorMode: "auto",
-  };
-
-  function findDrawItMaskedTermElement(selectorMode = "auto") {
-    const strictSelectors = [
-      "[data-qa='term-mask']",
-      "[data-testid='term-mask']",
-      "[class*='term'][class*='mask']",
-    ];
-    const autoSelectors = [
-      ...strictSelectors,
-      "[class*='word'][class*='mask']",
-      "[class*='draw'][class*='term']",
-      "[data-qa*='term']",
-      "[data-testid*='term']",
-    ];
-    const selectors = selectorMode === "strict" ? strictSelectors : autoSelectors;
-    for (const selector of selectors) {
-      const hit = document.querySelector(selector);
-      if (hit && typeof hit.textContent === "string") return hit;
-    }
-    return null;
-  }
-
-  function applyDrawItAnswerReveal(answerText) {
-    if (!drawItAnswerRevealState.enabled) return;
-    const answer = String(answerText || "").trim();
-    if (!answer) return;
-    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
-    if (!target) return;
-    if (!target.dataset.zyroxOriginalMask) {
-      target.dataset.zyroxOriginalMask = String(target.textContent || "");
-    }
-    target.textContent = answer;
-  }
-
-  function restoreDrawItAnswerMask() {
-    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
-    if (!target) return;
-    const originalMask = target.dataset.zyroxOriginalMask;
-    if (typeof originalMask === "string" && originalMask.length) {
-      target.textContent = originalMask;
-      delete target.dataset.zyroxOriginalMask;
-    }
-  }
-
-  function startDrawItAnswerReveal() {
-    const cfg = moduleCfg("Answer Reveal");
-    drawItAnswerRevealState.selectorMode = cfg.selectorMode === "strict" ? "strict" : "auto";
-    drawItAnswerRevealState.enabled = true;
-  }
-
-  function stopDrawItAnswerReveal() {
-    drawItAnswerRevealState.enabled = false;
-    restoreDrawItAnswerMask();
   }
 
   function getAnswerPopupConfig() {
