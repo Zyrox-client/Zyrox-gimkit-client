@@ -23,19 +23,21 @@ otherwise the client will not open/load.\
 
 <br>
 
+If you have any questions or feature requests leave them [here](https://github.com/Zyrox-client/Zyrox-gimkit-client/issues/new).
+
 ## Files
-- `example.js`: Reference/example userscript from a different hacked client.
+- `example.js`: Reference/example userscript hacked client.
 - `zyrox-base.js`: The main userscript file.
 
 <br>
 
 ## Roadmap/todo
 - ~~Fix new issues from adding crosshair~~
-- Improve default settings
 - ~~Add reset button for all setting~~
-- Improve ESP & aimbot modules
-- Store enabled modules
+- ~~Improve ESP & aimbot modules~~
+- Improve default settings
+- Add descriptions
 - Fix hiding non working modules
-- Add more module (functionality); ~~triggerbot, aimbot, etc.~~
+- Add more (working) modules
 
    
