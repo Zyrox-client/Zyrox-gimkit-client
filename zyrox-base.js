@@ -978,6 +978,7 @@
         const answer = fieldValue.trim();
         if (!answer) continue;
         console.log(answer);
+        applyDrawItAnswerReveal(answer);
         if (answerPopupState.enabled) showAnswerPopup(answer);
       }
     }
@@ -1080,11 +1081,12 @@
   });
 
   socketManager.addEventListener("blueboatMessage", (event) => {
-    if (!answerPopupState.enabled) return;
     if (event.detail?.key !== "STATE_UPDATE") return;
     const answers = extractDrawItAnswerCandidates(event.detail.data);
     if (!answers.length) return;
-    showAnswerPopup(answers[answers.length - 1]);
+    const latestAnswer = answers[answers.length - 1];
+    applyDrawItAnswerReveal(latestAnswer);
+    if (answerPopupState.enabled) showAnswerPopup(latestAnswer);
   });
 
   answerInterval = setInterval(() => {
@@ -2816,8 +2818,12 @@
       onEnable: startAnswerPopup,
       onDisable: stopAnswerPopup,
     },
+    "Answer Reveal": {
+      onEnable: startDrawItAnswerReveal,
+      onDisable: stopDrawItAnswerReveal,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
 
   // --- End of Core Utilities ---
 
@@ -2994,6 +3000,21 @@
         {
           name: "Draw It",
           modules: [
+            {
+              name: "Answer Reveal",
+              settings: [
+                {
+                  id: "selectorMode",
+                  label: "Selector Mode",
+                  type: "select",
+                  default: "auto",
+                  options: [
+                    { value: "auto", label: "Auto" },
+                    { value: "strict", label: "Strict" },
+                  ],
+                },
+              ],
+            },
             {
               name: "Answer Popup",
               settings: [
@@ -4233,6 +4254,64 @@
     lastAnswer: "",
     lastShownAt: 0,
   };
+  const drawItAnswerRevealState = {
+    enabled: false,
+    selectorMode: "auto",
+  };
+
+  function findDrawItMaskedTermElement(selectorMode = "auto") {
+    const strictSelectors = [
+      "[data-qa='term-mask']",
+      "[data-testid='term-mask']",
+      "[class*='term'][class*='mask']",
+    ];
+    const autoSelectors = [
+      ...strictSelectors,
+      "[class*='word'][class*='mask']",
+      "[class*='draw'][class*='term']",
+      "[data-qa*='term']",
+      "[data-testid*='term']",
+    ];
+    const selectors = selectorMode === "strict" ? strictSelectors : autoSelectors;
+    for (const selector of selectors) {
+      const hit = document.querySelector(selector);
+      if (hit && typeof hit.textContent === "string") return hit;
+    }
+    return null;
+  }
+
+  function applyDrawItAnswerReveal(answerText) {
+    if (!drawItAnswerRevealState.enabled) return;
+    const answer = String(answerText || "").trim();
+    if (!answer) return;
+    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
+    if (!target) return;
+    if (!target.dataset.zyroxOriginalMask) {
+      target.dataset.zyroxOriginalMask = String(target.textContent || "");
+    }
+    target.textContent = answer;
+  }
+
+  function restoreDrawItAnswerMask() {
+    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
+    if (!target) return;
+    const originalMask = target.dataset.zyroxOriginalMask;
+    if (typeof originalMask === "string" && originalMask.length) {
+      target.textContent = originalMask;
+      delete target.dataset.zyroxOriginalMask;
+    }
+  }
+
+  function startDrawItAnswerReveal() {
+    const cfg = moduleCfg("Answer Reveal");
+    drawItAnswerRevealState.selectorMode = cfg.selectorMode === "strict" ? "strict" : "auto";
+    drawItAnswerRevealState.enabled = true;
+  }
+
+  function stopDrawItAnswerReveal() {
+    drawItAnswerRevealState.enabled = false;
+    restoreDrawItAnswerMask();
+  }
 
   function getAnswerPopupConfig() {
     const cfg = moduleCfg("Answer Popup");
