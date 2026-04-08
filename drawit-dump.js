@@ -1,24 +1,20 @@
 // ==UserScript==
 // @name        Gimkit Draw That - Raw Dump
-// @description Logs full raw STATE_UPDATE payload so we can see the real data structure
+// @description Logs only the Draw That round answer (term) from STATE_UPDATE payloads
 // @namespace   https://github.com/local/drawthat-rawdump
 // @match       https://www.gimkit.com/join*
 // @run-at      document-start
 // @grant       none
-// @version     1.0.0
+// @version     1.1.0
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // Only dump STATE_UPDATE this many times (to avoid spam), then stop
-    const MAX_DUMPS = 5;
-    // Also fully dump these keys every time they appear
-    const ALWAYS_DUMP = new Set(["PLAYER_JOINS_STATIC_STATE", "DRAW_MODE_FEED_ITEM"]);
-    // Skip these entirely
     const SKIP = new Set(["DRAW_MODE_LD"]);
+    const LOG_DUPLICATES = false;
 
-    let stateUpdateDumps = 0;
+    let lastLoggedAnswer = null;
 
     // ── Decoder (same as before) ─────────────────────────────────────────────────
     function bbDecode(buffer) {
@@ -80,6 +76,25 @@
         } catch(e) { return null; }
     }
 
+    function getRoundAnswer(stateUpdatePayload) {
+        if (!Array.isArray(stateUpdatePayload)) return null;
+
+        for (const entry of stateUpdatePayload) {
+            if (!entry || entry.type !== "DRAW_MODE_ROUND") continue;
+            if (!Array.isArray(entry.value)) continue;
+
+            for (const roundField of entry.value) {
+                const key = roundField?.value?.key;
+                if (key !== "term") continue;
+
+                const answer = roundField?.value?.value;
+                if (typeof answer === "string" && answer.trim()) return answer;
+            }
+        }
+
+        return null;
+    }
+
     // ── Hook ─────────────────────────────────────────────────────────────────────
     const hooked = new WeakSet();
 
@@ -94,34 +109,21 @@
             const key = decoded.key;
             if (SKIP.has(key)) return;
 
-            if (ALWAYS_DUMP.has(key)) {
-                console.log(`%c[RawDump] ⬇️ ${key}`, "color:#fa4;font-weight:bold;");
-                console.log(JSON.parse(JSON.stringify(decoded.data))); // deep clone so it doesn't collapse
-                return;
-            }
-
             if (key === "STATE_UPDATE") {
-                if (stateUpdateDumps >= MAX_DUMPS) return;
-                stateUpdateDumps++;
-                console.log(`%c[RawDump] ⬇️ STATE_UPDATE #${stateUpdateDumps} — raw data:`, "color:#4af;font-weight:bold;");
-                console.log(JSON.parse(JSON.stringify(decoded.data)));
-                if (stateUpdateDumps === MAX_DUMPS) {
-                    console.log("%c[RawDump] STATE_UPDATE dump limit reached. Run  resumeDump()  to dump 5 more.", "color:#888;font-style:italic;");
-                }
+                const answer = getRoundAnswer(decoded.data);
+                if (!answer) return;
+                if (!LOG_DUPLICATES && answer === lastLoggedAnswer) return;
+
+                lastLoggedAnswer = answer;
+                console.log(`%c[DrawThat Answer] ${answer}`, "color:#2ecc71;font-weight:bold;");
                 return;
             }
-
-            // Everything else: one-liner
-            console.log(`%c[RawDump] ⬇️ ${key}`, "color:#aaa;", decoded.data);
         });
 
         // Also log outgoing (except DRAW_MODE_LD spam)
         const orig = ws.send.bind(ws);
         ws.send = function(data) {
-            const decoded = bbDecode(data);
-            if (decoded?.key && !SKIP.has(decoded.key)) {
-                console.log(`%c[RawDump] ⬆️ ${decoded.key}`, "color:#f90;font-weight:bold;", decoded.data);
-            }
+            // Incoming answer extraction is all we need; skip outbound logs to reduce noise.
             orig(data);
         };
     }
@@ -132,10 +134,5 @@
         origSend.call(this, data);
     };
 
-    window.resumeDump = function() {
-        stateUpdateDumps = 0;
-        console.log("[RawDump] Resuming STATE_UPDATE dumps (next 5)");
-    };
-
-    console.log("%c[RawDump] Ready. resumeDump() to get more STATE_UPDATEs.", "color:#0f0;font-style:italic;");
+    console.log("%c[DrawThat Answer] Ready. Waiting for term updates...", "color:#0f0;font-style:italic;");
 })();
