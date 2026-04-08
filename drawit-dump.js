@@ -1,19 +1,16 @@
 // ==UserScript==
 // @name        Gimkit Draw That - Raw Dump
-// @description Logs raw Draw That websocket payloads with labeled log types to find the answer field
+// @description Logs only Draw That answer candidate term events
 // @namespace   https://github.com/local/drawthat-rawdump
 // @match       https://www.gimkit.com/join*
 // @run-at      document-start
 // @grant       none
-// @version     1.3.0
+// @version     1.4.0
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // Also fully dump these keys every time they appear
-    const ALWAYS_DUMP = new Set(["PLAYER_JOINS_STATIC_STATE", "DRAW_MODE_FEED_ITEM"]);
-    // Skip these entirely
     const SKIP = new Set(["DRAW_MODE_LD"]);
 
     // ── Decoder (same as before) ─────────────────────────────────────────────────
@@ -93,12 +90,9 @@
                 const fieldValue = typeof nestedValue === 'undefined' ? directValue : nestedValue;
                 if (!fieldKey) continue;
 
-                const marker = `type=${row.type || 'unknown'} field=${fieldKey}`;
-                if (fieldKey === 'term') {
-                    console.log(`%c[RawDump:ANSWER_CANDIDATE] ${marker}`, 'color:#00e676;font-weight:bold;', fieldValue);
-                } else {
-                    console.log(`%c[RawDump:STATE_FIELD] ${marker}`, 'color:#82b1ff;', fieldValue);
-                }
+                if (fieldKey !== 'term') continue;
+                if (typeof fieldValue !== 'string' || !fieldValue.trim()) continue;
+                console.log('[RawDump:ANSWER_CANDIDATE] type=DRAW_MODE_ROUND field=term');
             }
         }
     }
@@ -109,40 +103,16 @@
     function hookSocket(ws) {
         if (hooked.has(ws)) return;
         hooked.add(ws);
-        console.log('%c[RawDump:SOCKET_HOOKED] Socket hooked', 'color:#0f0;font-weight:bold;');
-
         ws.addEventListener('message', (e) => {
             const decoded = bbDecode(e.data);
             if (!decoded?.key) return;
             const key = decoded.key;
             if (SKIP.has(key)) return;
 
-            if (ALWAYS_DUMP.has(key)) {
-                console.log(`%c[RawDump:${key}] full payload`, 'color:#fa4;font-weight:bold;');
-                console.log(JSON.parse(JSON.stringify(decoded.data)));
-                return;
-            }
-
             if (key === 'STATE_UPDATE') {
-                console.log('%c[RawDump:STATE_UPDATE] full payload', 'color:#4af;font-weight:bold;');
-                console.log(JSON.parse(JSON.stringify(decoded.data)));
                 logAnswerCandidates(decoded.data);
-                return;
             }
-
-            // Everything else: one-liner
-            console.log(`%c[RawDump:${key}]`, 'color:#aaa;', decoded.data);
         });
-
-        // Also log outgoing (except DRAW_MODE_LD spam)
-        const orig = ws.send.bind(ws);
-        ws.send = function(data) {
-            const decoded = bbDecode(data);
-            if (decoded?.key && !SKIP.has(decoded.key)) {
-                console.log(`%c[RawDump:OUT_${decoded.key}]`, 'color:#f90;font-weight:bold;', decoded.data);
-            }
-            orig(data);
-        };
     }
 
     const origSend = WebSocket.prototype.send;
@@ -150,6 +120,4 @@
         if (!this.url?.startsWith('ws://localhost')) hookSocket(this);
         origSend.call(this, data);
     };
-
-    console.log('%c[RawDump:READY] Listening for websocket payloads.', 'color:#0f0;font-style:italic;');
 })();
