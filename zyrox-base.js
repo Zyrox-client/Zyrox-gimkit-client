@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.7.2
+// @version      1.7.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.7.2";
+    const CLIENT_VERSION = "1.7.3";
     return CLIENT_VERSION;
   }
 
@@ -2707,7 +2707,7 @@
       "transform:translate(-50%, -18px)",
       "min-width:260px",
       "max-width:min(86vw,640px)",
-      "padding:12px 14px",
+      "padding:0",
       "border-radius:12px",
       "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
       "z-index:2147483647",
@@ -2717,6 +2717,7 @@
       "box-shadow:0 14px 34px rgba(0,0,0,.45)",
       "border:1px solid rgba(255,255,255,.14)",
       "display:none",
+      "overflow:hidden",
       "white-space:normal",
       "overflow-wrap:anywhere",
     ].join(";");
