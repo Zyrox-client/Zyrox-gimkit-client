@@ -978,6 +978,7 @@
         const answer = fieldValue.trim();
         if (!answer) continue;
         console.log(answer);
+        applyDrawItAnswerReveal(answer);
         if (answerPopupState.enabled) showAnswerPopup(answer);
       }
     }
@@ -1080,11 +1081,12 @@
   });
 
   socketManager.addEventListener("blueboatMessage", (event) => {
-    if (!answerPopupState.enabled) return;
     if (event.detail?.key !== "STATE_UPDATE") return;
     const answers = extractDrawItAnswerCandidates(event.detail.data);
     if (!answers.length) return;
-    showAnswerPopup(answers[answers.length - 1]);
+    const latestAnswer = answers[answers.length - 1];
+    applyDrawItAnswerReveal(latestAnswer);
+    if (answerPopupState.enabled) showAnswerPopup(latestAnswer);
   });
 
   answerInterval = setInterval(() => {
@@ -2629,6 +2631,98 @@
     lastShownAt: 0,
     lastRenderedAnswer: "",
   };
+  const drawItAnswerRevealState = {
+    enabled: false,
+    selectorMode: "auto",
+    lastAnswer: "",
+    syncIntervalId: null,
+  };
+
+  function getAnswerRevealConfig() {
+    if (typeof state !== "undefined" && state?.moduleConfig instanceof Map) {
+      const saved = state.moduleConfig.get("Answer Reveal");
+      if (saved && typeof saved === "object") {
+        return {
+          selectorMode: saved.selectorMode === "strict" ? "strict" : "auto",
+        };
+      }
+    }
+    return { selectorMode: "auto" };
+  }
+
+  function findDrawItMaskedTermElement(selectorMode = "auto") {
+    const strictSelectors = [
+      ".sc-iKrZTU.cVnVFI span",
+      ".sc-iKrZTU.cVnVFI",
+      "[data-qa='term-mask']",
+      "[data-testid='term-mask']",
+      "[class*='term'][class*='mask']",
+    ];
+    const autoSelectors = [
+      ...strictSelectors,
+      "[class*='word'][class*='mask']",
+      "[class*='draw'][class*='term']",
+      ".hSIGsV .cVnVFI span",
+      ".hSIGsV .cVnVFI",
+      "[data-qa*='term']",
+      "[data-testid*='term']",
+    ];
+    const selectors = selectorMode === "strict" ? strictSelectors : autoSelectors;
+    for (const selector of selectors) {
+      const hit = document.querySelector(selector);
+      if (hit && typeof hit.textContent === "string") return hit;
+    }
+    return null;
+  }
+
+  function applyDrawItAnswerReveal(answerText) {
+    if (!drawItAnswerRevealState.enabled) return;
+    const answer = String(answerText || "").trim();
+    if (!answer) return;
+    drawItAnswerRevealState.lastAnswer = answer;
+    forceDrawItAnswerReveal();
+  }
+
+  function forceDrawItAnswerReveal() {
+    if (!drawItAnswerRevealState.enabled) return;
+    const answer = String(drawItAnswerRevealState.lastAnswer || "").trim();
+    if (!answer) return;
+    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
+    if (!target) return;
+    if (!target.dataset.zyroxOriginalMask) {
+      target.dataset.zyroxOriginalMask = String(target.textContent || "");
+    }
+    if (target.textContent !== answer) target.textContent = answer;
+  }
+
+  function restoreDrawItAnswerMask() {
+    const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
+    if (!target) return;
+    const originalMask = target.dataset.zyroxOriginalMask;
+    if (typeof originalMask === "string" && originalMask.length) {
+      target.textContent = originalMask;
+      delete target.dataset.zyroxOriginalMask;
+    }
+  }
+
+  function startDrawItAnswerReveal() {
+    const cfg = getAnswerRevealConfig();
+    drawItAnswerRevealState.selectorMode = cfg.selectorMode;
+    drawItAnswerRevealState.enabled = true;
+    if (!drawItAnswerRevealState.syncIntervalId) {
+      drawItAnswerRevealState.syncIntervalId = setInterval(forceDrawItAnswerReveal, 50);
+    }
+  }
+
+  function stopDrawItAnswerReveal() {
+    drawItAnswerRevealState.enabled = false;
+    drawItAnswerRevealState.lastAnswer = "";
+    if (drawItAnswerRevealState.syncIntervalId) {
+      clearInterval(drawItAnswerRevealState.syncIntervalId);
+      drawItAnswerRevealState.syncIntervalId = null;
+    }
+    restoreDrawItAnswerMask();
+  }
 
   const ANSWER_POPUP_PRESETS = {
     default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600, panelBg: "rgba(8, 10, 14, 0.92)", headerStart: "rgba(255, 74, 74, 0.30)", headerEnd: "rgba(45, 12, 12, 0.95)" },
@@ -2816,8 +2910,12 @@
       onEnable: startAnswerPopup,
       onDisable: stopAnswerPopup,
     },
+    "Answer Reveal": {
+      onEnable: startDrawItAnswerReveal,
+      onDisable: stopDrawItAnswerReveal,
+    },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
 
   // --- End of Core Utilities ---
 
@@ -2994,6 +3092,21 @@
         {
           name: "Draw It",
           modules: [
+            {
+              name: "Answer Reveal",
+              settings: [
+                {
+                  id: "selectorMode",
+                  label: "Selector Mode",
+                  type: "select",
+                  default: "auto",
+                  options: [
+                    { value: "auto", label: "Auto" },
+                    { value: "strict", label: "Strict" },
+                  ],
+                },
+              ],
+            },
             {
               name: "Answer Popup",
               settings: [
@@ -4225,14 +4338,6 @@
   function refreshAutoAnswerLoopIfEnabled() {
     if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
   }
-
-  const answerPopupState = {
-    enabled: false,
-    container: null,
-    timeoutId: null,
-    lastAnswer: "",
-    lastShownAt: 0,
-  };
 
   function getAnswerPopupConfig() {
     const cfg = moduleCfg("Answer Popup");
