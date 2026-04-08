@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.7.5
+// @version      1.7.6
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.7.5";
+    const CLIENT_VERSION = "1.7.6";
     return CLIENT_VERSION;
   }
 
@@ -2634,6 +2634,8 @@
   const drawItAnswerRevealState = {
     enabled: false,
     selectorMode: "auto",
+    lastAnswer: "",
+    syncIntervalId: null,
   };
 
   function getAnswerRevealConfig() {
@@ -2650,6 +2652,8 @@
 
   function findDrawItMaskedTermElement(selectorMode = "auto") {
     const strictSelectors = [
+      ".sc-iKrZTU.cVnVFI span",
+      ".sc-iKrZTU.cVnVFI",
       "[data-qa='term-mask']",
       "[data-testid='term-mask']",
       "[class*='term'][class*='mask']",
@@ -2658,6 +2662,8 @@
       ...strictSelectors,
       "[class*='word'][class*='mask']",
       "[class*='draw'][class*='term']",
+      ".hSIGsV .cVnVFI span",
+      ".hSIGsV .cVnVFI",
       "[data-qa*='term']",
       "[data-testid*='term']",
     ];
@@ -2673,12 +2679,20 @@
     if (!drawItAnswerRevealState.enabled) return;
     const answer = String(answerText || "").trim();
     if (!answer) return;
+    drawItAnswerRevealState.lastAnswer = answer;
+    forceDrawItAnswerReveal();
+  }
+
+  function forceDrawItAnswerReveal() {
+    if (!drawItAnswerRevealState.enabled) return;
+    const answer = String(drawItAnswerRevealState.lastAnswer || "").trim();
+    if (!answer) return;
     const target = findDrawItMaskedTermElement(drawItAnswerRevealState.selectorMode);
     if (!target) return;
     if (!target.dataset.zyroxOriginalMask) {
       target.dataset.zyroxOriginalMask = String(target.textContent || "");
     }
-    target.textContent = answer;
+    if (target.textContent !== answer) target.textContent = answer;
   }
 
   function restoreDrawItAnswerMask() {
@@ -2695,10 +2709,18 @@
     const cfg = getAnswerRevealConfig();
     drawItAnswerRevealState.selectorMode = cfg.selectorMode;
     drawItAnswerRevealState.enabled = true;
+    if (!drawItAnswerRevealState.syncIntervalId) {
+      drawItAnswerRevealState.syncIntervalId = setInterval(forceDrawItAnswerReveal, 50);
+    }
   }
 
   function stopDrawItAnswerReveal() {
     drawItAnswerRevealState.enabled = false;
+    drawItAnswerRevealState.lastAnswer = "";
+    if (drawItAnswerRevealState.syncIntervalId) {
+      clearInterval(drawItAnswerRevealState.syncIntervalId);
+      drawItAnswerRevealState.syncIntervalId = null;
+    }
     restoreDrawItAnswerMask();
   }
 
