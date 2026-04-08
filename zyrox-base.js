@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.7.0
+// @version      1.7.1
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.7.0";
+    const CLIENT_VERSION = "1.7.1";
     return CLIENT_VERSION;
   }
 
@@ -2678,6 +2678,10 @@
     const effectivePresetName = getEffectivePopupPresetName(selectedPreset);
     const preset = ANSWER_POPUP_PRESETS[effectivePresetName] || ANSWER_POPUP_PRESETS.default;
     const usePresetOnly = selectedPreset === "default";
+    const rootStyles = typeof root !== "undefined" ? getComputedStyle(root) : null;
+    const headerStart = rootStyles?.getPropertyValue("--zyx-settings-header-start")?.trim() || "rgba(255, 61, 61, .3)";
+    const headerEnd = rootStyles?.getPropertyValue("--zyx-settings-header-end")?.trim() || "rgba(45, 12, 12, .95)";
+    const headerText = rootStyles?.getPropertyValue("--zyx-settings-text")?.trim() || "#ffe5e5";
     return {
       globalPreset: getGlobalPresetName(),
       preset: selectedPreset,
@@ -2690,6 +2694,9 @@
       accent: String(usePresetOnly ? preset.accent : (cfg.accent ?? preset.accent ?? defaults.accent)),
       textColor: String(usePresetOnly ? preset.textColor : (cfg.textColor ?? preset.textColor ?? defaults.textColor)),
       background: String(preset.background ?? ANSWER_POPUP_PRESETS.default.background),
+      headerStart,
+      headerEnd,
+      headerText,
     };
   }
 
@@ -2740,7 +2747,10 @@
     popup.style.border = "1px solid rgba(255,255,255,.14)";
     popup.style.boxShadow = "0 14px 34px rgba(0,0,0,.45)";
     const label = cfg.text.trim();
-    popup.innerHTML = `<div style="font-size:16px;font-weight:700;line-height:1.25;">${label ? `${label}: ` : ""}<span style="color:${cfg.accent};">${answer}</span></div>`;
+    popup.innerHTML = `
+      <div style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.1);background:linear-gradient(90deg, ${cfg.headerStart}, ${cfg.headerEnd});color:${cfg.headerText};font-size:13px;font-weight:700;text-transform:capitalize;">${label || "answer"}</div>
+      <div style="padding:10px 12px;font-size:16px;font-weight:700;line-height:1.25;"><span style="color:${cfg.accent};">${answer}</span></div>
+    `;
 
     popup.style.display = "block";
     popup.style.opacity = "1";
@@ -2765,7 +2775,10 @@
     answerPopupState.container.style.color = cfg.textColor;
     answerPopupState.container.style.borderLeft = `4px solid ${cfg.accent}`;
     const label = cfg.text.trim();
-    answerPopupState.container.innerHTML = `<div style="font-size:16px;font-weight:700;line-height:1.25;">${label ? `${label}: ` : ""}<span style="color:${cfg.accent};">${answer}</span></div>`;
+    answerPopupState.container.innerHTML = `
+      <div style="padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.1);background:linear-gradient(90deg, ${cfg.headerStart}, ${cfg.headerEnd});color:${cfg.headerText};font-size:13px;font-weight:700;text-transform:capitalize;">${label || "answer"}</div>
+      <div style="padding:10px 12px;font-size:16px;font-weight:700;line-height:1.25;"><span style="color:${cfg.accent};">${answer}</span></div>
+    `;
   }
 
   function startAnswerPopup() {
@@ -3084,6 +3097,8 @@
       --zyx-settings-card-border: rgba(255,255,255,.08);
       --zyx-select-bg: rgba(20, 20, 28, 0.9);
       --zyx-select-text: #ffe5e5;
+      --zyx-input-bg: rgba(20, 20, 28, 0.9);
+      --zyx-input-text: #ffe5e5;
       --zyx-accent-soft: #ffbdbd;
       --zyx-search-text: #ffe6e6;
       --zyx-checkmark-color: #ff6b6b;
@@ -3521,6 +3536,15 @@
     .zyrox-settings-pane.hidden { display: none !important; }
     .zyrox-setting-card { border: 1px solid var(--zyx-settings-card-border); border-radius: 10px; padding: 8px 10px; background: var(--zyx-settings-card-bg); display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .zyrox-setting-card label { display:block; font-size: 12px; color: var(--zyx-settings-text); margin: 0; }
+    .zyrox-setting-card input[type="text"],
+    .zyrox-config-body input[type="text"] {
+      background: var(--zyx-input-bg);
+      color: var(--zyx-input-text);
+      border: 1px solid var(--zyx-settings-card-border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      min-width: 150px;
+    }
     .zyrox-setting-card input[type='color'] {
       width: 52px;
       height: 30px;
@@ -3885,6 +3909,14 @@
                 <label>Dropdown Text</label>
                 <input type="color" class="set-select-text" value="#ffe5e5" />
               </div>
+              <div class="zyrox-setting-card">
+                <label>Text Input Background</label>
+                <input type="color" class="set-input-bg" value="#17171f" />
+              </div>
+              <div class="zyrox-setting-card">
+                <label>Text Input Text</label>
+                <input type="color" class="set-input-text" value="#ffe5e5" />
+              </div>
           <div class="zyrox-subheading">Typography</div>
               <div class="zyrox-setting-card">
                 <label>Font Family</label>
@@ -4054,6 +4086,8 @@
   const checkmarkColorInput = settingsMenu.querySelector(".set-checkmark-color");
   const selectBgInput = settingsMenu.querySelector(".set-select-bg");
   const selectTextInput = settingsMenu.querySelector(".set-select-text");
+  const inputBgInput = settingsMenu.querySelector(".set-input-bg");
+  const inputTextInput = settingsMenu.querySelector(".set-input-text");
   const mutedTextInput = settingsMenu.querySelector(".set-muted-text");
   const accentSoftInput = settingsMenu.querySelector(".set-accent-soft");
   const searchTextInput = settingsMenu.querySelector(".set-search-text");
@@ -5132,6 +5166,8 @@
       checkmarkColor: checkmarkColorInput.value,
       selectBg: selectBgInput.value,
       selectText: selectTextInput.value,
+      inputBg: inputBgInput.value,
+      inputText: inputTextInput.value,
       mutedText: mutedTextInput.value,
       accentSoft: accentSoftInput.value,
       searchText: searchTextInput.value,
@@ -5367,6 +5403,8 @@
     checkmarkColorInput.value = preset.checkmark;
     selectBgInput.value = preset.selectBg;
     selectTextInput.value = preset.selectText;
+    inputBgInput.value = preset.selectBg;
+    inputTextInput.value = preset.selectText;
     headerStartInput.value = preset.headerStart;
     headerEndInput.value = preset.headerEnd;
     headerTextInput.value = preset.headerText;
@@ -5424,6 +5462,8 @@
     const checkmarkColor = normalizeHex(checkmarkColorInput.value, "#ff6b6b");
     const selectBg = normalizeHex(selectBgInput.value, "#17171f");
     const selectText = normalizeHex(selectTextInput.value, "#ffe5e5");
+    const inputBg = normalizeHex(inputBgInput.value, "#17171f");
+    const inputText = normalizeHex(inputTextInput.value, "#ffe5e5");
     const mutedText = normalizeHex(mutedTextInput.value, "#9b9bab");
     const accentSoft = normalizeHex(accentSoftInput.value, "#ffbdbd");
     const searchText = normalizeHex(searchTextInput.value, "#ffe6e6");
@@ -5481,6 +5521,8 @@
     setThemeVar("--zyx-checkmark-color", checkmarkColor);
     setThemeVar("--zyx-select-bg", toRgba(selectBg, 0.9));
     setThemeVar("--zyx-select-text", selectText);
+    setThemeVar("--zyx-input-bg", toRgba(inputBg, 0.9));
+    setThemeVar("--zyx-input-text", inputText);
     window.__zyroxEspValueTextColor = espValueTextColor;
     window.__zyroxEspConfig = { ...getEspRenderConfig(), valueTextColor: espValueTextColor, font: font };
     setThemeVar("--zyx-radius-xl", `${radius}px`);
@@ -5690,6 +5732,8 @@
   settingsCardBgInput.addEventListener("input", applyAppearance);
   selectBgInput.addEventListener("input", applyAppearance);
   selectTextInput.addEventListener("input", applyAppearance);
+  inputBgInput.addEventListener("input", applyAppearance);
+  inputTextInput.addEventListener("input", applyAppearance);
   espValueTextColorInput.addEventListener("input", applyAppearance);
   scaleInput.addEventListener("input", applyAppearance);
   radiusInput.addEventListener("input", applyAppearance);
@@ -5729,6 +5773,8 @@
     checkmarkColorInput.value = "#ff6b6b";
     selectBgInput.value = "#17171f";
     selectTextInput.value = "#ffe5e5";
+    inputBgInput.value = "#17171f";
+    inputTextInput.value = "#ffe5e5";
     mutedTextInput.value = "#9b9bab";
     accentSoftInput.value = "#ffbdbd";
     searchTextInput.value = "#ffe6e6";
@@ -5950,6 +5996,8 @@
         assign(checkmarkColorInput, "checkmarkColor");
         assign(selectBgInput, "selectBg");
         assign(selectTextInput, "selectText");
+        assign(inputBgInput, "inputBg");
+        assign(inputTextInput, "inputText");
         assign(mutedTextInput, "mutedText");
         assign(accentSoftInput, "accentSoft");
         assign(searchTextInput, "searchText");
