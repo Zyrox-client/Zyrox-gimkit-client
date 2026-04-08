@@ -2916,6 +2916,15 @@
     },
   };
   const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
+  const MODULE_DESCRIPTIONS = {
+    "Auto Answer": "Automatically submits the best answer after a delay.",
+    "ESP": "Shows players with tracers, names, and off-screen indicators.",
+    "Crosshair": "Draws a customizable crosshair and optional center line.",
+    "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
+    "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
+    "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
+    "Answer Popup": "Displays detected Draw It answers in a popup.",
+  };
 
   // --- End of Core Utilities ---
 
@@ -2928,14 +2937,11 @@
           modules: [
             {
               name: "Auto Answer",
+              description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 500 },
               ],
             },
-            "Answer Streak",
-            "Question Preview",
-            "Skip Animation",
-            "Instant Continue",
           ],
         },
         {
@@ -2943,6 +2949,7 @@
           modules: [
             {
               name: "ESP",
+              description: MODULE_DESCRIPTIONS["ESP"],
               settings: [
                 { id: "hitbox", label: "Hitbox", type: "checkbox", default: true },
                 { id: "hitboxSize", label: "Hitbox Size", type: "slider", min: 24, max: 270, step: 2, default: 150, unit: "px" },
@@ -2992,29 +2999,14 @@
                 },
               ],
             },
-            {
-              name: "Health Bars",
-              settings: [
-                { id: "enabled", label: "Enabled", type: "checkbox", default: true },
-                { id: "width", label: "Bar Width", type: "slider", min: 20, max: 120, step: 1, default: 54, unit: "px" },
-                { id: "height", label: "Bar Height", type: "slider", min: 3, max: 18, step: 1, default: 6, unit: "px" },
-                { id: "yOffset", label: "Vertical Offset", type: "slider", min: 8, max: 90, step: 1, default: 32, unit: "px" },
-                { id: "showText", label: "Show HP Text", type: "checkbox", default: true },
-              ],
-            },
-            "HUD",
-            "Overlay",
           ],
-        },
-        {
-          name: "Quality of Life",
-          modules: ["Notifications", "Session Timer", "Hotkeys", "Clipboard Tools"],
         },
         {
           name: "Combat",
           modules: [
             {
               name: "Crosshair",
+              description: MODULE_DESCRIPTIONS["Crosshair"],
               settings: [
                 { id: "enabled",       label: "Show Crosshair",  type: "checkbox", default: true },
                 { id: "style",         label: "Style",            type: "select",   default: "x",
@@ -3041,6 +3033,7 @@
             },
             {
               name: "Triggerbot (Autoshoot)",
+              description: MODULE_DESCRIPTIONS["Triggerbot (Autoshoot)"],
               settings: [
                 { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
@@ -3054,6 +3047,7 @@
             },
             {
               name: "Aimbot",
+              description: MODULE_DESCRIPTIONS["Aimbot"],
               settings: [
                 { id: "enabled",             label: "Enabled",               type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",      type: "checkbox", default: true },
@@ -3078,22 +3072,11 @@
       title: "Gamemode Specific",
       groups: [
         {
-          name: "Classic",
-          modules: ["Classic Auto Buy", "Classic Streak Manager", "Classic Speed Round"],
-        },
-        {
-          name: "Capture The Flag",
-          modules: ["Flag Pathing", "Flag Return Alert", "Carrier Tracker"],
-        },
-        {
-          name: "Tag: Domination",
-          modules: ["Zone Priority", "Tag Timer Overlay", "Defense Rotation"],
-        },
-        {
           name: "Draw It",
           modules: [
             {
               name: "Answer Reveal",
+              description: MODULE_DESCRIPTIONS["Answer Reveal"],
               settings: [
                 {
                   id: "selectorMode",
@@ -3109,6 +3092,7 @@
             },
             {
               name: "Answer Popup",
+              description: MODULE_DESCRIPTIONS["Answer Popup"],
               settings: [
                 {
                   id: "preset",
@@ -3882,7 +3866,7 @@
   configMenu.innerHTML = `
     <div class="zyrox-config-header">
       <div class="zyrox-config-title">Module Config</div>
-      <div class="zyrox-config-sub">Edit settings</div>
+      <div class="zyrox-config-sub">Configure this module.</div>
     </div>
     <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
     <div class="zyrox-config-body">
@@ -4253,6 +4237,12 @@
       .flatMap((group) => group.modules || [])
       .find((mod) => typeof mod === "object" && mod && mod.name === moduleName);
     return found || null;
+  }
+
+  function getModuleDescription(moduleName) {
+    const layout = getModuleLayoutConfig(moduleName);
+    if (layout?.description) return layout.description;
+    return MODULE_DESCRIPTIONS[moduleName] || "Configure this module.";
   }
 
   function ensureModuleConfigStore() {
@@ -5231,7 +5221,7 @@
     }
 
     configTitleEl.textContent = moduleName;
-    configSubEl.textContent = "Edit settings";
+    configSubEl.textContent = getModuleDescription(moduleName);
     setBindButtonText("Set keybind");
     setCurrentBindText(cfg.keybind || null);
 
