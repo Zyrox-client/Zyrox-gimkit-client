@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.6.1
+// @version      1.7.3
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.6.1";
+    const CLIENT_VERSION = "1.7.3";
     return CLIENT_VERSION;
   }
 
@@ -1077,6 +1077,14 @@
         autoAnswerState.currentQuestionIndex = event.detail.data.value;
         break;
     }
+  });
+
+  socketManager.addEventListener("blueboatMessage", (event) => {
+    if (!answerPopupState.enabled) return;
+    if (event.detail?.key !== "STATE_UPDATE") return;
+    const answers = extractDrawItAnswerCandidates(event.detail.data);
+    if (!answers.length) return;
+    showAnswerPopup(answers[answers.length - 1]);
   });
 
   answerInterval = setInterval(() => {
@@ -4216,6 +4224,123 @@
 
   function refreshAutoAnswerLoopIfEnabled() {
     if (state.enabledModules.has("Auto Answer")) startAutoAnswer();
+  }
+
+  const answerPopupState = {
+    enabled: false,
+    container: null,
+    timeoutId: null,
+    lastAnswer: "",
+    lastShownAt: 0,
+  };
+
+  function getAnswerPopupConfig() {
+    const cfg = moduleCfg("Answer Popup");
+    return {
+      title: String(cfg.title ?? "Draw It Answer"),
+      prefix: String(cfg.prefix ?? "Answer:"),
+      durationMs: Math.max(400, Number(cfg.durationMs) || 2600),
+      background: String(cfg.background ?? "#121525"),
+      accent: String(cfg.accent ?? "#00e5ff"),
+      textColor: String(cfg.textColor ?? "#ffffff"),
+    };
+  }
+
+  function ensureAnswerPopupContainer() {
+    if (answerPopupState.container?.isConnected) return answerPopupState.container;
+    const popup = document.createElement("div");
+    popup.className = "zyrox-answer-popup";
+    popup.style.cssText = [
+      "position:fixed",
+      "left:50%",
+      "top:92px",
+      "transform:translate(-50%, -18px)",
+      "min-width:260px",
+      "max-width:min(86vw,640px)",
+      "padding:12px 14px",
+      "border-radius:12px",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+      "z-index:2147483647",
+      "opacity:0",
+      "pointer-events:none",
+      "transition:opacity .18s ease, transform .18s ease",
+      "box-shadow:0 14px 34px rgba(0,0,0,.45)",
+      "border:1px solid rgba(255,255,255,.14)",
+      "display:none",
+      "white-space:normal",
+      "overflow-wrap:anywhere",
+    ].join(";");
+    document.documentElement.appendChild(popup);
+    answerPopupState.container = popup;
+    return popup;
+  }
+
+  function showAnswerPopup(answerText) {
+    if (!answerPopupState.enabled) return;
+    const answer = String(answerText || "").trim();
+    if (!answer) return;
+    const now = Date.now();
+    if (answer === answerPopupState.lastAnswer && now - answerPopupState.lastShownAt < 700) return;
+    answerPopupState.lastAnswer = answer;
+    answerPopupState.lastShownAt = now;
+
+    const popup = ensureAnswerPopupContainer();
+    const cfg = getAnswerPopupConfig();
+    popup.style.background = cfg.background;
+    popup.style.color = cfg.textColor;
+    popup.style.borderLeft = `4px solid ${cfg.accent}`;
+    popup.innerHTML = `
+      <div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:4px;">${cfg.title}</div>
+      <div style="font-size:16px;font-weight:700;line-height:1.25;">${cfg.prefix} <span style="color:${cfg.accent};">${answer}</span></div>
+    `;
+
+    popup.style.display = "block";
+    popup.style.opacity = "1";
+    popup.style.transform = "translate(-50%, 0)";
+    if (answerPopupState.timeoutId) clearTimeout(answerPopupState.timeoutId);
+    answerPopupState.timeoutId = setTimeout(() => {
+      popup.style.opacity = "0";
+      popup.style.transform = "translate(-50%, -18px)";
+      setTimeout(() => {
+        if (popup.style.opacity === "0") popup.style.display = "none";
+      }, 180);
+    }, cfg.durationMs);
+  }
+
+  function extractDrawItAnswerCandidates(stateUpdateData) {
+    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
+    const answers = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
+      for (const item of row.value) {
+        const directKey = item?.key;
+        const nestedKey = item?.value?.key;
+        const fieldKey = directKey ?? nestedKey;
+        const directValue = item?.value;
+        const nestedValue = item?.value?.value;
+        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
+        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
+        const answer = fieldValue.trim();
+        if (answer) answers.push(answer);
+      }
+    }
+    return answers;
+  }
+
+  function startAnswerPopup() {
+    answerPopupState.enabled = true;
+  }
+
+  function stopAnswerPopup() {
+    answerPopupState.enabled = false;
+    if (answerPopupState.timeoutId) {
+      clearTimeout(answerPopupState.timeoutId);
+      answerPopupState.timeoutId = null;
+    }
+    if (answerPopupState.container) {
+      answerPopupState.container.style.opacity = "0";
+      answerPopupState.container.style.display = "none";
+    }
   }
 
   function closeConfig() {
