@@ -91,8 +91,10 @@
                 if (!fieldKey) continue;
 
                 if (fieldKey !== 'term') continue;
-                if (typeof fieldValue !== 'string' || !fieldValue.trim()) continue;
-                console.log('[RawDump:ANSWER_CANDIDATE] type=DRAW_MODE_ROUND field=term');
+                if (typeof fieldValue !== 'string') continue;
+                const answer = fieldValue.trim();
+                if (!answer) continue;
+                console.log(answer);
             }
         }
     }
