@@ -5,7 +5,7 @@
 // @match       https://www.gimkit.com/join*
 // @run-at      document-start
 // @grant       none
-// @version     1.2.0
+// @version     1.3.0
 // ==/UserScript==
 
 (function () {
@@ -15,7 +15,6 @@
     const ALWAYS_DUMP = new Set(["PLAYER_JOINS_STATIC_STATE", "DRAW_MODE_FEED_ITEM"]);
     // Skip these entirely
     const SKIP = new Set(["DRAW_MODE_LD"]);
-    const LOG_DUPLICATES = false;
 
     // ── Decoder (same as before) ─────────────────────────────────────────────────
     function bbDecode(buffer) {
@@ -78,15 +77,20 @@
     }
 
     function logAnswerCandidates(stateUpdateData) {
-        if (!Array.isArray(stateUpdateData)) return;
+        const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
 
-        for (const row of stateUpdateData) {
+        for (const row of rows) {
             if (!row || typeof row !== 'object') continue;
             if (!Array.isArray(row.value)) continue;
 
             for (const item of row.value) {
-                const fieldKey = item?.value?.key;
-                const fieldValue = item?.value?.value;
+                const directKey = item?.key;
+                const nestedKey = item?.value?.key;
+                const fieldKey = directKey ?? nestedKey;
+
+                const directValue = item?.value;
+                const nestedValue = item?.value?.value;
+                const fieldValue = typeof nestedValue === 'undefined' ? directValue : nestedValue;
                 if (!fieldKey) continue;
 
                 const marker = `type=${row.type || 'unknown'} field=${fieldKey}`;
@@ -97,25 +101,6 @@
                 }
             }
         }
-    }
-
-    function getRoundAnswer(stateUpdatePayload) {
-        if (!Array.isArray(stateUpdatePayload)) return null;
-
-        for (const entry of stateUpdatePayload) {
-            if (!entry || entry.type !== "DRAW_MODE_ROUND") continue;
-            if (!Array.isArray(entry.value)) continue;
-
-            for (const roundField of entry.value) {
-                const key = roundField?.value?.key;
-                if (key !== "term") continue;
-
-                const answer = roundField?.value?.value;
-                if (typeof answer === "string" && answer.trim()) return answer;
-            }
-        }
-
-        return null;
     }
 
     // ── Hook ─────────────────────────────────────────────────────────────────────
