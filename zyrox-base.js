@@ -2664,6 +2664,7 @@
   function getAnswerPopupConfig() {
     const defaults = {
       preset: "default",
+      text: "answer",
       durationMs: 2600,
       accent: "#ff4a4a",
       textColor: "#ffffff",
@@ -2681,6 +2682,7 @@
       globalPreset: getGlobalPresetName(),
       preset: selectedPreset,
       effectivePreset: effectivePresetName,
+      text: String(cfg.text ?? defaults.text),
       durationMs: Math.max(
         400,
         Number(usePresetOnly ? preset.durationMs : (cfg.durationMs ?? preset.durationMs ?? defaults.durationMs)) || defaults.durationMs,
@@ -2737,10 +2739,8 @@
     popup.style.borderLeft = `4px solid ${cfg.accent}`;
     popup.style.border = "1px solid rgba(255,255,255,.14)";
     popup.style.boxShadow = "0 14px 34px rgba(0,0,0,.45)";
-    popup.innerHTML = `
-      <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:5px;">${cfg.globalPreset} ${cfg.effectivePreset}</div>
-      <div style="font-size:16px;font-weight:700;line-height:1.25;"><span style="color:${cfg.accent};">${answer}</span></div>
-    `;
+    const label = cfg.text.trim();
+    popup.innerHTML = `<div style="font-size:16px;font-weight:700;line-height:1.25;">${label ? `${label}: ` : ""}<span style="color:${cfg.accent};">${answer}</span></div>`;
 
     popup.style.display = "block";
     popup.style.opacity = "1";
@@ -2764,10 +2764,8 @@
     answerPopupState.container.style.background = cfg.background;
     answerPopupState.container.style.color = cfg.textColor;
     answerPopupState.container.style.borderLeft = `4px solid ${cfg.accent}`;
-    answerPopupState.container.innerHTML = `
-      <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:5px;">${cfg.globalPreset} ${cfg.effectivePreset}</div>
-      <div style="font-size:16px;font-weight:700;line-height:1.25;"><span style="color:${cfg.accent};">${answer}</span></div>
-    `;
+    const label = cfg.text.trim();
+    answerPopupState.container.innerHTML = `<div style="font-size:16px;font-weight:700;line-height:1.25;">${label ? `${label}: ` : ""}<span style="color:${cfg.accent};">${answer}</span></div>`;
   }
 
   function startAnswerPopup() {
@@ -3001,6 +2999,7 @@
                     { value: "grayscale", label: "Grayscale" },
                   ],
                 },
+                { id: "text", label: "Popup Text", type: "text", default: "answer" },
                 { id: "durationMs", label: "Display Duration", type: "slider", min: 600, max: 8000, step: 100, default: 2600, unit: "ms" },
                 { id: "accent", label: "Accent Color", type: "color", default: "#ff4a4a" },
                 { id: "textColor", label: "Text Color", type: "color", default: "#ffffff" },
@@ -5292,6 +5291,9 @@
 
   function applyPreset(presetName) {
     state.globalPreset = normalizePopupPresetName(presetName || "default");
+    const popupCfg = moduleCfg("Answer Popup");
+    popupCfg.preset = state.globalPreset;
+    applyAnswerPopupPreset(popupCfg, state.globalPreset);
     const preset = (() => {
       if (state.globalPreset === "green") {
         return {
