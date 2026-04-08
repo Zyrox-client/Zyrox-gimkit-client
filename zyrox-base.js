@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.6.6
+// @version      1.6.7
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -377,7 +377,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.6.6";
+    const CLIENT_VERSION = "1.6.7";
     return CLIENT_VERSION;
   }
 
@@ -2629,10 +2629,27 @@
     lastShownAt: 0,
   };
 
+  const ANSWER_POPUP_PRESETS = {
+    default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600 },
+    ice: { accent: "#6cd8ff", textColor: "#eaf7ff", durationMs: 2400 },
+    neon: { accent: "#39ff88", textColor: "#dcffe9", durationMs: 2300 },
+    gold: { accent: "#ffd166", textColor: "#fff3d6", durationMs: 2800 },
+  };
+
+  function applyAnswerPopupPreset(cfg, presetName) {
+    const name = String(presetName || "default");
+    const preset = ANSWER_POPUP_PRESETS[name] || ANSWER_POPUP_PRESETS.default;
+    cfg.preset = name;
+    cfg.accent = preset.accent;
+    cfg.textColor = preset.textColor;
+    cfg.durationMs = preset.durationMs;
+  }
+
   function getAnswerPopupConfig() {
     const defaults = {
+      preset: "default",
       durationMs: 2600,
-      accent: "#00e5ff",
+      accent: "#ff4a4a",
       textColor: "#ffffff",
     };
     let cfg = defaults;
@@ -2640,10 +2657,12 @@
       const saved = state.moduleConfig.get("Answer Popup");
       if (saved && typeof saved === "object") cfg = { ...defaults, ...saved };
     }
+    const preset = ANSWER_POPUP_PRESETS[String(cfg.preset || "default")] || ANSWER_POPUP_PRESETS.default;
     return {
-      durationMs: Math.max(400, Number(cfg.durationMs) || defaults.durationMs),
-      accent: String(cfg.accent ?? defaults.accent),
-      textColor: String(cfg.textColor ?? defaults.textColor),
+      preset: String(cfg.preset || "default"),
+      durationMs: Math.max(400, Number(cfg.durationMs) || preset.durationMs || defaults.durationMs),
+      accent: String(cfg.accent ?? preset.accent ?? defaults.accent),
+      textColor: String(cfg.textColor ?? preset.textColor ?? defaults.textColor),
     };
   }
 
@@ -2925,8 +2944,20 @@
             {
               name: "Answer Popup",
               settings: [
+                {
+                  id: "preset",
+                  label: "Preset",
+                  type: "select",
+                  default: "default",
+                  options: [
+                    { value: "default", label: "Default (Red)" },
+                    { value: "ice", label: "Ice" },
+                    { value: "neon", label: "Neon" },
+                    { value: "gold", label: "Gold" },
+                  ],
+                },
                 { id: "durationMs", label: "Display Duration", type: "slider", min: 600, max: 8000, step: 100, default: 2600, unit: "ms" },
-                { id: "accent", label: "Accent Color", type: "color", default: "#00e5ff" },
+                { id: "accent", label: "Accent Color", type: "color", default: "#ff4a4a" },
                 { id: "textColor", label: "Text Color", type: "color", default: "#ffffff" },
               ],
             },
@@ -4097,6 +4128,7 @@
       state.enabledModules.add(moduleName);
       if (moduleName === "Auto Answer") startAutoAnswer();
     }
+    saveSettings();
   }
 
   // ---------------------------------------------------------------------------
@@ -4282,6 +4314,7 @@
         setCurrentBindText(null);
         state.listeningForBind = null;
         setBindButtonText("Set keybind");
+        saveSettings();
       });
     }
 
@@ -4507,6 +4540,7 @@
 
       const syncEsp = () => {
         window.__zyroxEspConfig = { ...cfg };
+        saveSettings();
       };
       syncEsp();
       const applyValueTextColor = () => {
@@ -4807,7 +4841,10 @@
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxTriggerAssistConfig = { ...cfg };
 
-      const syncTriggerAssist = () => { window.__zyroxTriggerAssistConfig = { ...cfg }; };
+      const syncTriggerAssist = () => {
+        window.__zyroxTriggerAssistConfig = { ...cfg };
+        saveSettings();
+      };
       syncTriggerAssist();
 
       for (const setting of moduleLayout?.settings || []) {
@@ -4854,7 +4891,10 @@
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxAutoAimConfig = { ...cfg };
 
-      const syncAutoAim = () => { window.__zyroxAutoAimConfig = { ...cfg }; };
+      const syncAutoAim = () => {
+        window.__zyroxAutoAimConfig = { ...cfg };
+        saveSettings();
+      };
       syncAutoAim();
 
       for (const setting of moduleLayout?.settings || []) {
@@ -4925,6 +4965,7 @@
                   window.__zyroxAutoAnswer?.start(newVal);
                 }
               }
+              saveSettings();
             });
           }
         }
@@ -4940,6 +4981,7 @@
           if (settingInput) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
+              saveSettings();
             });
           }
         }
@@ -4961,6 +5003,11 @@
           if (settingInput) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = String(event.target.value);
+              if (moduleName === "Answer Popup" && setting.id === "preset") {
+                applyAnswerPopupPreset(cfg, cfg[setting.id]);
+                openConfig(moduleName);
+              }
+              saveSettings();
             });
           }
         }
@@ -4975,6 +5022,23 @@
           if (settingInput) {
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value || "#ffffff");
+              saveSettings();
+            });
+          }
+        }
+
+        if (setting.type === "text") {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = String(setting.default ?? "");
+          const safeValue = String(cfg[setting.id]).replace(/"/g, "&quot;");
+          settingCard.innerHTML = `
+            <label>${setting.label}</label>
+            <input type="text" class="set-module-setting-text" data-setting-id="${setting.id}" value="${safeValue}" />
+          `;
+          const settingInput = settingCard.querySelector(".set-module-setting-text");
+          if (settingInput) {
+            settingInput.addEventListener("input", (event) => {
+              cfg[setting.id] = String(event.target.value ?? "");
+              saveSettings();
             });
           }
         }
@@ -5060,6 +5124,7 @@
       loosePositions: state.loosePositions,
       loosePanelPositions: state.loosePanelPositions,
       collapsedPanels: state.collapsedPanels,
+      enabledModules: Array.from(state.enabledModules),
       moduleConfig: Array.from(ensureModuleConfigStore().entries()),
     };
   }
@@ -5521,6 +5586,7 @@
     settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
     setFooterText();
     state.listeningForMenuBind = false;
+    saveSettings();
   });
 
   presetButtons.forEach((btn) => {
@@ -5809,6 +5875,7 @@
   document.body.appendChild(root);
   document.body.appendChild(configBackdrop);
 
+  let pendingEnabledModules = [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -5881,6 +5948,9 @@
         if (savedModuleConfig) {
           state.moduleConfig = new Map(savedModuleConfig);
         }
+        if (Array.isArray(saved.enabledModules)) {
+          pendingEnabledModules = saved.enabledModules.filter((name) => typeof name === "string");
+        }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         setFooterText();
       }
@@ -5894,6 +5964,12 @@
   applyAppearance();
   setDisplayMode(state.displayMode);
   applySearchFilter();
+  for (const moduleName of pendingEnabledModules) {
+    const moduleInstance = state.modules.get(moduleName);
+    if (!moduleInstance || moduleInstance.enabled) continue;
+    if (isModuleHiddenByWorkState(moduleName)) continue;
+    toggleModule(moduleName);
+  }
 
   const isTypingTarget = (target) => {
     if (!(target instanceof Element)) return false;
@@ -5931,6 +6007,7 @@
       settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
       setFooterText();
       state.listeningForMenuBind = false;
+      saveSettings();
       return;
     }
 
@@ -5943,6 +6020,7 @@
       setCurrentBindText(cfg.keybind);
       setBindButtonText("Set keybind");
       state.listeningForBind = null;
+      saveSettings();
       return;
     }
 
