@@ -2,7 +2,7 @@
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
 // @version      1.7.7
-// @description  Modern UI/menu shell for Zyrox client
+// @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
