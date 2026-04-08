@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.6.7
+// @version      1.6.8
 // @description  Modern UI/menu shell for Zyrox client
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -2627,18 +2627,34 @@
     timeoutId: null,
     lastAnswer: "",
     lastShownAt: 0,
+    lastRenderedAnswer: "",
   };
 
   const ANSWER_POPUP_PRESETS = {
-    default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600 },
-    ice: { accent: "#6cd8ff", textColor: "#eaf7ff", durationMs: 2400 },
-    neon: { accent: "#39ff88", textColor: "#dcffe9", durationMs: 2300 },
-    gold: { accent: "#ffd166", textColor: "#fff3d6", durationMs: 2800 },
+    default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600, background: "rgba(8, 10, 14, 0.92)" },
+    green: { accent: "#2dff75", textColor: "#e8fff1", durationMs: 2400, background: "rgba(7, 20, 12, 0.92)" },
+    ice: { accent: "#6cd8ff", textColor: "#eaf7ff", durationMs: 2400, background: "rgba(8, 17, 24, 0.92)" },
+    grayscale: { accent: "#d4d4d4", textColor: "#f1f1f1", durationMs: 2600, background: "rgba(18, 18, 18, 0.92)" },
   };
 
+  function normalizePopupPresetName(name) {
+    const key = String(name || "default").toLowerCase();
+    return Object.prototype.hasOwnProperty.call(ANSWER_POPUP_PRESETS, key) ? key : "default";
+  }
+
+  function getGlobalPresetName() {
+    const name = typeof state !== "undefined" ? state?.globalPreset : "default";
+    return normalizePopupPresetName(name || "default");
+  }
+
+  function getEffectivePopupPresetName(selectedPresetName) {
+    const selected = normalizePopupPresetName(selectedPresetName);
+    return selected === "default" ? getGlobalPresetName() : selected;
+  }
+
   function applyAnswerPopupPreset(cfg, presetName) {
-    const name = String(presetName || "default");
-    const preset = ANSWER_POPUP_PRESETS[name] || ANSWER_POPUP_PRESETS.default;
+    const name = normalizePopupPresetName(presetName);
+    const preset = ANSWER_POPUP_PRESETS[getEffectivePopupPresetName(name)] || ANSWER_POPUP_PRESETS.default;
     cfg.preset = name;
     cfg.accent = preset.accent;
     cfg.textColor = preset.textColor;
@@ -2657,12 +2673,17 @@
       const saved = state.moduleConfig.get("Answer Popup");
       if (saved && typeof saved === "object") cfg = { ...defaults, ...saved };
     }
-    const preset = ANSWER_POPUP_PRESETS[String(cfg.preset || "default")] || ANSWER_POPUP_PRESETS.default;
+    const selectedPreset = normalizePopupPresetName(cfg.preset || "default");
+    const effectivePresetName = getEffectivePopupPresetName(selectedPreset);
+    const preset = ANSWER_POPUP_PRESETS[effectivePresetName] || ANSWER_POPUP_PRESETS.default;
     return {
-      preset: String(cfg.preset || "default"),
+      globalPreset: getGlobalPresetName(),
+      preset: selectedPreset,
+      effectivePreset: effectivePresetName,
       durationMs: Math.max(400, Number(cfg.durationMs) || preset.durationMs || defaults.durationMs),
       accent: String(cfg.accent ?? preset.accent ?? defaults.accent),
       textColor: String(cfg.textColor ?? preset.textColor ?? defaults.textColor),
+      background: String(preset.background ?? ANSWER_POPUP_PRESETS.default.background),
     };
   }
 
@@ -2703,15 +2724,19 @@
     if (answer === answerPopupState.lastAnswer && now - answerPopupState.lastShownAt < 700) return;
     answerPopupState.lastAnswer = answer;
     answerPopupState.lastShownAt = now;
+    answerPopupState.lastRenderedAnswer = answer;
 
     const popup = ensureAnswerPopupContainer();
     const cfg = getAnswerPopupConfig();
-    popup.style.background = "transparent";
+    popup.style.background = cfg.background;
     popup.style.color = cfg.textColor;
-    popup.style.borderLeft = "";
-    popup.style.border = "none";
-    popup.style.boxShadow = "none";
-    popup.innerHTML = `<div style="font-size:20px;font-weight:800;line-height:1.2;color:${cfg.accent};">${answer}</div>`;
+    popup.style.borderLeft = `4px solid ${cfg.accent}`;
+    popup.style.border = "1px solid rgba(255,255,255,.14)";
+    popup.style.boxShadow = "0 14px 34px rgba(0,0,0,.45)";
+    popup.innerHTML = `
+      <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:5px;">${cfg.globalPreset} ${cfg.effectivePreset}</div>
+      <div style="font-size:16px;font-weight:700;line-height:1.25;"><span style="color:${cfg.accent};">${answer}</span></div>
+    `;
 
     popup.style.display = "block";
     popup.style.opacity = "1";
@@ -2724,6 +2749,21 @@
         if (popup.style.opacity === "0") popup.style.display = "none";
       }, 180);
     }, cfg.durationMs);
+  }
+
+  function refreshVisibleAnswerPopup() {
+    if (!answerPopupState.container) return;
+    if (answerPopupState.container.style.display === "none") return;
+    const answer = String(answerPopupState.lastRenderedAnswer || "").trim();
+    if (!answer) return;
+    const cfg = getAnswerPopupConfig();
+    answerPopupState.container.style.background = cfg.background;
+    answerPopupState.container.style.color = cfg.textColor;
+    answerPopupState.container.style.borderLeft = `4px solid ${cfg.accent}`;
+    answerPopupState.container.innerHTML = `
+      <div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.75;margin-bottom:5px;">${cfg.globalPreset} ${cfg.effectivePreset}</div>
+      <div style="font-size:16px;font-weight:700;line-height:1.25;"><span style="color:${cfg.accent};">${answer}</span></div>
+    `;
   }
 
   function startAnswerPopup() {
@@ -2740,6 +2780,7 @@
       answerPopupState.container.style.opacity = "0";
       answerPopupState.container.style.display = "none";
     }
+    answerPopupState.lastRenderedAnswer = "";
   }
 
   const MODULE_BEHAVIORS = {
@@ -2951,9 +2992,9 @@
                   default: "default",
                   options: [
                     { value: "default", label: "Default (Red)" },
+                    { value: "green", label: "Green" },
                     { value: "ice", label: "Ice" },
-                    { value: "neon", label: "Neon" },
-                    { value: "gold", label: "Gold" },
+                    { value: "grayscale", label: "Grayscale" },
                   ],
                 },
                 { id: "durationMs", label: "Display Duration", type: "slider", min: 600, max: 8000, step: 100, default: 2600, unit: "ms" },
@@ -2989,6 +3030,7 @@
     },
     loosePanelPositions: {},
     mergedRootPosition: { left: 20, top: 28 },
+    globalPreset: "default",
     modules: new Map(),
   };
 
@@ -5007,6 +5049,7 @@
                 applyAnswerPopupPreset(cfg, cfg[setting.id]);
                 openConfig(moduleName);
               }
+              if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
               saveSettings();
             });
           }
@@ -5022,6 +5065,7 @@
           if (settingInput) {
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value || "#ffffff");
+              if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
               saveSettings();
             });
           }
@@ -5039,21 +5083,6 @@
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value ?? "");
               saveSettings();
-            });
-          }
-        }
-
-        if (setting.type === "text") {
-          if (cfg[setting.id] === undefined) cfg[setting.id] = String(setting.default ?? "");
-          const safeValue = String(cfg[setting.id]).replace(/"/g, "&quot;");
-          settingCard.innerHTML = `
-            <label>${setting.label}</label>
-            <input type="text" class="set-module-setting-text" data-setting-id="${setting.id}" value="${safeValue}" />
-          `;
-          const settingInput = settingCard.querySelector(".set-module-setting-text");
-          if (settingInput) {
-            settingInput.addEventListener("input", (event) => {
-              cfg[setting.id] = String(event.target.value ?? "");
             });
           }
         }
@@ -5081,6 +5110,7 @@
   function collectSettings() {
     return {
       toggleKey: CONFIG.toggleKey,
+      globalPreset: state.globalPreset,
       searchAutofocus: searchAutofocusInput.checked,
       hideBrokenModules: hideBrokenModulesInput.checked,
       accent: accentInput.value,
@@ -5257,8 +5287,9 @@
   }
 
   function applyPreset(presetName) {
+    state.globalPreset = normalizePopupPresetName(presetName || "default");
     const preset = (() => {
-      if (presetName === "green") {
+      if (state.globalPreset === "green") {
         return {
           accent: "#2dff75", shellStart: "#2dff75", shellEnd: "#03130a", topbar: "#35d96d", border: "#5dff9a",
           outline: "#37d878", text: "#d7ffe6", muted: "#88b79b", soft: "#a8ffd0", search: "#e6fff0", icon: "#d7ffe9",
@@ -5271,7 +5302,7 @@
           font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
         };
       }
-      if (presetName === "ice") {
+      if (state.globalPreset === "ice") {
         return {
           accent: "#6cd8ff", shellStart: "#6cd8ff", shellEnd: "#07131a", topbar: "#58bff1", border: "#8ae4ff",
           outline: "#6fbce8", text: "#d7edff", muted: "#8ea7bd", soft: "#b8e5ff", search: "#e7f5ff", icon: "#dff3ff",
@@ -5284,7 +5315,7 @@
           font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
         };
       }
-      if (presetName === "grayscale") {
+      if (state.globalPreset === "grayscale") {
         return {
           accent: "#d3d3d3", shellStart: "#7a7a7a", shellEnd: "#0a0a0a", topbar: "#8d8d8d", border: "#b1b1b1",
           outline: "#9a9a9a", text: "#dddddd", muted: "#9a9a9a", soft: "#c9c9c9", search: "#f1f1f1", icon: "#f5f5f5",
@@ -5343,6 +5374,8 @@
     settingsCardBgInput.value = preset.settingsCardBg;
     espValueTextColorInput.value = preset.espValueTextColor;
     applyAppearance();
+    refreshVisibleAnswerPopup();
+    saveSettings();
   }
 
   function applyAppearance() {
@@ -5710,6 +5743,7 @@
     state.searchAutofocus = true;
     hideBrokenModulesInput.checked = true;
     state.hideBrokenModules = true;
+    state.globalPreset = "default";
     scaleInput.value = "100";
     radiusInput.value = "14";
     blurInput.value = "10";
@@ -5882,6 +5916,7 @@
       const saved = JSON.parse(raw);
       if (saved && typeof saved === "object") {
         if (saved.toggleKey) CONFIG.toggleKey = saved.toggleKey;
+        if (typeof saved.globalPreset === "string") state.globalPreset = normalizePopupPresetName(saved.globalPreset);
         if (typeof saved.searchAutofocus === "boolean") {
           state.searchAutofocus = saved.searchAutofocus;
           searchAutofocusInput.checked = saved.searchAutofocus;
