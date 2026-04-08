@@ -28,6 +28,7 @@ If you have any questions or feature requests leave them [here](https://github.c
 ## Files
 - `example.js`: Reference/example userscript hacked client.
 - `zyrox-base.js`: The main userscript file.
+- `classic-logger.js`: Packet logger helper for classic-mode auto-answer development (Colyseus/2D).
 
 <br>
 
