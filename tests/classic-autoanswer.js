@@ -266,6 +266,25 @@
     return state.questions.find((q) => q?._id === currentId || q?.id === currentId) || null;
   }
 
+  function getNextUnansweredQuestion() {
+    const current = getCurrentQuestion();
+    if (current) {
+      const currentId = current?._id || current?.id;
+      if (currentId && !state.sentQuestionIds.has(currentId)) return current;
+    }
+
+    for (const questionId of state.questionIdList) {
+      if (!questionId || state.sentQuestionIds.has(questionId)) continue;
+      const match = state.questions.find((q) => q?._id === questionId || q?.id === questionId);
+      if (match) return match;
+    }
+
+    return state.questions.find((q) => {
+      const id = q?._id || q?.id;
+      return id && !state.sentQuestionIds.has(id);
+    }) || null;
+  }
+
   function sendBlueboatMessage(key, data) {
     const socket = [...state.sockets].at(-1);
     if (!socket || socket.readyState !== 1 || !state.roomId) return false;
@@ -286,18 +305,31 @@
   }
 
   function answerCurrentQuestionOnce() {
-    const question = getCurrentQuestion();
-    if (!question) return;
+    const question = getNextUnansweredQuestion();
+    if (!question) {
+      return { ok: false, reason: "NO_QUESTION_AVAILABLE" };
+    }
 
     const answer = parseQuestionAnswer(question);
     const questionId = question?._id || question?.id;
-    if (!answer || !questionId || state.sentQuestionIds.has(questionId)) return;
+    if (!questionId) {
+      return { ok: false, reason: "MISSING_QUESTION_ID" };
+    }
+    if (state.sentQuestionIds.has(questionId)) {
+      return { ok: false, reason: "ALREADY_ANSWERED", questionId };
+    }
+    if (!answer) {
+      return { ok: false, reason: "NO_ANSWER_FOUND", questionId };
+    }
 
     const ok = sendBlueboatMessage("QUESTION_ANSWERED", { questionId, answer });
     if (ok) {
       state.sentQuestionIds.add(questionId);
       console.log(LOG_PREFIX, "Sent single QUESTION_ANSWERED", { questionId, answer });
+      return { ok: true, questionId, answer };
     }
+
+    return { ok: false, reason: "SEND_FAILED", questionId, answer };
   }
 
   function applyBlueboatStateUpdate(packet) {
@@ -383,7 +415,7 @@
 
     window.__zyroxClassicAutoAnswer = {
       answerOne() {
-        answerCurrentQuestionOnce();
+        return answerCurrentQuestionOnce();
       },
       getState() {
         return {
