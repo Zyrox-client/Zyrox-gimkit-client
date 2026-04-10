@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Zyrox classic auto-answer
 // @namespace    https://github.com/zyrox
-// @version      0.2.0
-// @description  Automatically answers questions in Gimkit Classic mode (Blueboat transport).
+// @version      0.3.0
+// @description  Tracks Classic mode questions and exposes a one-shot answer command.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
@@ -285,7 +285,7 @@
     return true;
   }
 
-  function autoAnswerTick() {
+  function answerCurrentQuestionOnce() {
     const question = getCurrentQuestion();
     if (!question) return;
 
@@ -296,7 +296,7 @@
     const ok = sendBlueboatMessage("QUESTION_ANSWERED", { questionId, answer });
     if (ok) {
       state.sentQuestionIds.add(questionId);
-      console.log(LOG_PREFIX, "Sent QUESTION_ANSWERED", { questionId, answer });
+      console.log(LOG_PREFIX, "Sent single QUESTION_ANSWERED", { questionId, answer });
     }
   }
 
@@ -321,11 +321,7 @@
 
   function onDecodedPacket(decoded) {
     if (!decoded) return;
-
-    if (decoded.transport === "colyseus") {
-      autoAnswerTick();
-      return;
-    }
+    if (decoded.transport === "colyseus") return;
 
     if (decoded.transport === "blueboat-binary") {
       if (typeof decoded.eventName === "string" && decoded.eventName.startsWith("message-")) {
@@ -339,12 +335,7 @@
         applyBlueboatStateUpdate(decoded.payload);
       }
 
-      autoAnswerTick();
       return;
-    }
-
-    if (decoded.transport === "engine.io/socket.io") {
-      autoAnswerTick();
     }
   }
 
@@ -390,7 +381,22 @@
       }
     };
 
-    console.log(LOG_PREFIX, "Ready. Auto-answer enabled for Classic mode (Blueboat).");
+    window.__zyroxClassicAutoAnswer = {
+      answerOne() {
+        answerCurrentQuestionOnce();
+      },
+      getState() {
+        return {
+          roomId: state.roomId,
+          questions: state.questions.length,
+          questionListSize: state.questionIdList.length,
+          currentQuestionIndex: state.currentQuestionIndex,
+          answeredCount: state.sentQuestionIds.size,
+        };
+      },
+    };
+
+    console.log(LOG_PREFIX, "Ready. Run __zyroxClassicAutoAnswer.answerOne() in console to send one answer.");
   }
 
   install();
