@@ -430,14 +430,35 @@
       });
 
       // Expose start/stop so the Zyrox module toggle controls the interval
-      let _intervalId = null;
+      let _timerId = null;
+      let _running = false;
+      let _baseSpeed = 1000;
+      const BLUEBOAT_EXTRA_DELAY_MS = 300;
+
+      function getCurrentDelay() {
+        if (socketManager.transportType === "blueboat") return _baseSpeed + BLUEBOAT_EXTRA_DELAY_MS;
+        return _baseSpeed;
+      }
+
+      function scheduleNextTick() {
+        if (!_running) return;
+        const delay = Math.max(200, Number(getCurrentDelay()) || 1000);
+        _timerId = setTimeout(() => {
+          answerQuestion();
+          scheduleNextTick();
+        }, delay);
+      }
+
       window.__zyroxAutoAnswer = {
         start(speed = 1000) {
-          if (_intervalId) clearInterval(_intervalId);
-          _intervalId = setInterval(answerQuestion, speed);
+          _baseSpeed = Math.max(200, Number(speed) || 1000);
+          _running = true;
+          if (_timerId) clearTimeout(_timerId);
+          scheduleNextTick();
         },
         stop() {
-          if (_intervalId) { clearInterval(_intervalId); _intervalId = null; }
+          _running = false;
+          if (_timerId) { clearTimeout(_timerId); _timerId = null; }
         },
       };
       console.log(LOG, "Page context ready, waiting for module toggle.");
