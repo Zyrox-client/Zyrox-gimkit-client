@@ -23,8 +23,24 @@
     questions: [],
     questionIdList: [],
     currentQuestionIndex: -1,
+    lastQuestionIndex: -1,
     sentQuestionIds: new Set(),
   };
+
+  function setCurrentQuestionIndex(nextIndex) {
+    if (!Number.isInteger(nextIndex)) return;
+    if (state.currentQuestionIndex !== -1 && nextIndex < state.currentQuestionIndex) {
+      state.sentQuestionIds.clear();
+      console.log(LOG_PREFIX, "Detected question index reset; cleared answered-question cache.");
+    }
+    state.lastQuestionIndex = state.currentQuestionIndex;
+    state.currentQuestionIndex = nextIndex;
+  }
+
+  function resetAnsweredCache(reason) {
+    state.sentQuestionIds.clear();
+    console.log(LOG_PREFIX, `Cleared answered-question cache (${reason}).`);
+  }
 
   function asArray(value) {
     if (Array.isArray(value)) return value;
@@ -354,15 +370,17 @@
         state.questions = Array.isArray(data?.value) ? data.value : [];
       } else if (type === "PLAYER_QUESTION_LIST") {
         state.questionIdList = data?.value?.questionList || [];
-        state.currentQuestionIndex = Number.isInteger(data?.value?.questionIndex) ? data.value.questionIndex : -1;
+        if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
+        resetAnsweredCache("PLAYER_QUESTION_LIST update");
       } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
-        state.currentQuestionIndex = Number.isInteger(data?.value) ? data.value : state.currentQuestionIndex;
+        if (Number.isInteger(data?.value)) setCurrentQuestionIndex(data.value);
       }
     } else if (key === "PLAYER_QUESTION_LIST" && data?.questionList) {
       state.questionIdList = data.questionList;
-      if (Number.isInteger(data?.questionIndex)) state.currentQuestionIndex = data.questionIndex;
+      if (Number.isInteger(data?.questionIndex)) setCurrentQuestionIndex(data.questionIndex);
+      resetAnsweredCache("PLAYER_QUESTION_LIST direct update");
     } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
-      state.currentQuestionIndex = data;
+      setCurrentQuestionIndex(data);
     } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
       state.questions = data;
     } else if (key === "QUESTION_REVEALED" && data) {
@@ -464,6 +482,7 @@
           questions: state.questions.length,
           questionListSize: state.questionIdList.length,
           currentQuestionIndex: state.currentQuestionIndex,
+          lastQuestionIndex: state.lastQuestionIndex,
           answeredCount: state.sentQuestionIds.size,
         };
       },
