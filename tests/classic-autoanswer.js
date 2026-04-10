@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox classic auto-answer
 // @namespace    https://github.com/zyrox
-// @version      0.3.0
+// @version      0.3.1
 // @description  Tracks Classic mode questions and exposes a one-shot answer command.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -25,6 +25,11 @@
     currentQuestionIndex: -1,
     sentQuestionIds: new Set(),
   };
+
+  function asArray(value) {
+    if (Array.isArray(value)) return value;
+    return value == null ? [] : [value];
+  }
 
   function msgpackDecode(buffer, startOffset = 0) {
     const view = new DataView(buffer);
@@ -307,7 +312,13 @@
   function answerCurrentQuestionOnce() {
     const question = getNextUnansweredQuestion();
     if (!question) {
-      return { ok: false, reason: "NO_QUESTION_AVAILABLE" };
+      return {
+        ok: false,
+        reason: "NO_QUESTION_AVAILABLE",
+        trackedQuestions: state.questions.length,
+        questionListSize: state.questionIdList.length,
+        currentQuestionIndex: state.currentQuestionIndex,
+      };
     }
 
     const answer = parseQuestionAnswer(question);
@@ -335,7 +346,6 @@
   function applyBlueboatStateUpdate(packet) {
     const key = packet?.key;
     const data = packet?.data;
-
     if (typeof key !== "string") return;
 
     if (key === "STATE_UPDATE") {
@@ -348,7 +358,37 @@
       } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
         state.currentQuestionIndex = Number.isInteger(data?.value) ? data.value : state.currentQuestionIndex;
       }
+    } else if (key === "PLAYER_QUESTION_LIST" && data?.questionList) {
+      state.questionIdList = data.questionList;
+      if (Number.isInteger(data?.questionIndex)) state.currentQuestionIndex = data.questionIndex;
+    } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
+      state.currentQuestionIndex = data;
+    } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
+      state.questions = data;
+    } else if (key === "QUESTION_REVEALED" && data) {
+      const q = data?.question || data;
+      const questionId = q?._id || q?.id;
+      if (questionId && !state.questions.find((item) => (item?._id || item?.id) === questionId)) {
+        state.questions.push(q);
+      }
     }
+  }
+
+  function extractBlueboatStateCandidates(payload) {
+    const candidates = [];
+    for (const item of asArray(payload)) {
+      if (!item || typeof item !== "object") continue;
+      if (typeof item.key === "string") candidates.push(item);
+      if (item.data && typeof item.data === "object" && typeof item.data.key === "string") candidates.push(item.data);
+      if (Array.isArray(item.events)) {
+        for (const eventItem of item.events) {
+          if (eventItem && typeof eventItem === "object" && typeof eventItem.key === "string") {
+            candidates.push(eventItem);
+          }
+        }
+      }
+    }
+    return candidates;
   }
 
   function onDecodedPacket(decoded) {
@@ -364,7 +404,8 @@
       }
 
       if (decoded.payload && typeof decoded.payload === "object") {
-        applyBlueboatStateUpdate(decoded.payload);
+        const candidates = extractBlueboatStateCandidates(decoded.payload);
+        for (const candidate of candidates) applyBlueboatStateUpdate(candidate);
       }
 
       return;
