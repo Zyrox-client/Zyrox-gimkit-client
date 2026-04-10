@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Zyrox classic auto-answer
 // @namespace    https://github.com/zyrox
-// @version      0.1.0
-// @description  Automatically answers questions in Gimkit Classic mode.
+// @version      0.2.0
+// @description  Automatically answers questions in Gimkit Classic mode (Blueboat transport).
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
@@ -14,10 +14,12 @@
 
   const LOG_PREFIX = "[ZyroxClassicAutoAnswer]";
   const COLYSEUS_ROOM_DATA = 13;
+  const ENGINE_PACKET_TYPES = { "0": "OPEN", "1": "CLOSE", "2": "PING", "3": "PONG", "4": "MESSAGE", "5": "UPGRADE", "6": "NOOP" };
+  const SOCKET_PACKET_TYPES = { "0": "CONNECT", "1": "DISCONNECT", "2": "EVENT", "3": "ACK", "4": "ERROR", "5": "BINARY_EVENT", "6": "BINARY_ACK" };
 
   const state = {
-    roomId: null,
     sockets: new Set(),
+    roomId: null,
     questions: [],
     questionIdList: [],
     currentQuestionIndex: -1,
@@ -156,7 +158,7 @@
       let at = part.offset;
       const str = part.value;
       for (let i = 0; i < str.length; i++) {
-        let code = str.charCodeAt(i);
+        const code = str.charCodeAt(i);
         if (code < 128) view.setUint8(at++, code);
         else if (code < 2048) {
           view.setUint8(at++, 192 | (code >> 6));
@@ -186,7 +188,7 @@
       message = second?.value;
     }
 
-    return { channel: first.value, body: message };
+    return { transport: "colyseus", channel: first.value, body: message };
   }
 
   function decodeBlueboatBinary(packet) {
@@ -202,8 +204,53 @@
     const eventPayload = Array.isArray(data) ? data[1] : data;
 
     return {
+      transport: "blueboat-binary",
+      socketPacketType: decoded.type,
       eventName,
       payload: eventPayload,
+      raw: decoded,
+    };
+  }
+
+  function decodeEngineSocketString(text) {
+    if (typeof text !== "string" || !text.length) return null;
+    if (!/^[0-6]/.test(text[0])) return null;
+
+    const engineCode = text[0];
+    let cursor = 1;
+    let socketCode = null;
+
+    if (text.length > 1 && /[0-6]/.test(text[1])) {
+      socketCode = text[1];
+      cursor = 2;
+    }
+
+    let namespace = "/";
+    if (text[cursor] === "/") {
+      const comma = text.indexOf(",", cursor);
+      if (comma !== -1) {
+        namespace = text.slice(cursor, comma);
+        cursor = comma + 1;
+      }
+    }
+
+    const payloadRaw = text.slice(cursor);
+    let payload = payloadRaw;
+    const jsonStart = payloadRaw.search(/[\[{]/);
+    if (jsonStart >= 0) {
+      const jsonCandidate = payloadRaw.slice(jsonStart);
+      try { payload = JSON.parse(jsonCandidate); } catch { payload = payloadRaw; }
+    }
+
+    return {
+      transport: "engine.io/socket.io",
+      engineCode,
+      engineType: ENGINE_PACKET_TYPES[engineCode] || "UNKNOWN",
+      socketCode,
+      socketType: socketCode ? SOCKET_PACKET_TYPES[socketCode] || "UNKNOWN" : null,
+      namespace,
+      payload,
+      raw: text,
     };
   }
 
@@ -217,25 +264,6 @@
     const currentId = state.questionIdList[state.currentQuestionIndex];
     if (!currentId) return null;
     return state.questions.find((q) => q?._id === currentId || q?.id === currentId) || null;
-  }
-
-  function applyBlueboatStateUpdate(packet) {
-    const key = packet?.key;
-    const data = packet?.data;
-
-    if (typeof key !== "string") return;
-
-    if (key === "STATE_UPDATE") {
-      const type = data?.type;
-      if (type === "GAME_QUESTIONS") {
-        state.questions = Array.isArray(data?.value) ? data.value : [];
-      } else if (type === "PLAYER_QUESTION_LIST") {
-        state.questionIdList = data?.value?.questionList || [];
-        state.currentQuestionIndex = Number.isInteger(data?.value?.questionIndex) ? data.value.questionIndex : -1;
-      } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
-        state.currentQuestionIndex = Number.isInteger(data?.value) ? data.value : state.currentQuestionIndex;
-      }
-    }
   }
 
   function sendBlueboatMessage(key, data) {
@@ -257,7 +285,7 @@
     return true;
   }
 
-  function answerCurrentQuestion() {
+  function autoAnswerTick() {
     const question = getCurrentQuestion();
     if (!question) return;
 
@@ -265,10 +293,58 @@
     const questionId = question?._id || question?.id;
     if (!answer || !questionId || state.sentQuestionIds.has(questionId)) return;
 
-    const sent = sendBlueboatMessage("QUESTION_ANSWERED", { questionId, answer });
-    if (sent) {
+    const ok = sendBlueboatMessage("QUESTION_ANSWERED", { questionId, answer });
+    if (ok) {
       state.sentQuestionIds.add(questionId);
-      console.log(LOG_PREFIX, "Answered question", { questionId, answer });
+      console.log(LOG_PREFIX, "Sent QUESTION_ANSWERED", { questionId, answer });
+    }
+  }
+
+  function applyBlueboatStateUpdate(packet) {
+    const key = packet?.key;
+    const data = packet?.data;
+
+    if (typeof key !== "string") return;
+
+    if (key === "STATE_UPDATE") {
+      const type = data?.type;
+      if (type === "GAME_QUESTIONS") {
+        state.questions = Array.isArray(data?.value) ? data.value : [];
+      } else if (type === "PLAYER_QUESTION_LIST") {
+        state.questionIdList = data?.value?.questionList || [];
+        state.currentQuestionIndex = Number.isInteger(data?.value?.questionIndex) ? data.value.questionIndex : -1;
+      } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
+        state.currentQuestionIndex = Number.isInteger(data?.value) ? data.value : state.currentQuestionIndex;
+      }
+    }
+  }
+
+  function onDecodedPacket(decoded) {
+    if (!decoded) return;
+
+    if (decoded.transport === "colyseus") {
+      autoAnswerTick();
+      return;
+    }
+
+    if (decoded.transport === "blueboat-binary") {
+      if (typeof decoded.eventName === "string" && decoded.eventName.startsWith("message-")) {
+        state.roomId = decoded.eventName.slice("message-".length);
+      }
+      if (decoded.eventName === "blueboat_SEND_MESSAGE") {
+        state.roomId = decoded.payload?.room || state.roomId;
+      }
+
+      if (decoded.payload && typeof decoded.payload === "object") {
+        applyBlueboatStateUpdate(decoded.payload);
+      }
+
+      autoAnswerTick();
+      return;
+    }
+
+    if (decoded.transport === "engine.io/socket.io") {
+      autoAnswerTick();
     }
   }
 
@@ -282,28 +358,13 @@
   async function inspectPacket(raw) {
     const normalized = await normalizeData(raw);
 
-    const colyseus = decodeColyseusPacket(normalized);
-    if (colyseus) {
-      answerCurrentQuestion();
+    if (typeof normalized === "string") {
+      onDecodedPacket(decodeEngineSocketString(normalized));
       return;
     }
 
-    const blueboatBinary = decodeBlueboatBinary(normalized);
-    if (!blueboatBinary) return;
-
-    if (typeof blueboatBinary.eventName === "string" && blueboatBinary.eventName.startsWith("message-")) {
-      state.roomId = blueboatBinary.eventName.slice("message-".length);
-    }
-
-    if (blueboatBinary.eventName === "blueboat_SEND_MESSAGE") {
-      state.roomId = blueboatBinary.payload?.room || state.roomId;
-    }
-
-    if (blueboatBinary.payload && typeof blueboatBinary.payload === "object") {
-      applyBlueboatStateUpdate(blueboatBinary.payload);
-    }
-
-    answerCurrentQuestion();
+    onDecodedPacket(decodeColyseusPacket(normalized));
+    onDecodedPacket(decodeBlueboatBinary(normalized));
   }
 
   function install() {
@@ -319,12 +380,17 @@
         state.sockets.add(this);
 
         this.addEventListener("message", (event) => {
-          inspectPacket(event.data).catch((err) => console.warn(LOG_PREFIX, "Failed to inspect packet:", err));
+          inspectPacket(event.data).catch((err) => console.warn(LOG_PREFIX, "Failed to inspect incoming packet:", err));
         });
+      }
+
+      send(data) {
+        inspectPacket(data).catch((err) => console.warn(LOG_PREFIX, "Failed to inspect outgoing packet:", err));
+        return super.send(data);
       }
     };
 
-    console.log(LOG_PREFIX, "Ready. Auto-answering Classic mode questions.");
+    console.log(LOG_PREFIX, "Ready. Auto-answer enabled for Classic mode (Blueboat).");
   }
 
   install();
