@@ -167,6 +167,7 @@
           super();
           this.socket = null;
           this.transportType = "unknown";
+          this.blueboatRoomId = null;
           this.playerId = null;
           this.install();
         }
@@ -179,27 +180,63 @@
               if (String(url || "").includes("gimkitconnect.com")) manager.registerSocket(this);
             }
             send(data) {
+              manager.onSend(data);
               super.send(data);
             }
           };
         }
         registerSocket(socket) {
           this.socket = socket;
-          this.transportType = "colyseus";
           console.log(LOG, "Registered WebSocket", socket.url);
           socket.addEventListener("message", (e) => {
-            const decoded = this.decodeColyseus(e.data);
-            if (!decoded) return;
-            this.dispatchEvent(new CustomEvent("colyseusMessage", { detail: decoded }));
-            if (decoded.type === "AUTH_ID") {
-              this.playerId = decoded.message;
-              console.log(LOG, "Got player id", this.playerId);
+            const firstByte = (() => {
+              try {
+                return new Uint8Array(e.data)[0];
+              } catch (_) {
+                return null;
+              }
+            })();
+            if (this.transportType === "unknown" && firstByte != null) {
+              this.transportType = firstByte === 4 ? "blueboat" : "colyseus";
             }
-            if (decoded.type === "DEVICES_STATES_CHANGES") {
-              const parsed = parseChangePacket(decoded.message);
-              this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parsed }));
+            if (this.transportType === "blueboat") {
+              const decoded = this.decodeBlueboat(e.data);
+              if (!decoded) return;
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: decoded }));
+              if (typeof decoded.eventName === "string" && decoded.eventName.startsWith("message-")) {
+                this.blueboatRoomId = decoded.eventName.slice("message-".length);
+              }
+            } else {
+              const decoded = this.decodeColyseus(e.data);
+              if (!decoded) return;
+              this.dispatchEvent(new CustomEvent("colyseusMessage", { detail: decoded }));
+              if (decoded.type === "AUTH_ID") {
+                this.playerId = decoded.message;
+                console.log(LOG, "Got player id", this.playerId);
+              }
+              if (decoded.type === "DEVICES_STATES_CHANGES") {
+                const parsed = parseChangePacket(decoded.message);
+                this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parsed }));
+              }
             }
           });
+        }
+        decodeBlueboat(data) {
+          const bytes = new Uint8Array(data);
+          if (!bytes.byteLength || bytes[0] !== 4) return null;
+          const decoded = msgpackDecode(data.slice(1), 0)?.value;
+          const payload = Array.isArray(decoded?.data) ? decoded.data[1] : decoded?.data;
+          return {
+            eventName: Array.isArray(decoded?.data) ? decoded.data[0] : null,
+            payload,
+          };
+        }
+        onSend(data) {
+          if (this.transportType !== "blueboat") return;
+          const decoded = this.decodeBlueboat(data);
+          if (!decoded) return;
+          if (decoded?.payload?.room) this.blueboatRoomId = decoded.payload.room;
+          if (decoded?.payload?.roomId) this.blueboatRoomId = decoded.payload.roomId;
         }
         decodeColyseus(data) {
           const bytes = new Uint8Array(data);
@@ -215,6 +252,20 @@
         }
         sendMessage(channel, payload) {
           if (!this.socket) return;
+          if (this.transportType === "blueboat") {
+            if (!this.blueboatRoomId) return;
+            const encoded = msgpackEncode({
+              type: 2,
+              data: ["blueboat_SEND_MESSAGE", { room: this.blueboatRoomId, key: channel, data: payload }],
+              options: { compress: true },
+              nsp: "/",
+            });
+            const out = new Uint8Array(1 + encoded.byteLength);
+            out[0] = 4;
+            out.set(new Uint8Array(encoded), 1);
+            this.socket.send(out.buffer);
+            return;
+          }
           const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
           const a = new Uint8Array(msgpackEncode(channel));
           const b = new Uint8Array(msgpackEncode(payload));
@@ -235,12 +286,106 @@
         currentQuestionId: null,
         questionIdList: [],
         currentQuestionIndex: -1,
+        sentQuestionIds: new Set(),
       };
+
+      function asArray(value) {
+        if (Array.isArray(value)) return value;
+        return value == null ? [] : [value];
+      }
+
+      function parseQuestionAnswer(question) {
+        if (!question) return null;
+        if (question.type === "text") return question.answers?.[0]?.text || null;
+        return question.answers?.find((a) => a?.correct)?.id || question.answers?.find((a) => a?.correct)?._id || null;
+      }
+
+      function findQuestionById(id) {
+        return state.questions.find((q) => q?._id == id || q?.id == id) || null;
+      }
+
+      function setCurrentQuestionIndex(nextIndex) {
+        if (!Number.isInteger(nextIndex)) return;
+        if (state.currentQuestionIndex !== -1 && nextIndex < state.currentQuestionIndex) {
+          state.sentQuestionIds.clear();
+        }
+        state.currentQuestionIndex = nextIndex;
+      }
+
+      function resetAnsweredCache() {
+        state.sentQuestionIds.clear();
+      }
+
+      function getNextUnansweredQuestion() {
+        const currentId = state.questionIdList[state.currentQuestionIndex];
+        if (currentId) {
+          const current = findQuestionById(currentId);
+          const id = current?._id || current?.id;
+          if (current && id && !state.sentQuestionIds.has(id)) return current;
+        }
+
+        for (const questionId of state.questionIdList) {
+          if (!questionId || state.sentQuestionIds.has(questionId)) continue;
+          const match = findQuestionById(questionId);
+          if (match) return match;
+        }
+
+        return state.questions.find((q) => {
+          const id = q?._id || q?.id;
+          return id && !state.sentQuestionIds.has(id);
+        }) || null;
+      }
+
+      function applyBlueboatStateUpdate(packet) {
+        const key = packet?.key;
+        const data = packet?.data;
+        if (typeof key !== "string") return;
+
+        if (key === "STATE_UPDATE") {
+          const type = data?.type;
+          if (type === "GAME_QUESTIONS") {
+            state.questions = Array.isArray(data?.value) ? data.value : [];
+          } else if (type === "PLAYER_QUESTION_LIST") {
+            state.questionIdList = data?.value?.questionList || [];
+            if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
+            resetAnsweredCache();
+          } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
+            if (Number.isInteger(data?.value)) setCurrentQuestionIndex(data.value);
+          }
+        } else if (key === "PLAYER_QUESTION_LIST" && data?.questionList) {
+          state.questionIdList = data.questionList;
+          if (Number.isInteger(data?.questionIndex)) setCurrentQuestionIndex(data.questionIndex);
+          resetAnsweredCache();
+        } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
+          setCurrentQuestionIndex(data);
+        } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
+          state.questions = data;
+        } else if (key === "QUESTION_REVEALED" && data) {
+          const question = data?.question || data;
+          const questionId = question?._id || question?.id;
+          if (questionId && !findQuestionById(questionId)) state.questions.push(question);
+        }
+      }
+
+      function extractBlueboatStateCandidates(payload) {
+        const candidates = [];
+        for (const item of asArray(payload)) {
+          if (!item || typeof item !== "object") continue;
+          if (typeof item.key === "string") candidates.push(item);
+          if (item.data && typeof item.data === "object" && typeof item.data.key === "string") candidates.push(item.data);
+          if (Array.isArray(item.events)) {
+            for (const eventItem of item.events) {
+              if (eventItem && typeof eventItem === "object" && typeof eventItem.key === "string") candidates.push(eventItem);
+            }
+          }
+        }
+        return candidates;
+      }
 
       function answerQuestion() {
         if (socketManager.transportType === "colyseus") {
           if (state.currentQuestionId == null || state.answerDeviceId == null) return;
-          const question = state.questions.find((q) => q._id == state.currentQuestionId);
+          const question = findQuestionById(state.currentQuestionId);
           if (!question) return;
           const packet = { key: "answered", deviceId: state.answerDeviceId, data: {} };
           if (question.type == "text") packet.data.answer = question.answers[0].text;
@@ -249,12 +394,14 @@
           socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
           console.log(LOG, "Answered colyseus", state.currentQuestionId);
         } else {
-          const questionId = state.questionIdList[state.currentQuestionIndex];
-          const question = state.questions.find((q) => q._id == questionId);
+          const question = getNextUnansweredQuestion();
           if (!question) return;
-          const answer = question.type == "mc" ? question.answers.find((a) => a.correct)?._id : question.answers[0]?.text;
+          const questionId = question?._id || question?.id;
+          if (!questionId || state.sentQuestionIds.has(questionId)) return;
+          const answer = parseQuestionAnswer(question);
           if (!answer) return;
           socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+          state.sentQuestionIds.add(questionId);
           console.log(LOG, "Answered blueboat", questionId);
         }
       }
@@ -275,19 +422,11 @@
       });
 
       socketManager.addEventListener("blueboatMessage", (event) => {
-        if (event.detail?.key !== "STATE_UPDATE") return;
-        switch (event.detail.data.type) {
-          case "GAME_QUESTIONS":
-            state.questions = event.detail.data.value;
-            break;
-          case "PLAYER_QUESTION_LIST":
-            state.questionIdList = event.detail.data.value.questionList;
-            state.currentQuestionIndex = event.detail.data.value.questionIndex;
-            break;
-          case "PLAYER_QUESTION_LIST_INDEX":
-            state.currentQuestionIndex = event.detail.data.value;
-            break;
+        if (event.detail?.eventName === "blueboat_SEND_MESSAGE" && event.detail?.payload?.room) {
+          socketManager.blueboatRoomId = event.detail.payload.room;
         }
+        const candidates = extractBlueboatStateCandidates(event.detail?.payload);
+        for (const candidate of candidates) applyBlueboatStateUpdate(candidate);
       });
 
       // Expose start/stop so the Zyrox module toggle controls the interval
