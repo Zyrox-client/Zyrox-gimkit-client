@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox classic auto-answer
 // @namespace    https://github.com/zyrox
-// @version      0.3.0
+// @version      0.3.1
 // @description  Tracks Classic mode questions and exposes a one-shot answer command.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
