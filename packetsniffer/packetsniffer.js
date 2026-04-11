@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.0.0
+// @version      1.0.1
 // @description  Logs every websocket packet with a split-pane sidebar UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -457,12 +457,12 @@
 
       .zyrox-type-tag {
         font-size: 13px; letter-spacing: 0.04em;
-        color: rgba(255,255,255,0.28);
+        color: rgba(255,255,255,0.5);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .zyrox-len-tag {
         font-size: 12px;
-        color: rgba(255,255,255,0.36);
+        color: rgba(255,255,255,0.6);
         white-space: nowrap;
         letter-spacing: 0.03em;
       }
@@ -1058,7 +1058,7 @@
     el.innerHTML = `
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
       <span class="zyrox-type-tag">${escapeHtml(getListTypeTag(p.parsed))}</span>
-      <span class="zyrox-len-tag">len: ${getPacketLength(p.parsed)}</span>
+      <span class="zyrox-len-tag">${getPacketLength(p.parsed)}</span>
     `;
 
     el.addEventListener("click", () => {
