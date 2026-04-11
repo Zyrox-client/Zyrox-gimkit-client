@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.0.9
+// @version      1.0.0
 // @description  Logs every websocket packet with a split-pane sidebar UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -574,8 +574,8 @@
         user-select: text;
         -webkit-user-select: text;
         cursor: text;
-        tab-size: 2;
-        -moz-tab-size: 2;
+        tab-size: 1;
+        -moz-tab-size: 1;
       }
       .zyrox-view-pane.active { display: block; }
       .zyrox-view-pane::-webkit-scrollbar { width: 5px; }
@@ -592,9 +592,8 @@
       .zyrox-json-indent { display: block; padding-left: 20px; }
       .zyrox-json-line {
         display: block;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        word-break: break-word;
+        white-space: pre;
+        word-break: normal;
       }
 
       /* Hex dump */
@@ -614,7 +613,7 @@
       #zyrox-raw-pane pre {
         font-size: 14px; line-height: 1.65;
         color: rgba(255,255,255,0.5);
-        white-space: pre-wrap; word-break: break-all; margin: 0;
+        white-space: pre; word-break: normal; margin: 0;
       }
 
       /* Loading indicator */
@@ -862,18 +861,18 @@
         tree.appendChild(renderJsonNode(p.parsed.json));
       } catch {
         const fallback = document.createElement("pre");
-        fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
+        fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre;margin:0;";
         fallback.textContent = JSON.stringify(p.parsed.json, null, 2);
         tree.appendChild(fallback);
       }
     } else if (p.parsed.text) {
       const pre = document.createElement("pre");
-      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre-wrap;word-break:break-all;margin:0;";
+      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre;margin:0;";
       pre.textContent = p.parsed.text;
       tree.appendChild(pre);
     } else {
       const fallback = document.createElement("pre");
-      fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.42);white-space:pre-wrap;word-break:break-all;margin:0;";
+      fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.42);white-space:pre;margin:0;";
       fallback.textContent = getBodyPreview(p.parsed, 8000);
       tree.appendChild(fallback);
     }
