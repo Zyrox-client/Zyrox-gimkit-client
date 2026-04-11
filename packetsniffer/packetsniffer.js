@@ -591,11 +591,10 @@
       .zyrox-json-brace { color: rgba(255,255,255,0.38); }
       .zyrox-json-indent { display: block; padding-left: 20px; }
       .zyrox-json-line {
-        display: flex;
-        gap: 4px;
-        white-space: pre;
-        word-break: normal;
-        flex-wrap: nowrap;
+        display: block;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       /* Hex dump */
