@@ -1249,6 +1249,13 @@
     if (answerPopupState.enabled) showAnswerPopup(latestAnswer);
   });
 
+  socketManager.addEventListener("blueboatMessage", (event) => {
+    if (event.detail?.key !== "STATE_UPDATE") return;
+    const update = event.detail?.data;
+    if (update?.type !== "UPGRADE_LEVELS") return;
+    updateUpgradeHudLevels(update.value);
+  });
+
   answerInterval = setInterval(() => {
     if (!autoAnswerEnabled) return;
     answerQuestion();
@@ -3144,12 +3151,16 @@
       onEnable: startAnswerPopup,
       onDisable: stopAnswerPopup,
     },
+    "Upgrade HUD": {
+      onEnable: startUpgradeHud,
+      onDisable: stopUpgradeHud,
+    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", ANIMATION_SKIP_MODULE_NAME, "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
+  const WORKING_MODULES = new Set(["Auto Answer", ANIMATION_SKIP_MODULE_NAME, "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Upgrade HUD", "Answer Reveal"]);
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
@@ -3159,6 +3170,7 @@
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
+    "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a top-right HUD.",
   };
 
   // --- End of Core Utilities ---
@@ -3316,6 +3328,16 @@
     gamemodeSpecific: {
       title: "Gamemode Specific",
       groups: [
+        {
+          name: "Classic/Tycoon",
+          modules: [
+            {
+              name: "Upgrade HUD",
+              description: MODULE_DESCRIPTIONS["Upgrade HUD"],
+              settings: [],
+            },
+          ],
+        },
         {
           name: "Draw It",
           modules: [
@@ -4665,6 +4687,84 @@
       }
     }
     return answers;
+  }
+
+  const UPGRADE_HUD_LABELS = {
+    moneyPerQuestion: "Money / Question",
+    streakBonus: "Streak Bonus",
+    multiplier: "Multiplier",
+    insurance: "Insurance",
+  };
+  const upgradeHudState = {
+    enabled: false,
+    container: null,
+    levels: {
+      moneyPerQuestion: 1,
+      streakBonus: 1,
+      multiplier: 1,
+      insurance: 1,
+    },
+  };
+
+  function ensureUpgradeHudContainer() {
+    if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
+    const hud = document.createElement("div");
+    hud.className = "zyrox-upgrade-hud";
+    hud.style.cssText = [
+      "position:fixed",
+      "top:14px",
+      "right:14px",
+      "min-width:220px",
+      "max-width:min(38vw,360px)",
+      "padding:10px 12px",
+      "border-radius:10px",
+      "background:rgba(8,12,17,.88)",
+      "border:1px solid rgba(255,255,255,.14)",
+      "box-shadow:0 12px 30px rgba(0,0,0,.42)",
+      "z-index:2147483646",
+      "color:#fff",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+      "display:none",
+      "pointer-events:none",
+    ].join(";");
+    document.documentElement.appendChild(hud);
+    upgradeHudState.container = hud;
+    return hud;
+  }
+
+  function renderUpgradeHud() {
+    const hud = ensureUpgradeHudContainer();
+    const rows = Object.keys(UPGRADE_HUD_LABELS)
+      .map((key) => {
+        const label = UPGRADE_HUD_LABELS[key];
+        const level = Number(upgradeHudState.levels[key]) || 1;
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
+      })
+      .join("");
+    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Classic / Tycoon Upgrades</div>${rows}`;
+    hud.style.display = upgradeHudState.enabled ? "block" : "none";
+  }
+
+  function updateUpgradeHudLevels(nextLevels) {
+    if (!nextLevels || typeof nextLevels !== "object") return;
+    for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
+      if (typeof nextLevels[key] === "undefined") continue;
+      const n = Number(nextLevels[key]);
+      upgradeHudState.levels[key] = Number.isFinite(n) ? n : 1;
+    }
+    if (upgradeHudState.enabled) renderUpgradeHud();
+  }
+
+  function startUpgradeHud() {
+    upgradeHudState.enabled = true;
+    renderUpgradeHud();
+  }
+
+  function stopUpgradeHud() {
+    upgradeHudState.enabled = false;
+    if (upgradeHudState.container) {
+      upgradeHudState.container.style.display = "none";
+    }
   }
 
   function startAnswerPopup() {
