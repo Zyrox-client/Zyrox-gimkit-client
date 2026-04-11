@@ -40,5 +40,5 @@ If you have any questions or feature requests leave them [here](https://github.c
 - Add descriptions
 - Fix hiding non working modules
 - Add more (working) modules
-
+- Add tutorial/introduction on first launch
    
