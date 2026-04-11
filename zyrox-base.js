@@ -433,7 +433,7 @@
       let _timerId = null;
       let _running = false;
       let _baseSpeed = 1000;
-      const BLUEBOAT_EXTRA_DELAY_MS = 300;
+      const BLUEBOAT_EXTRA_DELAY_MS = 500;
 
       function getCurrentDelay() {
         if (socketManager.transportType === "blueboat") return _baseSpeed + BLUEBOAT_EXTRA_DELAY_MS;
@@ -3099,7 +3099,7 @@
               name: "Auto Answer",
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
-                { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 500 },
+                { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
               ],
             },
           ],
