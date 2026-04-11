@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.0.3
+// @version      1.0.4
 // @description  Logs every websocket packet with a split-pane sidebar UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -254,7 +254,7 @@
         display: flex;
         flex-direction: column;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 16px;
+        font-size: 15px;
         background: rgba(8, 10, 18, 0.98);
         border-left: 1px solid rgba(0, 255, 136, 0.15);
         box-shadow: -12px 0 50px rgba(0,0,0,0.7), inset 1px 0 0 rgba(0,255,136,0.05);
@@ -477,7 +477,7 @@
 
       /* ── Viewer panel ── */
       #zyrox-viewer {
-        width: 55%; flex-shrink: 0;
+        width: 68.75%; flex-shrink: 0;
         display: none;
         flex-direction: column;
         background: rgba(4, 6, 14, 0.65);
@@ -980,6 +980,15 @@
     if (parsed.kind)       return `${parsed.kind} (${parsed.bytes ?? "?"} B)`;
     return "RAW";
   }
+  function getListTypeTag(parsed) {
+    const rawType = getTypeTag(parsed);
+    return rawType
+      .replace(/wss?:\/\/[^\s/]+/gi, "[ws]")
+      .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "[ip]")
+      .replace(/\[[^\]]+\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim() || "RAW";
+  }
   function getBodyPreview(parsed, limit = 100) {
     // For binary packets, prefer decoded text over metadata
     if (parsed.json)  { try { return JSON.stringify(parsed.json).slice(0, limit); } catch { /**/ } }
@@ -1030,7 +1039,7 @@
 
     el.innerHTML = `
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
-      <span class="zyrox-type-tag">${escapeHtml(getTypeTag(p.parsed))}</span>
+      <span class="zyrox-type-tag">${escapeHtml(getListTypeTag(p.parsed))}</span>
       <span class="zyrox-len-tag">len: ${getPacketLength(p.parsed)}</span>
       <span class="zyrox-time">${formatTime(p.timestamp)}</span>
     `;
