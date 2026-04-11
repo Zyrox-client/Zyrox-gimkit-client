@@ -916,6 +916,18 @@
     return { encode, decode };
   })();
 
+  function decodeBlueboatBinaryPacket(packet) {
+    if (!(packet instanceof ArrayBuffer)) return null;
+    const bytes = new Uint8Array(packet);
+    if (!bytes.byteLength || bytes[0] !== 4) return null;
+    const decoded = msgpackDecode(packet.slice(1), 0)?.value;
+    if (!decoded || typeof decoded !== "object") return null;
+    const data = decoded?.data;
+    const eventName = Array.isArray(data) ? data[0] : null;
+    const payload = Array.isArray(data) ? data[1] : data;
+    return { eventName, payload, raw: decoded };
+  }
+
   class SocketManager extends EventTarget {
     constructor() {
       super();
@@ -988,8 +1000,19 @@
             }
           }
         } else {
-          decoded = blueboat.decode(e.data);
-          if (decoded) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: decoded }));
+          decoded = decodeBlueboatBinaryPacket(e.data);
+          if (!decoded) {
+            const fallback = blueboat.decode(e.data);
+            if (fallback) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: fallback }));
+          } else {
+            const payload = decoded.payload;
+            if (payload && typeof payload === "object") {
+              const normalized = { ...payload, eventName: decoded.eventName, payload, raw: decoded.raw };
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalized }));
+            } else {
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: { payload, eventName: decoded.eventName, raw: decoded.raw } }));
+            }
+          }
         }
       });
     }
@@ -1144,6 +1167,14 @@
     }
   }
 
+  function applyUpgradeLevelsFromStateUpdate(stateUpdateData, source = "unknown") {
+    const levels = extractUpgradeLevelsFromStateUpdate(stateUpdateData);
+    if (!levels) return false;
+    upgradeHudLog(`UPGRADE_LEVELS detected via ${source}`, levels);
+    updateUpgradeHudLevels(levels);
+    return true;
+  }
+
   function hookSocketDrawIt(ws) {
     if (drawItHookedSockets.has(ws)) return;
     drawItHookedSockets.add(ws);
@@ -1152,7 +1183,10 @@
       if (!decoded?.key) return;
       const key = decoded.key;
       if (DRAWIT_SKIP.has(key)) return;
-      if (key === "STATE_UPDATE") logAnswerCandidatesDrawItExact(decoded.data);
+      if (key === "STATE_UPDATE") {
+        logAnswerCandidatesDrawItExact(decoded.data);
+        applyUpgradeLevelsFromStateUpdate(decoded.data, "raw-ws-hook");
+      }
     });
   }
 
@@ -1247,6 +1281,17 @@
     const latestAnswer = answers[answers.length - 1];
     applyDrawItAnswerReveal(latestAnswer);
     if (answerPopupState.enabled) showAnswerPopup(latestAnswer);
+  });
+
+  socketManager.addEventListener("blueboatMessage", (event) => {
+    const packet = event.detail;
+    const key = packet?.key ?? packet?.payload?.key ?? packet?.data?.key;
+    if (key !== "STATE_UPDATE") return;
+    const stateUpdate = packet?.data ?? packet?.payload?.data ?? packet?.payload ?? packet;
+    const applied = applyUpgradeLevelsFromStateUpdate(stateUpdate, "socketManager");
+    if (!applied) {
+      upgradeHudLog("STATE_UPDATE received but no UPGRADE_LEVELS found", { packet, stateUpdate });
+    }
   });
 
   answerInterval = setInterval(() => {
@@ -3049,6 +3094,121 @@
     answerPopupState.lastRenderedAnswer = "";
   }
 
+  const UPGRADE_HUD_LABELS = {
+    moneyPerQuestion: "Money / Question",
+    streakBonus: "Streak Bonus",
+    multiplier: "Multiplier",
+    insurance: "Insurance",
+  };
+  const upgradeHudState = {
+    enabled: false,
+    container: null,
+    levels: {
+      moneyPerQuestion: 1,
+      streakBonus: 1,
+      multiplier: 1,
+      insurance: 1,
+    },
+  };
+  const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
+
+  function upgradeHudLog(message, extra) {
+    if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
+    else console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`, extra);
+  }
+
+  function ensureUpgradeHudContainer() {
+    if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
+    const hud = document.createElement("div");
+    hud.className = "zyrox-upgrade-hud";
+    hud.style.cssText = [
+      "position:fixed",
+      "top:14px",
+      "right:14px",
+      "min-width:220px",
+      "max-width:min(38vw,360px)",
+      "padding:10px 12px",
+      "border-radius:10px",
+      "background:rgba(8,12,17,.88)",
+      "border:1px solid rgba(255,255,255,.14)",
+      "box-shadow:0 12px 30px rgba(0,0,0,.42)",
+      "z-index:2147483646",
+      "color:#fff",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+      "display:none",
+      "pointer-events:none",
+    ].join(";");
+    document.documentElement.appendChild(hud);
+    upgradeHudState.container = hud;
+    return hud;
+  }
+
+  function renderUpgradeHud() {
+    const hud = ensureUpgradeHudContainer();
+    const rows = Object.keys(UPGRADE_HUD_LABELS)
+      .map((key) => {
+        const label = UPGRADE_HUD_LABELS[key];
+        const level = Number(upgradeHudState.levels[key]) || 1;
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
+      })
+      .join("");
+    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Classic / Tycoon Upgrades</div>${rows}`;
+    hud.style.display = upgradeHudState.enabled ? "block" : "none";
+  }
+
+  function extractUpgradeLevelsFromStateUpdate(stateUpdate) {
+    const tryReadLevels = (entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      if (entry.type === "UPGRADE_LEVELS" && entry.value && typeof entry.value === "object") return entry.value;
+      return null;
+    };
+
+    const direct = tryReadLevels(stateUpdate);
+    if (direct) return direct;
+
+    if (Array.isArray(stateUpdate)) {
+      for (const entry of stateUpdate) {
+        const levels = tryReadLevels(entry);
+        if (levels) return levels;
+      }
+    }
+
+    if (stateUpdate && typeof stateUpdate === "object") {
+      const nested = tryReadLevels(stateUpdate.data);
+      if (nested) return nested;
+      const payloadNested = tryReadLevels(stateUpdate.payload?.data);
+      if (payloadNested) return payloadNested;
+    }
+
+    return null;
+  }
+
+  function updateUpgradeHudLevels(nextLevels) {
+    if (!nextLevels || typeof nextLevels !== "object") return;
+    const before = { ...upgradeHudState.levels };
+    for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
+      if (typeof nextLevels[key] === "undefined") continue;
+      const n = Number(nextLevels[key]);
+      upgradeHudState.levels[key] = Number.isFinite(n) ? n : 1;
+    }
+    upgradeHudLog("Applied UPGRADE_LEVELS update", { before, incoming: nextLevels, after: { ...upgradeHudState.levels } });
+    if (upgradeHudState.enabled) renderUpgradeHud();
+  }
+
+  function startUpgradeHud() {
+    upgradeHudState.enabled = true;
+    upgradeHudLog("Enabled");
+    renderUpgradeHud();
+  }
+
+  function stopUpgradeHud() {
+    upgradeHudState.enabled = false;
+    upgradeHudLog("Disabled");
+    if (upgradeHudState.container) {
+      upgradeHudState.container.style.display = "none";
+    }
+  }
+
   const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
   const LEGACY_ANIMATION_SKIP_MODULE_NAME = "Animation Skip";
   const ANIMATION_SKIP_STYLE_ID = "zyrox-animation-skip-style";
@@ -3123,12 +3283,16 @@
       onEnable: startAnswerPopup,
       onDisable: stopAnswerPopup,
     },
+    "Upgrade HUD": {
+      onEnable: startUpgradeHud,
+      onDisable: stopUpgradeHud,
+    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", ANIMATION_SKIP_MODULE_NAME, "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
+  const WORKING_MODULES = new Set(["Auto Answer", ANIMATION_SKIP_MODULE_NAME, "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Upgrade HUD", "Answer Reveal"]);
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
@@ -3138,6 +3302,7 @@
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
+    "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a top-right HUD.",
   };
 
   // --- End of Core Utilities ---
@@ -3295,6 +3460,16 @@
     gamemodeSpecific: {
       title: "Gamemode Specific",
       groups: [
+        {
+          name: "Classic/Tycoon",
+          modules: [
+            {
+              name: "Upgrade HUD",
+              description: MODULE_DESCRIPTIONS["Upgrade HUD"],
+              settings: [],
+            },
+          ],
+        },
         {
           name: "Draw It",
           modules: [
@@ -4644,22 +4819,6 @@
       }
     }
     return answers;
-  }
-
-  function startAnswerPopup() {
-    answerPopupState.enabled = true;
-  }
-
-  function stopAnswerPopup() {
-    answerPopupState.enabled = false;
-    if (answerPopupState.timeoutId) {
-      clearTimeout(answerPopupState.timeoutId);
-      answerPopupState.timeoutId = null;
-    }
-    if (answerPopupState.container) {
-      answerPopupState.container.style.opacity = "0";
-      answerPopupState.container.style.display = "none";
-    }
   }
 
   function closeConfig() {
