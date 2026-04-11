@@ -569,6 +569,8 @@
         user-select: text;
         -webkit-user-select: text;
         cursor: text;
+        tab-size: 2;
+        -moz-tab-size: 2;
       }
       .zyrox-view-pane.active { display: block; }
       .zyrox-view-pane::-webkit-scrollbar { width: 5px; }
