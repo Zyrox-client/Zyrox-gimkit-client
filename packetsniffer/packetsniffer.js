@@ -457,12 +457,12 @@
 
       .zyrox-type-tag {
         font-size: 13px; letter-spacing: 0.04em;
-        color: rgba(255,255,255,0.28);
+        color: rgba(255,255,255,0.5);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .zyrox-len-tag {
         font-size: 12px;
-        color: rgba(255,255,255,0.36);
+        color: rgba(255,255,255,0.6);
         white-space: nowrap;
         letter-spacing: 0.03em;
       }
@@ -574,8 +574,8 @@
         user-select: text;
         -webkit-user-select: text;
         cursor: text;
-        tab-size: 2;
-        -moz-tab-size: 2;
+        tab-size: 1;
+        -moz-tab-size: 1;
       }
       .zyrox-view-pane.active { display: block; }
       .zyrox-view-pane::-webkit-scrollbar { width: 5px; }
@@ -591,11 +591,9 @@
       .zyrox-json-brace { color: rgba(255,255,255,0.38); }
       .zyrox-json-indent { display: block; padding-left: 20px; }
       .zyrox-json-line {
-        display: flex;
-        gap: 4px;
+        display: block;
         white-space: pre;
         word-break: normal;
-        flex-wrap: nowrap;
       }
 
       /* Hex dump */
@@ -615,7 +613,7 @@
       #zyrox-raw-pane pre {
         font-size: 14px; line-height: 1.65;
         color: rgba(255,255,255,0.5);
-        white-space: pre-wrap; word-break: break-all; margin: 0;
+        white-space: pre; word-break: normal; margin: 0;
       }
 
       /* Loading indicator */
@@ -634,18 +632,6 @@
         background: rgba(0,0,0,0.2);
       }
       #zyrox-status { font-size: 12px; color: rgba(255,255,255,0.2); letter-spacing: 0.05em; }
-      #zyrox-autoscroll-toggle {
-        display: flex; align-items: center; gap: 6px;
-        cursor: pointer; font-size: 12px; color: rgba(255,255,255,0.28);
-        letter-spacing: 0.05em; transition: color 0.15s;
-      }
-      #zyrox-autoscroll-toggle:hover { color: rgba(255,255,255,0.55); }
-      #zyrox-autoscroll-toggle.on { color: rgba(0,255,136,0.65); }
-      #zyrox-autoscroll-dot {
-        width: 7px; height: 7px; border-radius: 50%;
-        background: rgba(255,255,255,0.18); transition: background 0.15s;
-      }
-      #zyrox-autoscroll-toggle.on #zyrox-autoscroll-dot { background: #00ff88; }
 
     `;
     document.head.appendChild(style);
@@ -708,10 +694,6 @@
       </div>
       <div id="zyrox-footer">
         <span id="zyrox-status">CONNECTED</span>
-        <div id="zyrox-autoscroll-toggle" class="on">
-          <div id="zyrox-autoscroll-dot"></div>
-          AUTO-SCROLL
-        </div>
       </div>
     `;
 
@@ -754,11 +736,6 @@
         });
         rerenderList();
       });
-    });
-
-    sidebar.querySelector("#zyrox-autoscroll-toggle").addEventListener("click", function() {
-      autoScroll = !autoScroll;
-      this.classList.toggle("on", autoScroll);
     });
 
     sidebar.querySelector("#zyrox-viewer-close").addEventListener("click", closeViewer);
@@ -884,18 +861,18 @@
         tree.appendChild(renderJsonNode(p.parsed.json));
       } catch {
         const fallback = document.createElement("pre");
-        fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
+        fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre;margin:0;";
         fallback.textContent = JSON.stringify(p.parsed.json, null, 2);
         tree.appendChild(fallback);
       }
     } else if (p.parsed.text) {
       const pre = document.createElement("pre");
-      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre-wrap;word-break:break-all;margin:0;";
+      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre;margin:0;";
       pre.textContent = p.parsed.text;
       tree.appendChild(pre);
     } else {
       const fallback = document.createElement("pre");
-      fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.42);white-space:pre-wrap;word-break:break-all;margin:0;";
+      fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.42);white-space:pre;margin:0;";
       fallback.textContent = getBodyPreview(p.parsed, 8000);
       tree.appendChild(fallback);
     }
@@ -1081,8 +1058,7 @@
     el.innerHTML = `
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
       <span class="zyrox-type-tag">${escapeHtml(getListTypeTag(p.parsed))}</span>
-      <span class="zyrox-len-tag">len: ${getPacketLength(p.parsed)}</span>
-      <span class="zyrox-time">${formatTime(p.timestamp)}</span>
+      <span class="zyrox-len-tag">${getPacketLength(p.parsed)}</span>
     `;
 
     el.addEventListener("click", () => {
