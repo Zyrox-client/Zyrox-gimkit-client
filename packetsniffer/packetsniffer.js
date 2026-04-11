@@ -15,7 +15,7 @@
   // ─── Constants ────────────────────────────────────────────────────────────────
   const PREFIX = "[PacketSniffer]";
   const MAX_PACKETS = 500;
-  const DEFAULT_WIDTH = 800;
+  const DEFAULT_WIDTH = 880;
   const MIN_WIDTH = 320;
   const COLYSEUS_ROOM_DATA = 13;
 
@@ -228,8 +228,10 @@
   let decodeStructuredBinaryEnabled = true;
   let selectedId = null;
   let currentWidth = DEFAULT_WIDTH;
+  let viewerWidthPercent = 68.75;
+  let initialized = false;
 
-  let sidebar, listEl, countEl, filterInput, viewerPanel;
+  let sidebar, listEl, countEl, filterInput, viewerPanel, bodyEl, dividerEl;
 
   // ─── Page margin ─────────────────────────────────────────────────────────────
   function applyPageMargin() {
@@ -253,7 +255,7 @@
         display: flex;
         flex-direction: column;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 16px;
+        font-size: 15px;
         background: rgba(8, 10, 18, 0.98);
         border-left: 1px solid rgba(0, 255, 136, 0.15);
         box-shadow: -12px 0 50px rgba(0,0,0,0.7), inset 1px 0 0 rgba(0,255,136,0.05);
@@ -433,7 +435,7 @@
 
       .zyrox-packet {
         display: grid;
-        grid-template-columns: 38px 72px 1fr auto;
+        grid-template-columns: 38px minmax(120px, 1fr) auto auto;
         gap: 0 8px;
         align-items: center;
         padding: 7px 12px;
@@ -458,23 +460,26 @@
         color: rgba(255,255,255,0.28);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      .zyrox-body-preview {
-        font-size: 13px; color: rgba(255,255,255,0.5);
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+      .zyrox-len-tag {
+        font-size: 12px;
+        color: rgba(255,255,255,0.36);
+        white-space: nowrap;
+        letter-spacing: 0.03em;
       }
       .zyrox-time { font-size: 12px; color: rgba(255,255,255,0.18); white-space: nowrap; }
 
       /* ── Divider ── */
       #zyrox-divider {
-        width: 1px; flex-shrink: 0;
+        width: 6px; flex-shrink: 0;
         background: rgba(255,255,255,0.07);
         display: none;
+        cursor: col-resize;
       }
       #zyrox-divider.visible { display: block; }
 
       /* ── Viewer panel ── */
       #zyrox-viewer {
-        width: 55%; flex-shrink: 0;
+        width: ${viewerWidthPercent}%; flex-shrink: 0;
         display: none;
         flex-direction: column;
         background: rgba(4, 6, 14, 0.65);
@@ -562,7 +567,7 @@
       }
       .zyrox-view-pane {
         position: absolute; inset: 0;
-        overflow-y: auto;
+        overflow: auto;
         padding: 12px 14px;
         display: none;
         /* SELECTABLE */
@@ -585,7 +590,13 @@
       .zyrox-json-null  { color: rgba(255,255,255,0.3); }
       .zyrox-json-brace { color: rgba(255,255,255,0.38); }
       .zyrox-json-indent { display: block; padding-left: 20px; }
-      .zyrox-json-line { display: flex; gap: 4px; white-space: pre-wrap; word-break: break-all; }
+      .zyrox-json-line {
+        display: flex;
+        gap: 4px;
+        white-space: pre;
+        word-break: normal;
+        flex-wrap: nowrap;
+      }
 
       /* Hex dump */
       .zyrox-hex-dump {
@@ -710,6 +721,8 @@
     countEl     = sidebar.querySelector("#zyrox-count");
     filterInput = sidebar.querySelector("#zyrox-filter-input");
     viewerPanel = sidebar.querySelector("#zyrox-viewer");
+    bodyEl      = sidebar.querySelector("#zyrox-body");
+    dividerEl   = sidebar.querySelector("#zyrox-divider");
 
     // ── Wire events ──
     sidebar.querySelector("#zyrox-toggle-btn").addEventListener("click", toggleSidebar);
@@ -749,6 +762,34 @@
     });
 
     sidebar.querySelector("#zyrox-viewer-close").addEventListener("click", closeViewer);
+
+    // ── Viewer/List splitter ──
+    let splitDragging = false;
+    dividerEl.addEventListener("mousedown", (e) => {
+      splitDragging = viewerPanel.classList.contains("visible");
+      if (!splitDragging) return;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!splitDragging) return;
+      const rect = bodyEl.getBoundingClientRect();
+      const viewerPx = rect.right - e.clientX;
+      const minPx = 220;
+      const maxPx = rect.width - 180;
+      const clampedPx = Math.max(minPx, Math.min(maxPx, viewerPx));
+      viewerWidthPercent = (clampedPx / rect.width) * 100;
+      viewerPanel.style.width = `${viewerWidthPercent}%`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!splitDragging) return;
+      splitDragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
 
     sidebar.querySelectorAll(".zyrox-tab").forEach(tab => {
       tab.addEventListener("click", () => {
@@ -818,7 +859,8 @@
   function openViewer(p) {
     selectedId = p.id;
     viewerPanel.classList.add("visible");
-    sidebar.querySelector("#zyrox-divider").classList.add("visible");
+    dividerEl.classList.add("visible");
+    viewerPanel.style.width = `${viewerWidthPercent}%`;
 
     const dirEl = sidebar.querySelector("#zyrox-viewer-dir");
     dirEl.textContent = p.direction;
@@ -838,14 +880,14 @@
       loading.textContent = "Decoding binary data…";
       tree.appendChild(loading);
     } else if (p.parsed.json) {
-      const pre = document.createElement("pre");
-      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
       try {
-        pre.textContent = JSON.stringify(p.parsed.json, null, 2);
+        tree.appendChild(renderJsonNode(p.parsed.json));
       } catch {
-        pre.textContent = String(p.parsed.json);
+        const fallback = document.createElement("pre");
+        fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
+        fallback.textContent = JSON.stringify(p.parsed.json, null, 2);
+        tree.appendChild(fallback);
       }
-      tree.appendChild(pre);
     } else if (p.parsed.text) {
       const pre = document.createElement("pre");
       pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre-wrap;word-break:break-all;margin:0;";
@@ -889,7 +931,7 @@
   function closeViewer() {
     selectedId = null;
     viewerPanel.classList.remove("visible");
-    sidebar.querySelector("#zyrox-divider").classList.remove("visible");
+    dividerEl.classList.remove("visible");
     listEl.querySelectorAll(".zyrox-packet.active").forEach(el => el.classList.remove("active"));
   }
 
@@ -977,6 +1019,17 @@
     if (parsed.kind)       return `${parsed.kind} (${parsed.bytes ?? "?"} B)`;
     return "RAW";
   }
+  function getListTypeTag(parsed) {
+    const rawType = getTypeTag(parsed);
+    return rawType
+      .replace(/wss?:\/\/[^\s]+/gi, "")
+      .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, "")
+      .replace(/\b[a-f0-9:]{2,}\b(?::\d+)?/gi, "")
+      .replace(/\[[^\]]+\]/g, "")
+      .replace(/[/:]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim() || "RAW";
+  }
   function getBodyPreview(parsed, limit = 100) {
     // For binary packets, prefer decoded text over metadata
     if (parsed.json)  { try { return JSON.stringify(parsed.json).slice(0, limit); } catch { /**/ } }
@@ -994,6 +1047,20 @@
     if (parsed.raw != null) { return String(parsed.raw); }
     if (parsed.hex)   { return parsed.hex; }
     return JSON.stringify(parsed);
+  }
+  function getPacketLength(parsed) {
+    if (typeof parsed.raw === "string") return parsed.raw.length;
+    if (typeof parsed.body === "string") return parsed.body.length;
+    if (typeof parsed.text === "string") return parsed.text.length;
+    if (typeof parsed.bytes === "number") return parsed.bytes;
+    if (parsed.hex) return parsed.hex.replace(/\s+/g, "").length / 2;
+    if (parsed.json) {
+      try { return JSON.stringify(parsed.json).length; } catch { /**/ }
+    }
+    if (parsed.payload != null) {
+      try { return JSON.stringify(parsed.payload).length; } catch { /**/ }
+    }
+    return 0;
   }
   function escapeHtml(str) {
     return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -1013,8 +1080,8 @@
 
     el.innerHTML = `
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
-      <span class="zyrox-type-tag">${escapeHtml(getTypeTag(p.parsed))}</span>
-      <span class="zyrox-body-preview">${escapeHtml(getBodyPreview(p.parsed))}</span>
+      <span class="zyrox-type-tag">${escapeHtml(getListTypeTag(p.parsed))}</span>
+      <span class="zyrox-len-tag">len: ${getPacketLength(p.parsed)}</span>
       <span class="zyrox-time">${formatTime(p.timestamp)}</span>
     `;
 
@@ -1047,7 +1114,7 @@
     const parsed = typeof payload === "string" ? parseTextPacket(payload) : parseBinaryPacket(payload);
 
     console.log(PREFIX, direction, {
-      url: socket.url, readyState: socket.readyState,
+      readyState: socket.readyState,
       parsed, raw: payload, timestamp: new Date().toISOString(),
     });
 
@@ -1107,6 +1174,12 @@
 
   // ─── Init ─────────────────────────────────────────────────────────────────────
   function init() {
+    if (initialized) return;
+    if (document.getElementById("zyrox-sidebar")) {
+      initialized = true;
+      return;
+    }
+    initialized = true;
     injectStyles();
     buildSidebar();
     console.log(PREFIX, "v0.4.0 installed — press [K] to toggle");
