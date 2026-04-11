@@ -3111,6 +3111,7 @@
     },
   };
   const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
+  const UPGRADE_HUD_TOP_OFFSET_PX = 39;
 
   function upgradeHudLog(message, extra) {
     if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
@@ -3123,7 +3124,7 @@
     hud.className = "zyrox-upgrade-hud";
     hud.style.cssText = [
       "position:fixed",
-      "top:14px",
+      `top:${UPGRADE_HUD_TOP_OFFSET_PX}px`,
       "right:14px",
       "min-width:220px",
       "max-width:min(38vw,360px)",
@@ -3143,8 +3144,38 @@
     return hud;
   }
 
+  function getUpgradeHudConfig() {
+    const defaults = { hudLocation: "topRight" };
+    try {
+      const cfg = moduleCfg("Upgrade HUD");
+      const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
+      const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
+      return { hudLocation: allowed.has(loc) ? loc : defaults.hudLocation };
+    } catch (_) {
+      return defaults;
+    }
+  }
+
   function renderUpgradeHud() {
     const hud = ensureUpgradeHudContainer();
+    const cfg = getUpgradeHudConfig();
+    hud.style.top = "";
+    hud.style.right = "";
+    hud.style.bottom = "";
+    hud.style.left = "";
+    if (cfg.hudLocation === "topLeft") {
+      hud.style.top = `${UPGRADE_HUD_TOP_OFFSET_PX}px`;
+      hud.style.left = "14px";
+    } else if (cfg.hudLocation === "bottomRight") {
+      hud.style.bottom = "14px";
+      hud.style.right = "14px";
+    } else if (cfg.hudLocation === "bottomLeft") {
+      hud.style.bottom = "14px";
+      hud.style.left = "14px";
+    } else {
+      hud.style.top = `${UPGRADE_HUD_TOP_OFFSET_PX}px`;
+      hud.style.right = "14px";
+    }
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
@@ -3152,7 +3183,7 @@
         return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
       })
       .join("");
-    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Classic / Tycoon Upgrades</div>${rows}`;
+    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Upgrades</div>${rows}`;
     hud.style.display = upgradeHudState.enabled ? "block" : "none";
   }
 
@@ -3492,7 +3523,20 @@
             {
               name: "Upgrade HUD",
               description: MODULE_DESCRIPTIONS["Upgrade HUD"],
-              settings: [],
+              settings: [
+                {
+                  id: "hudLocation",
+                  label: "HUD Location",
+                  type: "select",
+                  default: "topRight",
+                  options: [
+                    { value: "topRight", label: "Top Right" },
+                    { value: "topLeft", label: "Top Left" },
+                    { value: "bottomRight", label: "Bottom Right" },
+                    { value: "bottomLeft", label: "Bottom Left" },
+                  ],
+                },
+              ],
             },
           ],
         },
@@ -5588,6 +5632,7 @@
                 openConfig(moduleName);
               }
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
+              if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") renderUpgradeHud();
               saveSettings();
             });
           }
