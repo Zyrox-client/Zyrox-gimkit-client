@@ -839,14 +839,14 @@
       loading.textContent = "Decoding binary data…";
       tree.appendChild(loading);
     } else if (p.parsed.json) {
-      const pre = document.createElement("pre");
-      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
       try {
-        pre.textContent = JSON.stringify(p.parsed.json, null, 2);
+        tree.appendChild(renderJsonNode(p.parsed.json));
       } catch {
-        pre.textContent = String(p.parsed.json);
+        const fallback = document.createElement("pre");
+        fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
+        fallback.textContent = JSON.stringify(p.parsed.json, null, 2);
+        tree.appendChild(fallback);
       }
-      tree.appendChild(pre);
     } else if (p.parsed.text) {
       const pre = document.createElement("pre");
       pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre-wrap;word-break:break-all;margin:0;";
