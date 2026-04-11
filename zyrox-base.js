@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.0
+// @version      1.8.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -3049,7 +3049,10 @@
     answerPopupState.lastRenderedAnswer = "";
   }
 
+  const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
+  const LEGACY_ANIMATION_SKIP_MODULE_NAME = "Animation Skip";
   const ANIMATION_SKIP_STYLE_ID = "zyrox-animation-skip-style";
+  let originalElementAnimate = null;
 
   function startAnimationSkip() {
     let styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
@@ -3060,23 +3063,43 @@
     }
     styleEl.textContent = `
       *, *::before, *::after {
+        transition: none !important;
         transition-duration: 0ms !important;
         transition-delay: 0ms !important;
+        animation: none !important;
         animation-duration: 0ms !important;
         animation-delay: 0ms !important;
         animation-iteration-count: 1 !important;
         scroll-behavior: auto !important;
       }
     `;
+
+    if (!originalElementAnimate && typeof Element !== "undefined" && typeof Element.prototype?.animate === "function") {
+      originalElementAnimate = Element.prototype.animate;
+      Element.prototype.animate = function patchedAnimate(keyframes, options) {
+        const normalized = typeof options === "number" ? { duration: options } : { ...(options || {}) };
+        normalized.duration = 0;
+        normalized.delay = 0;
+        normalized.endDelay = 0;
+        normalized.iterations = 1;
+        const animation = originalElementAnimate.call(this, keyframes, normalized);
+        try { animation.finish(); } catch (_) {}
+        return animation;
+      };
+    }
   }
 
   function stopAnimationSkip() {
     const styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
     if (styleEl) styleEl.remove();
+    if (originalElementAnimate && typeof Element !== "undefined") {
+      Element.prototype.animate = originalElementAnimate;
+      originalElementAnimate = null;
+    }
   }
 
   const MODULE_BEHAVIORS = {
-    "Animation Skip": {
+    [ANIMATION_SKIP_MODULE_NAME]: {
       onEnable: startAnimationSkip,
       onDisable: stopAnimationSkip,
     },
@@ -3105,10 +3128,10 @@
       onDisable: stopDrawItAnswerReveal,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "Animation Skip", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
+  const WORKING_MODULES = new Set(["Auto Answer", ANIMATION_SKIP_MODULE_NAME, "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
-    "Animation Skip": "Removes menu/UI transition and animation delays so interfaces open instantly.",
+    [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
     "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
@@ -3196,8 +3219,8 @@
           name: "Quality of life",
           modules: [
             {
-              name: "Animation Skip",
-              description: MODULE_DESCRIPTIONS["Animation Skip"],
+              name: ANIMATION_SKIP_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[ANIMATION_SKIP_MODULE_NAME],
               settings: [],
             },
           ],
@@ -6328,10 +6351,16 @@
           ? saved.moduleConfig
           : (Array.isArray(saved.moduleSettings) ? saved.moduleSettings : null);
         if (savedModuleConfig) {
-          state.moduleConfig = new Map(savedModuleConfig);
+          const migratedModuleConfig = savedModuleConfig.map(([name, cfg]) => {
+            if (name === LEGACY_ANIMATION_SKIP_MODULE_NAME) return [ANIMATION_SKIP_MODULE_NAME, cfg];
+            return [name, cfg];
+          });
+          state.moduleConfig = new Map(migratedModuleConfig);
         }
         if (Array.isArray(saved.enabledModules)) {
-          pendingEnabledModules = saved.enabledModules.filter((name) => typeof name === "string");
+          pendingEnabledModules = saved.enabledModules
+            .filter((name) => typeof name === "string")
+            .map((name) => (name === LEGACY_ANIMATION_SKIP_MODULE_NAME ? ANIMATION_SKIP_MODULE_NAME : name));
         }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         setFooterText();
