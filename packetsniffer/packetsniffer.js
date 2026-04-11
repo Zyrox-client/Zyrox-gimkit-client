@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      0.3.0
+// @version      0.4.0
 // @description  Logs every websocket packet with a split-pane sidebar UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -45,11 +45,52 @@
     return { engineType, engineName, socketType, socketName, body, json: tryJson(body), raw: text };
   }
 
+  function toHex(bytes) {
+    const parts = [];
+    for (let i = 0; i < bytes.length; i++) {
+      if (i > 0 && i % 16 === 0) parts.push("\n");
+      else if (i > 0 && i % 8 === 0) parts.push("  ");
+      else if (i > 0) parts.push(" ");
+      parts.push(bytes[i].toString(16).padStart(2, "0"));
+    }
+    return parts.join("");
+  }
+
   function parseBinaryPacket(value) {
-    if (value instanceof Blob) return { kind: "Blob", size: value.size, type: value.type || "(none)" };
-    if (value instanceof ArrayBuffer) return { kind: "ArrayBuffer", bytes: value.byteLength };
-    if (ArrayBuffer.isView(value)) return { kind: value.constructor?.name || "TypedArray", bytes: value.byteLength };
-    return { kind: typeof value };
+    let bytes = null;
+
+    if (value instanceof ArrayBuffer) {
+      bytes = new Uint8Array(value);
+    } else if (ArrayBuffer.isView(value)) {
+      bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    } else if (value instanceof Blob) {
+      // Async: return a placeholder and patch the packet when the blob is read
+      const meta = { kind: "Blob", bytes: value.size, text: null, json: null, hex: null, _loading: true };
+      value.arrayBuffer().then(buf => {
+        const u8 = new Uint8Array(buf);
+        meta.hex = toHex(u8);
+        meta._loading = false;
+        try {
+          meta.text = new TextDecoder("utf-8", { fatal: true }).decode(u8);
+          meta.json = tryJson(meta.text);
+        } catch { /**/ }
+        // If this packet is currently open in the viewer, refresh it
+        const p = packets.find(x => x.parsed === meta);
+        if (p && p.id === selectedId) openViewer(p);
+      }).catch(() => { meta._loading = false; });
+      return meta;
+    }
+
+    if (!bytes) return { kind: typeof value, bytes: 0, hex: null, text: null, json: null };
+
+    const hex = toHex(bytes);
+    let text = null, json = null;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      json = tryJson(text);
+    } catch { /**/ }
+
+    return { kind: "Binary", bytes: bytes.length, text, json, hex };
   }
 
   // ─── State ────────────────────────────────────────────────────────────────────
@@ -60,8 +101,16 @@
   let filterDir = "ALL";
   let autoScroll = true;
   let selectedId = null;
+  let currentWidth = DEFAULT_WIDTH;
 
   let sidebar, listEl, countEl, filterInput, viewerPanel;
+
+  // ─── Page margin ─────────────────────────────────────────────────────────────
+  function applyPageMargin() {
+    document.body.style.marginRight = sidebarOpen ? currentWidth + "px" : "0";
+    document.body.style.transition = "margin-right 0.25s cubic-bezier(0.4,0,0.2,1)";
+    document.body.style.boxSizing = "border-box";
+  }
 
   // ─── Styles ───────────────────────────────────────────────────────────────────
   function injectStyles() {
@@ -78,7 +127,7 @@
         display: flex;
         flex-direction: column;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 11px;
+        font-size: 16px;
         background: rgba(8, 10, 18, 0.98);
         border-left: 1px solid rgba(0, 255, 136, 0.15);
         box-shadow: -12px 0 50px rgba(0,0,0,0.7), inset 1px 0 0 rgba(0,255,136,0.05);
@@ -100,17 +149,15 @@
         transition: background 0.15s;
       }
       #zyrox-resize-handle:hover,
-      #zyrox-resize-handle.dragging {
-        background: rgba(0,255,136,0.18);
-      }
+      #zyrox-resize-handle.dragging { background: rgba(0,255,136,0.18); }
 
       /* ── Header ── */
       #zyrox-header {
         position: relative;
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 10px 14px 10px 18px;
+        gap: 10px;
+        padding: 12px 16px 12px 20px;
         background: rgba(0,255,136,0.04);
         border-bottom: 1px solid rgba(0,255,136,0.12);
         flex-shrink: 0;
@@ -118,8 +165,7 @@
       }
       #zyrox-header::after {
         content: '';
-        position: absolute;
-        inset: 0;
+        position: absolute; inset: 0;
         background: repeating-linear-gradient(
           0deg, transparent, transparent 2px,
           rgba(0,255,136,0.012) 2px, rgba(0,255,136,0.012) 4px
@@ -127,7 +173,7 @@
         pointer-events: none;
       }
       #zyrox-logo {
-        width: 16px; height: 16px;
+        width: 18px; height: 18px;
         background: #00ff88;
         clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
         flex-shrink: 0;
@@ -135,20 +181,20 @@
       #zyrox-title {
         color: #00ff88;
         font-weight: 700;
-        font-size: 12px;
+        font-size: 18px;
         letter-spacing: 0.12em;
         text-transform: uppercase;
         flex: 1;
       }
-      #zyrox-count { color: rgba(0,255,136,0.45); font-size: 10px; letter-spacing: 0.05em; }
+      #zyrox-count { color: rgba(0,255,136,0.45); font-size: 13px; letter-spacing: 0.05em; }
       #zyrox-toggle-btn {
         background: none;
         border: 1px solid rgba(0,255,136,0.2);
         color: rgba(0,255,136,0.55);
         cursor: pointer;
-        padding: 3px 8px;
+        padding: 4px 10px;
         font-family: inherit;
-        font-size: 10px;
+        font-size: 13px;
         border-radius: 3px;
         transition: all 0.15s;
         letter-spacing: 0.05em;
@@ -159,22 +205,21 @@
       /* ── Controls ── */
       #zyrox-controls {
         display: flex;
-        gap: 5px;
-        padding: 7px 12px;
+        gap: 6px;
+        padding: 8px 14px;
         border-bottom: 1px solid rgba(255,255,255,0.04);
         flex-shrink: 0;
         align-items: center;
       }
       #zyrox-filter-input {
-        flex: 1;
-        min-width: 0;
+        flex: 1; min-width: 0;
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 4px;
         color: #e0e0e0;
         font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
-        padding: 5px 8px;
+        font-size: 13px;
+        padding: 6px 10px;
         outline: none;
         transition: border-color 0.15s;
       }
@@ -186,14 +231,13 @@
         border: 1px solid rgba(255,255,255,0.07);
         color: rgba(255,255,255,0.35);
         font-family: 'JetBrains Mono', monospace;
-        font-size: 9px;
-        padding: 4px 7px;
+        font-size: 13px;
+        padding: 5px 9px;
         border-radius: 4px;
         cursor: pointer;
         letter-spacing: 0.06em;
         transition: all 0.15s;
-        white-space: nowrap;
-        flex-shrink: 0;
+        white-space: nowrap; flex-shrink: 0;
       }
       .zyrox-dir-btn:hover { color: rgba(255,255,255,0.65); border-color: rgba(255,255,255,0.18); }
       .zyrox-dir-btn.active-all  { background: rgba(150,150,255,0.1);  border-color: rgba(150,150,255,0.35); color: #aaaaff; }
@@ -205,14 +249,13 @@
         border: 1px solid rgba(255,60,60,0.14);
         color: rgba(255,100,100,0.55);
         font-family: 'JetBrains Mono', monospace;
-        font-size: 9px;
-        padding: 4px 7px;
+        font-size: 13px;
+        padding: 5px 9px;
         border-radius: 4px;
         cursor: pointer;
         letter-spacing: 0.04em;
         transition: all 0.15s;
-        white-space: nowrap;
-        flex-shrink: 0;
+        white-space: nowrap; flex-shrink: 0;
       }
       #zyrox-clear-btn:hover { background: rgba(255,60,60,0.12); color: #ff6464; border-color: rgba(255,60,60,0.3); }
 
@@ -238,16 +281,16 @@
         overflow-y: auto;
         padding: 2px 0;
       }
-      #zyrox-list::-webkit-scrollbar { width: 4px; }
+      #zyrox-list::-webkit-scrollbar { width: 5px; }
       #zyrox-list::-webkit-scrollbar-track { background: transparent; }
-      #zyrox-list::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.18); border-radius: 2px; }
+      #zyrox-list::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.18); border-radius: 3px; }
 
       .zyrox-packet {
         display: grid;
-        grid-template-columns: 30px 52px 1fr auto;
-        gap: 0 6px;
+        grid-template-columns: 38px 72px 1fr auto;
+        gap: 0 8px;
         align-items: center;
-        padding: 5px 10px;
+        padding: 7px 12px;
         border-bottom: 1px solid rgba(255,255,255,0.025);
         cursor: pointer;
         transition: background 0.08s;
@@ -257,28 +300,27 @@
       .zyrox-packet.active {
         background: rgba(0,255,136,0.06);
         border-left: 2px solid rgba(0,255,136,0.55);
-        padding-left: 8px;
+        padding-left: 10px;
       }
 
-      .zyrox-dir-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-align: center; }
+      .zyrox-dir-badge { font-size: 13px; font-weight: 700; letter-spacing: 0.07em; text-align: center; }
       .zyrox-dir-badge.IN  { color: #00c8ff; }
       .zyrox-dir-badge.OUT { color: #ffb400; }
 
       .zyrox-type-tag {
-        font-size: 9px; letter-spacing: 0.04em;
+        font-size: 13px; letter-spacing: 0.04em;
         color: rgba(255,255,255,0.28);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
       .zyrox-body-preview {
-        font-size: 10px; color: rgba(255,255,255,0.5);
+        font-size: 13px; color: rgba(255,255,255,0.5);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
       }
-      .zyrox-time { font-size: 9px; color: rgba(255,255,255,0.18); white-space: nowrap; }
+      .zyrox-time { font-size: 12px; color: rgba(255,255,255,0.18); white-space: nowrap; }
 
       /* ── Divider ── */
       #zyrox-divider {
-        width: 1px;
-        flex-shrink: 0;
+        width: 1px; flex-shrink: 0;
         background: rgba(255,255,255,0.07);
         display: none;
       }
@@ -286,8 +328,7 @@
 
       /* ── Viewer panel ── */
       #zyrox-viewer {
-        width: 55%;
-        flex-shrink: 0;
+        width: 55%; flex-shrink: 0;
         display: none;
         flex-direction: column;
         background: rgba(4, 6, 14, 0.65);
@@ -299,38 +340,41 @@
       #zyrox-viewer-header {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
+        gap: 10px;
+        padding: 9px 14px;
         border-bottom: 1px solid rgba(255,255,255,0.06);
         flex-shrink: 0;
         background: rgba(0,0,0,0.22);
       }
       #zyrox-viewer-dir {
-        font-size: 9px; font-weight: 700;
+        font-size: 13px; font-weight: 700;
         letter-spacing: 0.08em;
-        padding: 2px 6px;
+        padding: 3px 8px;
         border-radius: 3px;
         flex-shrink: 0;
       }
       #zyrox-viewer-dir.IN  { color: #00c8ff; background: rgba(0,200,255,0.1);  border: 1px solid rgba(0,200,255,0.22); }
       #zyrox-viewer-dir.OUT { color: #ffb400; background: rgba(255,180,0,0.1);  border: 1px solid rgba(255,180,0,0.22); }
       #zyrox-viewer-meta { flex: 1; min-width: 0; }
-      #zyrox-viewer-type { font-size: 10px; color: rgba(255,255,255,0.7); font-weight: 600; letter-spacing: 0.06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      #zyrox-viewer-time { font-size: 9px; color: rgba(255,255,255,0.2); margin-top: 1px; }
+      #zyrox-viewer-type {
+        font-size: 14px; color: rgba(255,255,255,0.7);
+        font-weight: 600; letter-spacing: 0.06em;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #zyrox-viewer-time { font-size: 12px; color: rgba(255,255,255,0.2); margin-top: 2px; }
 
       .zyrox-viewer-action {
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.08);
         color: rgba(255,255,255,0.35);
         font-family: 'JetBrains Mono', monospace;
-        font-size: 9px;
-        padding: 3px 7px;
+        font-size: 13px;
+        padding: 4px 9px;
         border-radius: 3px;
         cursor: pointer;
         letter-spacing: 0.04em;
         transition: all 0.15s;
-        white-space: nowrap;
-        flex-shrink: 0;
+        white-space: nowrap; flex-shrink: 0;
       }
       .zyrox-viewer-action:hover { color: rgba(255,255,255,0.7); border-color: rgba(255,255,255,0.2); }
       .zyrox-viewer-action.copied { color: #00ff88; border-color: rgba(0,255,136,0.3); }
@@ -338,7 +382,7 @@
       #zyrox-viewer-close {
         background: none; border: none;
         color: rgba(255,255,255,0.22);
-        font-size: 14px; cursor: pointer;
+        font-size: 18px; cursor: pointer;
         padding: 0 2px; line-height: 1;
         transition: color 0.15s; font-family: inherit;
         flex-shrink: 0;
@@ -352,8 +396,8 @@
         flex-shrink: 0;
       }
       .zyrox-tab {
-        padding: 5px 14px;
-        font-size: 9px; letter-spacing: 0.07em;
+        padding: 6px 16px;
+        font-size: 13px; letter-spacing: 0.07em;
         color: rgba(255,255,255,0.28);
         cursor: pointer;
         border-bottom: 2px solid transparent;
@@ -367,60 +411,79 @@
 
       /* ── Viewer content ── */
       #zyrox-viewer-body {
-        flex: 1;
-        overflow: hidden;
-        position: relative;
-        min-height: 0;
+        flex: 1; overflow: hidden;
+        position: relative; min-height: 0;
       }
       .zyrox-view-pane {
         position: absolute; inset: 0;
         overflow-y: auto;
-        padding: 10px 12px;
+        padding: 12px 14px;
         display: none;
+        /* SELECTABLE */
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: text;
       }
       .zyrox-view-pane.active { display: block; }
-      .zyrox-view-pane::-webkit-scrollbar { width: 4px; }
-      .zyrox-view-pane::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.15); border-radius: 2px; }
+      .zyrox-view-pane::-webkit-scrollbar { width: 5px; }
+      .zyrox-view-pane::-webkit-scrollbar-thumb { background: rgba(0,255,136,0.15); border-radius: 3px; }
 
       /* JSON */
-      .zyrox-json-root { font-size: 10px; line-height: 1.7; }
-      .zyrox-json-key  { color: #7ec8e3; }
-      .zyrox-json-str  { color: #a8e6a3; }
-      .zyrox-json-num  { color: #f0c080; }
-      .zyrox-json-bool { color: #e07070; }
-      .zyrox-json-null { color: rgba(255,255,255,0.3); }
+      .zyrox-json-root { font-size: 14px; line-height: 1.75; }
+      .zyrox-json-key   { color: #7ec8e3; }
+      .zyrox-json-str   { color: #a8e6a3; }
+      .zyrox-json-num   { color: #f0c080; }
+      .zyrox-json-bool  { color: #e07070; }
+      .zyrox-json-null  { color: rgba(255,255,255,0.3); }
       .zyrox-json-brace { color: rgba(255,255,255,0.38); }
-      .zyrox-json-indent { display: block; padding-left: 16px; }
-      .zyrox-json-line {
-        display: flex; gap: 4px;
-        white-space: pre-wrap; word-break: break-all;
+      .zyrox-json-indent { display: block; padding-left: 20px; }
+      .zyrox-json-line { display: flex; gap: 4px; white-space: pre-wrap; word-break: break-all; }
+
+      /* Hex dump */
+      .zyrox-hex-dump {
+        font-size: 13px; line-height: 1.7;
+        color: rgba(255,255,255,0.45);
+        white-space: pre; font-family: 'JetBrains Mono', monospace;
+        word-break: break-all;
       }
+      .zyrox-binary-meta {
+        font-size: 13px; color: rgba(255,255,255,0.28);
+        margin-bottom: 10px; letter-spacing: 0.03em;
+      }
+      .zyrox-binary-meta span { color: rgba(0,255,136,0.6); }
 
       /* Raw */
       #zyrox-raw-pane pre {
-        font-size: 10px; line-height: 1.6;
+        font-size: 14px; line-height: 1.65;
         color: rgba(255,255,255,0.5);
         white-space: pre-wrap; word-break: break-all; margin: 0;
+      }
+
+      /* Loading indicator */
+      .zyrox-loading {
+        color: rgba(255,255,255,0.3);
+        font-size: 13px;
+        font-style: italic;
       }
 
       /* ── Footer ── */
       #zyrox-footer {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 5px 14px;
+        padding: 6px 16px;
         border-top: 1px solid rgba(255,255,255,0.04);
         flex-shrink: 0;
         background: rgba(0,0,0,0.2);
       }
-      #zyrox-status { font-size: 9px; color: rgba(255,255,255,0.2); letter-spacing: 0.05em; }
+      #zyrox-status { font-size: 12px; color: rgba(255,255,255,0.2); letter-spacing: 0.05em; }
       #zyrox-autoscroll-toggle {
-        display: flex; align-items: center; gap: 5px;
-        cursor: pointer; font-size: 9px; color: rgba(255,255,255,0.28);
+        display: flex; align-items: center; gap: 6px;
+        cursor: pointer; font-size: 12px; color: rgba(255,255,255,0.28);
         letter-spacing: 0.05em; transition: color 0.15s;
       }
       #zyrox-autoscroll-toggle:hover { color: rgba(255,255,255,0.55); }
       #zyrox-autoscroll-toggle.on { color: rgba(0,255,136,0.65); }
       #zyrox-autoscroll-dot {
-        width: 6px; height: 6px; border-radius: 50%;
+        width: 7px; height: 7px; border-radius: 50%;
         background: rgba(255,255,255,0.18); transition: background 0.15s;
       }
       #zyrox-autoscroll-toggle.on #zyrox-autoscroll-dot { background: #00ff88; }
@@ -435,8 +498,8 @@
         border: 1px solid rgba(0,255,136,0.18); border-right: none;
         color: rgba(0,255,136,0.45);
         font-family: 'JetBrains Mono', monospace;
-        font-size: 9px; letter-spacing: 0.1em;
-        padding: 10px 5px;
+        font-size: 12px; letter-spacing: 0.1em;
+        padding: 12px 6px;
         border-radius: 4px 0 0 4px;
         cursor: pointer; transition: all 0.2s;
         backdrop-filter: blur(8px);
@@ -455,14 +518,12 @@
 
     sidebar.innerHTML = `
       <div id="zyrox-resize-handle"></div>
-
       <div id="zyrox-header">
         <div id="zyrox-logo"></div>
         <span id="zyrox-title">PacketSniffer</span>
         <span id="zyrox-count">0 pkts</span>
         <button id="zyrox-toggle-btn">HIDE [K]</button>
       </div>
-
       <div id="zyrox-controls">
         <input id="zyrox-filter-input" type="text" placeholder="filter packets…" />
         <button class="zyrox-dir-btn active-all" data-dir="ALL">ALL</button>
@@ -470,7 +531,6 @@
         <button class="zyrox-dir-btn" data-dir="OUT">OUT</button>
         <button id="zyrox-clear-btn">CLR</button>
       </div>
-
       <div id="zyrox-body">
         <div id="zyrox-list-panel">
           <div id="zyrox-list"></div>
@@ -489,6 +549,7 @@
           <div id="zyrox-viewer-tabs">
             <button class="zyrox-tab active" data-tab="json">JSON</button>
             <button class="zyrox-tab" data-tab="raw">RAW</button>
+            <button class="zyrox-tab" data-tab="hex">HEX</button>
           </div>
           <div id="zyrox-viewer-body">
             <div class="zyrox-view-pane active" id="zyrox-json-pane">
@@ -497,10 +558,12 @@
             <div class="zyrox-view-pane" id="zyrox-raw-pane">
               <pre id="zyrox-raw-content"></pre>
             </div>
+            <div class="zyrox-view-pane" id="zyrox-hex-pane">
+              <div id="zyrox-hex-content"></div>
+            </div>
           </div>
         </div>
       </div>
-
       <div id="zyrox-footer">
         <span id="zyrox-status">CONNECTED</span>
         <div id="zyrox-autoscroll-toggle" class="on">
@@ -525,7 +588,7 @@
     hint.addEventListener("click", toggleSidebar);
     document.body.appendChild(hint);
 
-    // ── Events ──
+    // ── Wire events ──
     sidebar.querySelector("#zyrox-toggle-btn").addEventListener("click", toggleSidebar);
 
     sidebar.querySelector("#zyrox-clear-btn").addEventListener("click", () => {
@@ -587,6 +650,8 @@
       resizeStartW = sidebar.offsetWidth;
       handle.classList.add("dragging");
       document.body.style.cursor = "ew-resize";
+      // Temporarily disable the margin transition for live drag feel
+      document.body.style.transition = "none";
       document.body.style.userSelect = "none";
       e.preventDefault();
     });
@@ -595,7 +660,9 @@
       if (!resizing) return;
       const delta = resizeStartX - e.clientX;
       const newW = Math.min(Math.max(resizeStartW + delta, MIN_WIDTH), window.innerWidth * 0.95);
+      currentWidth = newW;
       sidebar.style.width = newW + "px";
+      if (sidebarOpen) document.body.style.marginRight = newW + "px";
     });
 
     document.addEventListener("mouseup", () => {
@@ -604,7 +671,11 @@
       handle.classList.remove("dragging");
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
+      document.body.style.transition = "margin-right 0.25s cubic-bezier(0.4,0,0.2,1)";
     });
+
+    // Apply initial page margin
+    applyPageMargin();
   }
 
   // ─── Sidebar toggle ───────────────────────────────────────────────────────────
@@ -612,6 +683,7 @@
     sidebarOpen = !sidebarOpen;
     sidebar.classList.toggle("hidden", !sidebarOpen);
     document.getElementById("zyrox-hint")?.classList.toggle("sidebar-open", sidebarOpen);
+    applyPageMargin();
   }
 
   // ─── Viewer open / close ──────────────────────────────────────────────────────
@@ -620,29 +692,58 @@
     viewerPanel.classList.add("visible");
     sidebar.querySelector("#zyrox-divider").classList.add("visible");
 
-    // Header
     const dirEl = sidebar.querySelector("#zyrox-viewer-dir");
-    dirEl.textContent  = p.direction;
-    dirEl.className    = p.direction; // IN | OUT
-    dirEl.id           = "zyrox-viewer-dir";
+    dirEl.textContent = p.direction;
+    dirEl.className   = p.direction;
+    dirEl.id          = "zyrox-viewer-dir";
 
     sidebar.querySelector("#zyrox-viewer-type").textContent = getTypeTag(p.parsed);
     sidebar.querySelector("#zyrox-viewer-time").textContent = formatTime(p.timestamp);
 
-    // JSON pane
+    // ── JSON / parsed tab ──
     const tree = sidebar.querySelector("#zyrox-json-tree");
     tree.innerHTML = "";
-    if (p.parsed.json) {
+
+    if (p.parsed._loading) {
+      const loading = document.createElement("div");
+      loading.className = "zyrox-loading";
+      loading.textContent = "Decoding binary data…";
+      tree.appendChild(loading);
+    } else if (p.parsed.json) {
       tree.appendChild(renderJsonNode(p.parsed.json));
-    } else {
+    } else if (p.parsed.text) {
       const pre = document.createElement("pre");
-      pre.style.cssText = "font-size:10px;color:rgba(255,255,255,0.42);white-space:pre-wrap;word-break:break-all;margin:0;";
-      pre.textContent = getBodyPreview(p.parsed, 8000);
+      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre-wrap;word-break:break-all;margin:0;";
+      pre.textContent = p.parsed.text;
       tree.appendChild(pre);
+    } else {
+      const fallback = document.createElement("pre");
+      fallback.style.cssText = "font-size:14px;color:rgba(255,255,255,0.42);white-space:pre-wrap;word-break:break-all;margin:0;";
+      fallback.textContent = getBodyPreview(p.parsed, 8000);
+      tree.appendChild(fallback);
     }
 
-    // Raw pane
+    // ── Raw tab ──
     sidebar.querySelector("#zyrox-raw-content").textContent = getFullBody(p.parsed);
+
+    // ── Hex tab ──
+    const hexEl = sidebar.querySelector("#zyrox-hex-content");
+    hexEl.innerHTML = "";
+    if (p.parsed.hex) {
+      const meta = document.createElement("div");
+      meta.className = "zyrox-binary-meta";
+      meta.innerHTML = `<span>${p.parsed.bytes}</span> bytes · ${p.parsed.kind}`;
+      hexEl.appendChild(meta);
+      const dump = document.createElement("div");
+      dump.className = "zyrox-hex-dump";
+      dump.textContent = p.parsed.hex;
+      hexEl.appendChild(dump);
+    } else {
+      const na = document.createElement("div");
+      na.style.cssText = "font-size:13px;color:rgba(255,255,255,0.25);";
+      na.textContent = "No binary data";
+      hexEl.appendChild(na);
+    }
 
     // Highlight active row
     listEl.querySelectorAll(".zyrox-packet").forEach(el =>
@@ -660,14 +761,14 @@
   // ─── JSON tree renderer ───────────────────────────────────────────────────────
   function renderJsonNode(value) {
     const frag = document.createDocumentFragment();
-    if (Array.isArray(value))                         frag.appendChild(renderCollection(value, "[", "]"));
-    else if (value !== null && typeof value === "object") frag.appendChild(renderCollection(value, "{", "}"));
-    else                                               frag.appendChild(renderPrimitive(value));
+    if (Array.isArray(value))                              frag.appendChild(renderCollection(value, "[", "]"));
+    else if (value !== null && typeof value === "object")  frag.appendChild(renderCollection(value, "{", "}"));
+    else                                                   frag.appendChild(renderPrimitive(value));
     return frag;
   }
 
   function renderCollection(obj, open, close) {
-    const isArr  = Array.isArray(obj);
+    const isArr   = Array.isArray(obj);
     const entries = isArr ? obj.map((v, i) => [i, v]) : Object.entries(obj);
     const wrapper = document.createElement("span");
 
@@ -690,33 +791,27 @@
     entries.forEach(([k, v], i) => {
       const line = document.createElement("span");
       line.className = "zyrox-json-line";
-
       if (!isArr) {
         const keyS = document.createElement("span");
         keyS.className = "zyrox-json-key";
         keyS.textContent = `"${k}": `;
         line.appendChild(keyS);
       }
-
       line.appendChild(renderJsonNode(v));
-
       if (i < entries.length - 1) {
         const comma = document.createElement("span");
         comma.className = "zyrox-json-brace";
         comma.textContent = ",";
         line.appendChild(comma);
       }
-
       block.appendChild(line);
     });
 
     wrapper.appendChild(block);
-
     const closeB = document.createElement("span");
     closeB.className = "zyrox-json-brace";
     closeB.textContent = close;
     wrapper.appendChild(closeB);
-
     return wrapper;
   }
 
@@ -738,19 +833,28 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
   }
   function getTypeTag(parsed) {
-    return parsed.socketName || parsed.engineName || parsed.kind || "RAW";
+    if (parsed.socketName) return parsed.socketName;
+    if (parsed.engineName) return parsed.engineName;
+    if (parsed.kind)       return `${parsed.kind} (${parsed.bytes ?? "?"} B)`;
+    return "RAW";
   }
   function getBodyPreview(parsed, limit = 100) {
-    let src = null;
-    if (parsed.json) { try { src = JSON.stringify(parsed.json); } catch { /**/ } }
-    src = src || parsed.body || parsed.payload || (parsed.raw != null ? String(parsed.raw) : null);
-    if (src) return src.slice(0, limit);
-    if (parsed.kind) return `[${parsed.kind} ${parsed.bytes ?? parsed.size ?? "?"} bytes]`;
+    // For binary packets, prefer decoded text over metadata
+    if (parsed.json)  { try { return JSON.stringify(parsed.json).slice(0, limit); } catch { /**/ } }
+    if (parsed.text)  { return parsed.text.slice(0, limit); }
+    if (parsed.body)  { return parsed.body.slice(0, limit); }
+    if (parsed.payload) { return parsed.payload.slice(0, limit); }
+    if (parsed.raw != null) { return String(parsed.raw).slice(0, limit); }
+    if (parsed.hex)   { return parsed.hex.slice(0, limit); }
+    if (parsed.kind)  { return `[${parsed.kind} · ${parsed.bytes ?? parsed.size ?? "?"} bytes]`; }
     return "";
   }
   function getFullBody(parsed) {
-    if (parsed.json) { try { return JSON.stringify(parsed.json, null, 2); } catch { /**/ } }
-    return parsed.raw != null ? String(parsed.raw) : JSON.stringify(parsed);
+    if (parsed.json)  { try { return JSON.stringify(parsed.json, null, 2); } catch { /**/ } }
+    if (parsed.text)  { return parsed.text; }
+    if (parsed.raw != null) { return String(parsed.raw); }
+    if (parsed.hex)   { return parsed.hex; }
+    return JSON.stringify(parsed);
   }
   function escapeHtml(str) {
     return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -770,7 +874,7 @@
 
     el.innerHTML = `
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
-      <span class="zyrox-type-tag">${getTypeTag(p.parsed)}</span>
+      <span class="zyrox-type-tag">${escapeHtml(getTypeTag(p.parsed))}</span>
       <span class="zyrox-body-preview">${escapeHtml(getBodyPreview(p.parsed))}</span>
       <span class="zyrox-time">${formatTime(p.timestamp)}</span>
     `;
@@ -866,7 +970,7 @@
   function init() {
     injectStyles();
     buildSidebar();
-    console.log(PREFIX, "v0.3.0 installed — press [K] to toggle");
+    console.log(PREFIX, "v0.4.0 installed — press [K] to toggle");
   }
 
   if (document.body) {
