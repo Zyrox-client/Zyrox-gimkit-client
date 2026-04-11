@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.1
+// @version      1.8.2
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -3053,8 +3053,23 @@
   const LEGACY_ANIMATION_SKIP_MODULE_NAME = "Animation Skip";
   const ANIMATION_SKIP_STYLE_ID = "zyrox-animation-skip-style";
   let originalElementAnimate = null;
+  let animationSkipRouteWatcher = null;
 
-  function startAnimationSkip() {
+  function shouldPauseAnimationSkipForJoinMenu() {
+    return String(location?.pathname || "").startsWith("/join");
+  }
+
+  function applyAnimationSkipState(enabled) {
+    if (!enabled) {
+      const styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
+      if (styleEl) styleEl.remove();
+      if (originalElementAnimate && typeof Element !== "undefined") {
+        Element.prototype.animate = originalElementAnimate;
+        originalElementAnimate = null;
+      }
+      return;
+    }
+
     let styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
     if (!styleEl) {
       styleEl = document.createElement("style");
@@ -3089,13 +3104,19 @@
     }
   }
 
+  function startAnimationSkip() {
+    const syncMode = () => applyAnimationSkipState(!shouldPauseAnimationSkipForJoinMenu());
+    syncMode();
+    if (animationSkipRouteWatcher) clearInterval(animationSkipRouteWatcher);
+    animationSkipRouteWatcher = setInterval(syncMode, 400);
+  }
+
   function stopAnimationSkip() {
-    const styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
-    if (styleEl) styleEl.remove();
-    if (originalElementAnimate && typeof Element !== "undefined") {
-      Element.prototype.animate = originalElementAnimate;
-      originalElementAnimate = null;
+    if (animationSkipRouteWatcher) {
+      clearInterval(animationSkipRouteWatcher);
+      animationSkipRouteWatcher = null;
     }
+    applyAnimationSkipState(false);
   }
 
   const MODULE_BEHAVIORS = {
