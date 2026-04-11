@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.6
+// @version      1.8.7
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.8.6";
+    const CLIENT_VERSION = "1.8.7";
     return CLIENT_VERSION;
   }
 
@@ -916,6 +916,18 @@
     return { encode, decode };
   })();
 
+  function decodeBlueboatBinaryPacket(packet) {
+    if (!(packet instanceof ArrayBuffer)) return null;
+    const bytes = new Uint8Array(packet);
+    if (!bytes.byteLength || bytes[0] !== 4) return null;
+    const decoded = msgpackDecode(packet.slice(1), 0)?.value;
+    if (!decoded || typeof decoded !== "object") return null;
+    const data = decoded?.data;
+    const eventName = Array.isArray(data) ? data[0] : null;
+    const payload = Array.isArray(data) ? data[1] : data;
+    return { eventName, payload, raw: decoded };
+  }
+
   class SocketManager extends EventTarget {
     constructor() {
       super();
@@ -988,8 +1000,19 @@
             }
           }
         } else {
-          decoded = blueboat.decode(e.data);
-          if (decoded) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: decoded }));
+          decoded = decodeBlueboatBinaryPacket(e.data);
+          if (!decoded) {
+            const fallback = blueboat.decode(e.data);
+            if (fallback) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: fallback }));
+          } else {
+            const payload = decoded.payload;
+            if (payload && typeof payload === "object") {
+              const normalized = { ...payload, eventName: decoded.eventName, payload, raw: decoded.raw };
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalized }));
+            } else {
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: { payload, eventName: decoded.eventName, raw: decoded.raw } }));
+            }
+          }
         }
       });
     }
@@ -1255,7 +1278,11 @@
     if (key !== "STATE_UPDATE") return;
     const stateUpdate = packet?.data ?? packet?.payload?.data ?? packet?.payload ?? packet;
     const levels = extractUpgradeLevelsFromStateUpdate(stateUpdate);
-    if (!levels) return;
+    if (!levels) {
+      upgradeHudLog("STATE_UPDATE received but no UPGRADE_LEVELS found", { packet, stateUpdate });
+      return;
+    }
+    upgradeHudLog("UPGRADE_LEVELS packet detected", { levels, packet });
     updateUpgradeHudLevels(levels);
   });
 
@@ -3075,6 +3102,12 @@
       insurance: 1,
     },
   };
+  const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
+
+  function upgradeHudLog(message, extra) {
+    if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
+    else console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`, extra);
+  }
 
   function ensureUpgradeHudContainer() {
     if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
@@ -3144,21 +3177,25 @@
 
   function updateUpgradeHudLevels(nextLevels) {
     if (!nextLevels || typeof nextLevels !== "object") return;
+    const before = { ...upgradeHudState.levels };
     for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
       if (typeof nextLevels[key] === "undefined") continue;
       const n = Number(nextLevels[key]);
       upgradeHudState.levels[key] = Number.isFinite(n) ? n : 1;
     }
+    upgradeHudLog("Applied UPGRADE_LEVELS update", { before, incoming: nextLevels, after: { ...upgradeHudState.levels } });
     if (upgradeHudState.enabled) renderUpgradeHud();
   }
 
   function startUpgradeHud() {
     upgradeHudState.enabled = true;
+    upgradeHudLog("Enabled");
     renderUpgradeHud();
   }
 
   function stopUpgradeHud() {
     upgradeHudState.enabled = false;
+    upgradeHudLog("Disabled");
     if (upgradeHudState.container) {
       upgradeHudState.container.style.display = "none";
     }
