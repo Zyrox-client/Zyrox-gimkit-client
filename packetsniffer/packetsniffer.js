@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.0.4
+// @version      1.0.5
 // @description  Logs every websocket packet with a split-pane sidebar UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -15,7 +15,7 @@
   // ─── Constants ────────────────────────────────────────────────────────────────
   const PREFIX = "[PacketSniffer]";
   const MAX_PACKETS = 500;
-  const DEFAULT_WIDTH = 800;
+  const DEFAULT_WIDTH = 880;
   const MIN_WIDTH = 320;
   const COLYSEUS_ROOM_DATA = 13;
 
@@ -228,9 +228,10 @@
   let decodeStructuredBinaryEnabled = true;
   let selectedId = null;
   let currentWidth = DEFAULT_WIDTH;
+  let viewerWidthPercent = 68.75;
   let initialized = false;
 
-  let sidebar, listEl, countEl, filterInput, viewerPanel;
+  let sidebar, listEl, countEl, filterInput, viewerPanel, bodyEl, dividerEl;
 
   // ─── Page margin ─────────────────────────────────────────────────────────────
   function applyPageMargin() {
@@ -469,15 +470,16 @@
 
       /* ── Divider ── */
       #zyrox-divider {
-        width: 1px; flex-shrink: 0;
+        width: 6px; flex-shrink: 0;
         background: rgba(255,255,255,0.07);
         display: none;
+        cursor: col-resize;
       }
       #zyrox-divider.visible { display: block; }
 
       /* ── Viewer panel ── */
       #zyrox-viewer {
-        width: 68.75%; flex-shrink: 0;
+        width: ${viewerWidthPercent}%; flex-shrink: 0;
         display: none;
         flex-direction: column;
         background: rgba(4, 6, 14, 0.65);
@@ -713,6 +715,8 @@
     countEl     = sidebar.querySelector("#zyrox-count");
     filterInput = sidebar.querySelector("#zyrox-filter-input");
     viewerPanel = sidebar.querySelector("#zyrox-viewer");
+    bodyEl      = sidebar.querySelector("#zyrox-body");
+    dividerEl   = sidebar.querySelector("#zyrox-divider");
 
     // ── Wire events ──
     sidebar.querySelector("#zyrox-toggle-btn").addEventListener("click", toggleSidebar);
@@ -752,6 +756,34 @@
     });
 
     sidebar.querySelector("#zyrox-viewer-close").addEventListener("click", closeViewer);
+
+    // ── Viewer/List splitter ──
+    let splitDragging = false;
+    dividerEl.addEventListener("mousedown", (e) => {
+      splitDragging = viewerPanel.classList.contains("visible");
+      if (!splitDragging) return;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!splitDragging) return;
+      const rect = bodyEl.getBoundingClientRect();
+      const viewerPx = rect.right - e.clientX;
+      const minPx = 220;
+      const maxPx = rect.width - 180;
+      const clampedPx = Math.max(minPx, Math.min(maxPx, viewerPx));
+      viewerWidthPercent = (clampedPx / rect.width) * 100;
+      viewerPanel.style.width = `${viewerWidthPercent}%`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!splitDragging) return;
+      splitDragging = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
 
     sidebar.querySelectorAll(".zyrox-tab").forEach(tab => {
       tab.addEventListener("click", () => {
@@ -821,7 +853,8 @@
   function openViewer(p) {
     selectedId = p.id;
     viewerPanel.classList.add("visible");
-    sidebar.querySelector("#zyrox-divider").classList.add("visible");
+    dividerEl.classList.add("visible");
+    viewerPanel.style.width = `${viewerWidthPercent}%`;
 
     const dirEl = sidebar.querySelector("#zyrox-viewer-dir");
     dirEl.textContent = p.direction;
@@ -892,7 +925,7 @@
   function closeViewer() {
     selectedId = null;
     viewerPanel.classList.remove("visible");
-    sidebar.querySelector("#zyrox-divider").classList.remove("visible");
+    dividerEl.classList.remove("visible");
     listEl.querySelectorAll(".zyrox-packet.active").forEach(el => el.classList.remove("active"));
   }
 
@@ -983,9 +1016,11 @@
   function getListTypeTag(parsed) {
     const rawType = getTypeTag(parsed);
     return rawType
-      .replace(/wss?:\/\/[^\s/]+/gi, "[ws]")
-      .replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, "[ip]")
+      .replace(/wss?:\/\/[^\s]+/gi, "")
+      .replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\b/g, "")
+      .replace(/\b[a-f0-9:]{2,}\b(?::\d+)?/gi, "")
       .replace(/\[[^\]]+\]/g, "")
+      .replace(/[/:]+$/g, "")
       .replace(/\s+/g, " ")
       .trim() || "RAW";
   }
