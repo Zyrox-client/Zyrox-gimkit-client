@@ -591,11 +591,10 @@
       .zyrox-json-brace { color: rgba(255,255,255,0.38); }
       .zyrox-json-indent { display: block; padding-left: 20px; }
       .zyrox-json-line {
-        display: flex;
-        gap: 4px;
-        white-space: pre;
-        word-break: normal;
-        flex-wrap: nowrap;
+        display: block;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
       }
 
       /* Hex dump */
@@ -634,18 +633,6 @@
         background: rgba(0,0,0,0.2);
       }
       #zyrox-status { font-size: 12px; color: rgba(255,255,255,0.2); letter-spacing: 0.05em; }
-      #zyrox-autoscroll-toggle {
-        display: flex; align-items: center; gap: 6px;
-        cursor: pointer; font-size: 12px; color: rgba(255,255,255,0.28);
-        letter-spacing: 0.05em; transition: color 0.15s;
-      }
-      #zyrox-autoscroll-toggle:hover { color: rgba(255,255,255,0.55); }
-      #zyrox-autoscroll-toggle.on { color: rgba(0,255,136,0.65); }
-      #zyrox-autoscroll-dot {
-        width: 7px; height: 7px; border-radius: 50%;
-        background: rgba(255,255,255,0.18); transition: background 0.15s;
-      }
-      #zyrox-autoscroll-toggle.on #zyrox-autoscroll-dot { background: #00ff88; }
 
     `;
     document.head.appendChild(style);
@@ -708,10 +695,6 @@
       </div>
       <div id="zyrox-footer">
         <span id="zyrox-status">CONNECTED</span>
-        <div id="zyrox-autoscroll-toggle" class="on">
-          <div id="zyrox-autoscroll-dot"></div>
-          AUTO-SCROLL
-        </div>
       </div>
     `;
 
@@ -754,11 +737,6 @@
         });
         rerenderList();
       });
-    });
-
-    sidebar.querySelector("#zyrox-autoscroll-toggle").addEventListener("click", function() {
-      autoScroll = !autoScroll;
-      this.classList.toggle("on", autoScroll);
     });
 
     sidebar.querySelector("#zyrox-viewer-close").addEventListener("click", closeViewer);
@@ -1082,7 +1060,6 @@
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
       <span class="zyrox-type-tag">${escapeHtml(getListTypeTag(p.parsed))}</span>
       <span class="zyrox-len-tag">len: ${getPacketLength(p.parsed)}</span>
-      <span class="zyrox-time">${formatTime(p.timestamp)}</span>
     `;
 
     el.addEventListener("click", () => {
