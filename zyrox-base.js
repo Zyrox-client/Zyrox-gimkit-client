@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.5
+// @version      1.8.6
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -1250,10 +1250,13 @@
   });
 
   socketManager.addEventListener("blueboatMessage", (event) => {
-    if (event.detail?.key !== "STATE_UPDATE") return;
-    const update = event.detail?.data;
-    if (update?.type !== "UPGRADE_LEVELS") return;
-    updateUpgradeHudLevels(update.value);
+    const packet = event.detail;
+    const key = packet?.key ?? packet?.payload?.key ?? packet?.data?.key;
+    if (key !== "STATE_UPDATE") return;
+    const stateUpdate = packet?.data ?? packet?.payload?.data ?? packet?.payload ?? packet;
+    const levels = extractUpgradeLevelsFromStateUpdate(stateUpdate);
+    if (!levels) return;
+    updateUpgradeHudLevels(levels);
   });
 
   answerInterval = setInterval(() => {
@@ -3112,6 +3115,33 @@
     hud.style.display = upgradeHudState.enabled ? "block" : "none";
   }
 
+  function extractUpgradeLevelsFromStateUpdate(stateUpdate) {
+    const tryReadLevels = (entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      if (entry.type === "UPGRADE_LEVELS" && entry.value && typeof entry.value === "object") return entry.value;
+      return null;
+    };
+
+    const direct = tryReadLevels(stateUpdate);
+    if (direct) return direct;
+
+    if (Array.isArray(stateUpdate)) {
+      for (const entry of stateUpdate) {
+        const levels = tryReadLevels(entry);
+        if (levels) return levels;
+      }
+    }
+
+    if (stateUpdate && typeof stateUpdate === "object") {
+      const nested = tryReadLevels(stateUpdate.data);
+      if (nested) return nested;
+      const payloadNested = tryReadLevels(stateUpdate.payload?.data);
+      if (payloadNested) return payloadNested;
+    }
+
+    return null;
+  }
+
   function updateUpgradeHudLevels(nextLevels) {
     if (!nextLevels || typeof nextLevels !== "object") return;
     for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
@@ -4770,100 +4800,6 @@
       }
     }
     return answers;
-  }
-
-  const UPGRADE_HUD_LABELS = {
-    moneyPerQuestion: "Money / Question",
-    streakBonus: "Streak Bonus",
-    multiplier: "Multiplier",
-    insurance: "Insurance",
-  };
-  const upgradeHudState = {
-    enabled: false,
-    container: null,
-    levels: {
-      moneyPerQuestion: 1,
-      streakBonus: 1,
-      multiplier: 1,
-      insurance: 1,
-    },
-  };
-
-  function ensureUpgradeHudContainer() {
-    if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
-    const hud = document.createElement("div");
-    hud.className = "zyrox-upgrade-hud";
-    hud.style.cssText = [
-      "position:fixed",
-      "top:14px",
-      "right:14px",
-      "min-width:220px",
-      "max-width:min(38vw,360px)",
-      "padding:10px 12px",
-      "border-radius:10px",
-      "background:rgba(8,12,17,.88)",
-      "border:1px solid rgba(255,255,255,.14)",
-      "box-shadow:0 12px 30px rgba(0,0,0,.42)",
-      "z-index:2147483646",
-      "color:#fff",
-      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
-      "display:none",
-      "pointer-events:none",
-    ].join(";");
-    document.documentElement.appendChild(hud);
-    upgradeHudState.container = hud;
-    return hud;
-  }
-
-  function renderUpgradeHud() {
-    const hud = ensureUpgradeHudContainer();
-    const rows = Object.keys(UPGRADE_HUD_LABELS)
-      .map((key) => {
-        const label = UPGRADE_HUD_LABELS[key];
-        const level = Number(upgradeHudState.levels[key]) || 1;
-        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
-      })
-      .join("");
-    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Classic / Tycoon Upgrades</div>${rows}`;
-    hud.style.display = upgradeHudState.enabled ? "block" : "none";
-  }
-
-  function updateUpgradeHudLevels(nextLevels) {
-    if (!nextLevels || typeof nextLevels !== "object") return;
-    for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
-      if (typeof nextLevels[key] === "undefined") continue;
-      const n = Number(nextLevels[key]);
-      upgradeHudState.levels[key] = Number.isFinite(n) ? n : 1;
-    }
-    if (upgradeHudState.enabled) renderUpgradeHud();
-  }
-
-  function startUpgradeHud() {
-    upgradeHudState.enabled = true;
-    renderUpgradeHud();
-  }
-
-  function stopUpgradeHud() {
-    upgradeHudState.enabled = false;
-    if (upgradeHudState.container) {
-      upgradeHudState.container.style.display = "none";
-    }
-  }
-
-  function startAnswerPopup() {
-    answerPopupState.enabled = true;
-  }
-
-  function stopAnswerPopup() {
-    answerPopupState.enabled = false;
-    if (answerPopupState.timeoutId) {
-      clearTimeout(answerPopupState.timeoutId);
-      answerPopupState.timeoutId = null;
-    }
-    if (answerPopupState.container) {
-      answerPopupState.container.style.opacity = "0";
-      answerPopupState.container.style.display = "none";
-    }
   }
 
   function closeConfig() {
