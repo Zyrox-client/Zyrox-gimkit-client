@@ -228,6 +228,7 @@
   let decodeStructuredBinaryEnabled = true;
   let selectedId = null;
   let currentWidth = DEFAULT_WIDTH;
+  let initialized = false;
 
   let sidebar, listEl, countEl, filterInput, viewerPanel;
 
@@ -1107,6 +1108,12 @@
 
   // ─── Init ─────────────────────────────────────────────────────────────────────
   function init() {
+    if (initialized) return;
+    if (document.getElementById("zyrox-sidebar")) {
+      initialized = true;
+      return;
+    }
+    initialized = true;
     injectStyles();
     buildSidebar();
     console.log(PREFIX, "v0.4.0 installed — press [K] to toggle");
