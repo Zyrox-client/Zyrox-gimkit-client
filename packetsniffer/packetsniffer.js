@@ -567,7 +567,7 @@
       }
       .zyrox-view-pane {
         position: absolute; inset: 0;
-        overflow-y: auto;
+        overflow: auto;
         padding: 12px 14px;
         display: none;
         /* SELECTABLE */
@@ -590,7 +590,13 @@
       .zyrox-json-null  { color: rgba(255,255,255,0.3); }
       .zyrox-json-brace { color: rgba(255,255,255,0.38); }
       .zyrox-json-indent { display: block; padding-left: 20px; }
-      .zyrox-json-line { display: flex; gap: 4px; white-space: pre-wrap; word-break: break-all; }
+      .zyrox-json-line {
+        display: flex;
+        gap: 4px;
+        white-space: pre;
+        word-break: normal;
+        flex-wrap: nowrap;
+      }
 
       /* Hex dump */
       .zyrox-hex-dump {
@@ -1108,7 +1114,7 @@
     const parsed = typeof payload === "string" ? parseTextPacket(payload) : parseBinaryPacket(payload);
 
     console.log(PREFIX, direction, {
-      url: socket.url, readyState: socket.readyState,
+      readyState: socket.readyState,
       parsed, raw: payload, timestamp: new Date().toISOString(),
     });
 
