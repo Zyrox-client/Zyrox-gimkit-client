@@ -17,6 +17,7 @@
   const MAX_PACKETS = 500;
   const DEFAULT_WIDTH = 800;
   const MIN_WIDTH = 320;
+  const COLYSEUS_ROOM_DATA = 13;
 
   const ENGINE_PACKET_TYPES = {
     "0": "OPEN", "1": "CLOSE", "2": "PING", "3": "PONG",
@@ -56,6 +57,110 @@
     return parts.join("");
   }
 
+  function msgpackDecode(buffer, startOffset = 0) {
+    const view = new DataView(buffer);
+    let offset = startOffset;
+
+    const readString = (len) => {
+      let out = "";
+      const end = offset + len;
+      while (offset < end) {
+        const byte = view.getUint8(offset++);
+        if ((byte & 0x80) === 0) out += String.fromCharCode(byte);
+        else if ((byte & 0xe0) === 0xc0) out += String.fromCharCode(((byte & 0x1f) << 6) | (view.getUint8(offset++) & 0x3f));
+        else if ((byte & 0xf0) === 0xe0) out += String.fromCharCode(((byte & 0x0f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f));
+        else {
+          const codePoint = ((byte & 0x07) << 18) | ((view.getUint8(offset++) & 0x3f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f);
+          const cp = codePoint - 0x10000;
+          out += String.fromCharCode((cp >> 10) + 0xd800, (cp & 1023) + 0xdc00);
+        }
+      }
+      return out;
+    };
+
+    const read = () => {
+      const token = view.getUint8(offset++);
+      if (token < 0x80) return token;
+      if (token < 0x90) {
+        const size = token & 0x0f;
+        const map = {};
+        for (let i = 0; i < size; i++) map[read()] = read();
+        return map;
+      }
+      if (token < 0xa0) {
+        const size = token & 0x0f;
+        const arr = [];
+        for (let i = 0; i < size; i++) arr.push(read());
+        return arr;
+      }
+      if (token < 0xc0) return readString(token & 0x1f);
+      if (token > 0xdf) return token - 256;
+
+      switch (token) {
+        case 192: return null;
+        case 194: return false;
+        case 195: return true;
+        case 196: { const n = view.getUint8(offset); offset += 1; const out = buffer.slice(offset, offset + n); offset += n; return out; }
+        case 197: { const n = view.getUint16(offset); offset += 2; const out = buffer.slice(offset, offset + n); offset += n; return out; }
+        case 198: { const n = view.getUint32(offset); offset += 4; const out = buffer.slice(offset, offset + n); offset += n; return out; }
+        case 202: { const v = view.getFloat32(offset); offset += 4; return v; }
+        case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
+        case 204: { const v = view.getUint8(offset); offset += 1; return v; }
+        case 205: { const v = view.getUint16(offset); offset += 2; return v; }
+        case 206: { const v = view.getUint32(offset); offset += 4; return v; }
+        case 208: { const v = view.getInt8(offset); offset += 1; return v; }
+        case 209: { const v = view.getInt16(offset); offset += 2; return v; }
+        case 210: { const v = view.getInt32(offset); offset += 4; return v; }
+        case 217: { const n = view.getUint8(offset); offset += 1; return readString(n); }
+        case 218: { const n = view.getUint16(offset); offset += 2; return readString(n); }
+        case 219: { const n = view.getUint32(offset); offset += 4; return readString(n); }
+        case 220: { const n = view.getUint16(offset); offset += 2; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
+        case 221: { const n = view.getUint32(offset); offset += 4; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
+        case 222: { const n = view.getUint16(offset); offset += 2; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
+        case 223: { const n = view.getUint32(offset); offset += 4; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
+        default: return null;
+      }
+    };
+
+    return { value: read(), offset };
+  }
+
+  function decodeColyseusPacket(packet) {
+    if (!(packet instanceof ArrayBuffer)) return null;
+    const bytes = new Uint8Array(packet);
+    if (bytes[0] !== COLYSEUS_ROOM_DATA) return null;
+
+    const first = msgpackDecode(packet, 1);
+    if (!first) return null;
+
+    let message = null;
+    if (bytes.byteLength > first.offset) {
+      const second = msgpackDecode(packet, first.offset);
+      message = second?.value;
+    }
+
+    return { transport: "colyseus", channel: first.value, body: message };
+  }
+
+  function decodeBlueboatBinary(packet) {
+    if (!(packet instanceof ArrayBuffer)) return null;
+    const bytes = new Uint8Array(packet);
+    if (!bytes.byteLength || bytes[0] !== 4) return null;
+
+    const decoded = msgpackDecode(packet.slice(1), 0)?.value;
+    if (!decoded || typeof decoded !== "object") return null;
+
+    const data = decoded?.data;
+    const eventName = Array.isArray(data) ? data[0] : null;
+    const eventPayload = Array.isArray(data) ? data[1] : data;
+
+    return { transport: "blueboat-binary", eventName, payload: eventPayload, raw: decoded };
+  }
+
+  function decodeStructuredBinary(buffer) {
+    return decodeColyseusPacket(buffer) || decodeBlueboatBinary(buffer);
+  }
+
   function parseBinaryPacket(value) {
     let bytes = null;
 
@@ -69,10 +174,18 @@
       value.arrayBuffer().then(buf => {
         const u8 = new Uint8Array(buf);
         meta.hex = toHex(u8);
+        if (decodeStructuredBinaryEnabled) {
+          const decoded = decodeStructuredBinary(buf);
+          if (decoded) {
+            meta.protocol = decoded.transport;
+            meta.json = decoded;
+            meta.text = JSON.stringify(decoded);
+          }
+        }
         meta._loading = false;
         try {
-          meta.text = new TextDecoder("utf-8", { fatal: true }).decode(u8);
-          meta.json = tryJson(meta.text);
+          if (!meta.text) meta.text = new TextDecoder("utf-8", { fatal: true }).decode(u8);
+          if (!meta.json) meta.json = tryJson(meta.text);
         } catch { /**/ }
         // If this packet is currently open in the viewer, refresh it
         const p = packets.find(x => x.parsed === meta);
@@ -85,12 +198,24 @@
 
     const hex = toHex(bytes);
     let text = null, json = null;
+    let protocol = null;
+
+    if (decodeStructuredBinaryEnabled) {
+      const rawBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const decoded = decodeStructuredBinary(rawBuffer);
+      if (decoded) {
+        protocol = decoded.transport;
+        json = decoded;
+        text = JSON.stringify(decoded);
+      }
+    }
+
     try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      json = tryJson(text);
+      if (!text) text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      if (!json) json = tryJson(text);
     } catch { /**/ }
 
-    return { kind: "Binary", bytes: bytes.length, text, json, hex };
+    return { kind: "Binary", bytes: bytes.length, text, json, hex, protocol };
   }
 
   // ─── State ────────────────────────────────────────────────────────────────────
@@ -100,6 +225,7 @@
   let filterText = "";
   let filterDir = "ALL";
   let autoScroll = true;
+  let decodeStructuredBinaryEnabled = true;
   let selectedId = null;
   let currentWidth = DEFAULT_WIDTH;
 
@@ -258,6 +384,26 @@
         white-space: nowrap; flex-shrink: 0;
       }
       #zyrox-clear-btn:hover { background: rgba(255,60,60,0.12); color: #ff6464; border-color: rgba(255,60,60,0.3); }
+
+      #zyrox-decode-btn {
+        background: rgba(0,255,136,0.06);
+        border: 1px solid rgba(0,255,136,0.22);
+        color: rgba(0,255,136,0.7);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 13px;
+        padding: 5px 9px;
+        border-radius: 4px;
+        cursor: pointer;
+        letter-spacing: 0.04em;
+        transition: all 0.15s;
+        white-space: nowrap; flex-shrink: 0;
+      }
+      #zyrox-decode-btn.off {
+        background: rgba(255,255,255,0.03);
+        border-color: rgba(255,255,255,0.1);
+        color: rgba(255,255,255,0.4);
+      }
+      #zyrox-decode-btn:hover { border-color: rgba(0,255,136,0.45); color: #00ff88; }
 
       /* ── Split body ── */
       #zyrox-body {
@@ -423,6 +569,8 @@
         user-select: text;
         -webkit-user-select: text;
         cursor: text;
+        tab-size: 2;
+        -moz-tab-size: 2;
       }
       .zyrox-view-pane.active { display: block; }
       .zyrox-view-pane::-webkit-scrollbar { width: 5px; }
@@ -488,24 +636,6 @@
       }
       #zyrox-autoscroll-toggle.on #zyrox-autoscroll-dot { background: #00ff88; }
 
-      /* ── Hint tab ── */
-      #zyrox-hint {
-        position: fixed; top: 50%; right: 0;
-        transform: translateY(-50%);
-        z-index: 999998;
-        writing-mode: vertical-rl;
-        background: rgba(8,10,18,0.88);
-        border: 1px solid rgba(0,255,136,0.18); border-right: none;
-        color: rgba(0,255,136,0.45);
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px; letter-spacing: 0.1em;
-        padding: 12px 6px;
-        border-radius: 4px 0 0 4px;
-        cursor: pointer; transition: all 0.2s;
-        backdrop-filter: blur(8px);
-      }
-      #zyrox-hint:hover { color: #00ff88; background: rgba(0,255,136,0.07); }
-      #zyrox-hint.sidebar-open { opacity: 0; pointer-events: none; }
     `;
     document.head.appendChild(style);
   }
@@ -529,6 +659,7 @@
         <button class="zyrox-dir-btn active-all" data-dir="ALL">ALL</button>
         <button class="zyrox-dir-btn" data-dir="IN">IN</button>
         <button class="zyrox-dir-btn" data-dir="OUT">OUT</button>
+        <button id="zyrox-decode-btn">DEC ON</button>
         <button id="zyrox-clear-btn">CLR</button>
       </div>
       <div id="zyrox-body">
@@ -580,14 +711,6 @@
     filterInput = sidebar.querySelector("#zyrox-filter-input");
     viewerPanel = sidebar.querySelector("#zyrox-viewer");
 
-    // Hint tab
-    const hint = document.createElement("div");
-    hint.id = "zyrox-hint";
-    hint.textContent = "PACKETS [K]";
-    if (sidebarOpen) hint.classList.add("sidebar-open");
-    hint.addEventListener("click", toggleSidebar);
-    document.body.appendChild(hint);
-
     // ── Wire events ──
     sidebar.querySelector("#zyrox-toggle-btn").addEventListener("click", toggleSidebar);
 
@@ -596,6 +719,12 @@
       listEl.innerHTML = "";
       closeViewer();
       updateCount();
+    });
+
+    sidebar.querySelector("#zyrox-decode-btn").addEventListener("click", function() {
+      decodeStructuredBinaryEnabled = !decodeStructuredBinaryEnabled;
+      this.textContent = decodeStructuredBinaryEnabled ? "DEC ON" : "DEC OFF";
+      this.classList.toggle("off", !decodeStructuredBinaryEnabled);
     });
 
     filterInput.addEventListener("input", () => {
@@ -682,7 +811,6 @@
   function toggleSidebar() {
     sidebarOpen = !sidebarOpen;
     sidebar.classList.toggle("hidden", !sidebarOpen);
-    document.getElementById("zyrox-hint")?.classList.toggle("sidebar-open", sidebarOpen);
     applyPageMargin();
   }
 
@@ -710,7 +838,14 @@
       loading.textContent = "Decoding binary data…";
       tree.appendChild(loading);
     } else if (p.parsed.json) {
-      tree.appendChild(renderJsonNode(p.parsed.json));
+      const pre = document.createElement("pre");
+      pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.6);white-space:pre-wrap;word-break:break-word;margin:0;";
+      try {
+        pre.textContent = JSON.stringify(p.parsed.json, null, 2);
+      } catch {
+        pre.textContent = String(p.parsed.json);
+      }
+      tree.appendChild(pre);
     } else if (p.parsed.text) {
       const pre = document.createElement("pre");
       pre.style.cssText = "font-size:14px;color:rgba(255,255,255,0.5);white-space:pre-wrap;word-break:break-all;margin:0;";
@@ -833,6 +968,10 @@
     return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
   }
   function getTypeTag(parsed) {
+    if (parsed.protocol === "colyseus") return "COLYSEUS";
+    if (parsed.protocol === "blueboat-binary") return "BLUEBOAT_BINARY";
+    if (parsed.transport === "colyseus") return `COLYSEUS/${String(parsed.channel)}`;
+    if (parsed.transport === "blueboat-binary") return parsed.eventName ? `BLUEBOAT_BINARY/${parsed.eventName}` : "BLUEBOAT_BINARY";
     if (parsed.socketName) return parsed.socketName;
     if (parsed.engineName) return parsed.engineName;
     if (parsed.kind)       return `${parsed.kind} (${parsed.bytes ?? "?"} B)`;
@@ -842,8 +981,8 @@
     // For binary packets, prefer decoded text over metadata
     if (parsed.json)  { try { return JSON.stringify(parsed.json).slice(0, limit); } catch { /**/ } }
     if (parsed.text)  { return parsed.text.slice(0, limit); }
-    if (parsed.body)  { return parsed.body.slice(0, limit); }
-    if (parsed.payload) { return parsed.payload.slice(0, limit); }
+    if (parsed.body != null)  { return typeof parsed.body === "string" ? parsed.body.slice(0, limit) : JSON.stringify(parsed.body).slice(0, limit); }
+    if (parsed.payload != null) { return typeof parsed.payload === "string" ? parsed.payload.slice(0, limit) : JSON.stringify(parsed.payload).slice(0, limit); }
     if (parsed.raw != null) { return String(parsed.raw).slice(0, limit); }
     if (parsed.hex)   { return parsed.hex.slice(0, limit); }
     if (parsed.kind)  { return `[${parsed.kind} · ${parsed.bytes ?? parsed.size ?? "?"} bytes]`; }
