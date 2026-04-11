@@ -434,7 +434,7 @@
 
       .zyrox-packet {
         display: grid;
-        grid-template-columns: 38px 72px 1fr auto;
+        grid-template-columns: 38px minmax(120px, 1fr) auto auto;
         gap: 0 8px;
         align-items: center;
         padding: 7px 12px;
@@ -459,9 +459,11 @@
         color: rgba(255,255,255,0.28);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      .zyrox-body-preview {
-        font-size: 13px; color: rgba(255,255,255,0.5);
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+      .zyrox-len-tag {
+        font-size: 12px;
+        color: rgba(255,255,255,0.36);
+        white-space: nowrap;
+        letter-spacing: 0.03em;
       }
       .zyrox-time { font-size: 12px; color: rgba(255,255,255,0.18); white-space: nowrap; }
 
@@ -996,6 +998,20 @@
     if (parsed.hex)   { return parsed.hex; }
     return JSON.stringify(parsed);
   }
+  function getPacketLength(parsed) {
+    if (typeof parsed.raw === "string") return parsed.raw.length;
+    if (typeof parsed.body === "string") return parsed.body.length;
+    if (typeof parsed.text === "string") return parsed.text.length;
+    if (typeof parsed.bytes === "number") return parsed.bytes;
+    if (parsed.hex) return parsed.hex.replace(/\s+/g, "").length / 2;
+    if (parsed.json) {
+      try { return JSON.stringify(parsed.json).length; } catch { /**/ }
+    }
+    if (parsed.payload != null) {
+      try { return JSON.stringify(parsed.payload).length; } catch { /**/ }
+    }
+    return 0;
+  }
   function escapeHtml(str) {
     return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
@@ -1015,7 +1031,7 @@
     el.innerHTML = `
       <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
       <span class="zyrox-type-tag">${escapeHtml(getTypeTag(p.parsed))}</span>
-      <span class="zyrox-body-preview">${escapeHtml(getBodyPreview(p.parsed))}</span>
+      <span class="zyrox-len-tag">len: ${getPacketLength(p.parsed)}</span>
       <span class="zyrox-time">${formatTime(p.timestamp)}</span>
     `;
 
