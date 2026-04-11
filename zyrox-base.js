@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.7.7";
+    const CLIENT_VERSION = "1.8.6";
     return CLIENT_VERSION;
   }
 
