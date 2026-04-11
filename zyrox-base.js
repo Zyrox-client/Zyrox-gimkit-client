@@ -3049,7 +3049,37 @@
     answerPopupState.lastRenderedAnswer = "";
   }
 
+  const ANIMATION_SKIP_STYLE_ID = "zyrox-animation-skip-style";
+
+  function startAnimationSkip() {
+    let styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
+    if (!styleEl) {
+      styleEl = document.createElement("style");
+      styleEl.id = ANIMATION_SKIP_STYLE_ID;
+      document.documentElement.appendChild(styleEl);
+    }
+    styleEl.textContent = `
+      *, *::before, *::after {
+        transition-duration: 0ms !important;
+        transition-delay: 0ms !important;
+        animation-duration: 0ms !important;
+        animation-delay: 0ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+      }
+    `;
+  }
+
+  function stopAnimationSkip() {
+    const styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
+    if (styleEl) styleEl.remove();
+  }
+
   const MODULE_BEHAVIORS = {
+    "Animation Skip": {
+      onEnable: startAnimationSkip,
+      onDisable: stopAnimationSkip,
+    },
     "ESP": {
       onEnable: startEsp,
       onDisable: stopEsp,
@@ -3075,9 +3105,10 @@
       onDisable: stopDrawItAnswerReveal,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
+  const WORKING_MODULES = new Set(["Auto Answer", "Animation Skip", "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Answer Reveal"]);
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
+    "Animation Skip": "Removes menu/UI transition and animation delays so interfaces open instantly.",
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
     "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
@@ -3158,6 +3189,16 @@
                   ],
                 },
               ],
+            },
+          ],
+        },
+        {
+          name: "Quality of life",
+          modules: [
+            {
+              name: "Animation Skip",
+              description: MODULE_DESCRIPTIONS["Animation Skip"],
+              settings: [],
             },
           ],
         },
