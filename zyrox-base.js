@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.1
+// @version      1.8.4
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -3138,8 +3138,28 @@
   const LEGACY_ANIMATION_SKIP_MODULE_NAME = "Animation Skip";
   const ANIMATION_SKIP_STYLE_ID = "zyrox-animation-skip-style";
   let originalElementAnimate = null;
+  let animationSkipRouteWatcher = null;
 
-  function startAnimationSkip() {
+  function isLikelyInActiveMatch() {
+    return !!document.querySelector("canvas");
+  }
+
+  function shouldPauseAnimationSkipForJoinMenu() {
+    const onJoinRoute = String(location?.pathname || "").startsWith("/join");
+    return onJoinRoute && !isLikelyInActiveMatch();
+  }
+
+  function applyAnimationSkipState(enabled) {
+    if (!enabled) {
+      const styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
+      if (styleEl) styleEl.remove();
+      if (originalElementAnimate && typeof Element !== "undefined") {
+        Element.prototype.animate = originalElementAnimate;
+        originalElementAnimate = null;
+      }
+      return;
+    }
+
     let styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
     if (!styleEl) {
       styleEl = document.createElement("style");
@@ -3174,13 +3194,19 @@
     }
   }
 
+  function startAnimationSkip() {
+    const syncMode = () => applyAnimationSkipState(!shouldPauseAnimationSkipForJoinMenu());
+    syncMode();
+    if (animationSkipRouteWatcher) clearInterval(animationSkipRouteWatcher);
+    animationSkipRouteWatcher = setInterval(syncMode, 400);
+  }
+
   function stopAnimationSkip() {
-    const styleEl = document.getElementById(ANIMATION_SKIP_STYLE_ID);
-    if (styleEl) styleEl.remove();
-    if (originalElementAnimate && typeof Element !== "undefined") {
-      Element.prototype.animate = originalElementAnimate;
-      originalElementAnimate = null;
+    if (animationSkipRouteWatcher) {
+      clearInterval(animationSkipRouteWatcher);
+      animationSkipRouteWatcher = null;
     }
+    applyAnimationSkipState(false);
   }
 
   const MODULE_BEHAVIORS = {
@@ -4744,6 +4770,100 @@
       }
     }
     return answers;
+  }
+
+  const UPGRADE_HUD_LABELS = {
+    moneyPerQuestion: "Money / Question",
+    streakBonus: "Streak Bonus",
+    multiplier: "Multiplier",
+    insurance: "Insurance",
+  };
+  const upgradeHudState = {
+    enabled: false,
+    container: null,
+    levels: {
+      moneyPerQuestion: 1,
+      streakBonus: 1,
+      multiplier: 1,
+      insurance: 1,
+    },
+  };
+
+  function ensureUpgradeHudContainer() {
+    if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
+    const hud = document.createElement("div");
+    hud.className = "zyrox-upgrade-hud";
+    hud.style.cssText = [
+      "position:fixed",
+      "top:14px",
+      "right:14px",
+      "min-width:220px",
+      "max-width:min(38vw,360px)",
+      "padding:10px 12px",
+      "border-radius:10px",
+      "background:rgba(8,12,17,.88)",
+      "border:1px solid rgba(255,255,255,.14)",
+      "box-shadow:0 12px 30px rgba(0,0,0,.42)",
+      "z-index:2147483646",
+      "color:#fff",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+      "display:none",
+      "pointer-events:none",
+    ].join(";");
+    document.documentElement.appendChild(hud);
+    upgradeHudState.container = hud;
+    return hud;
+  }
+
+  function renderUpgradeHud() {
+    const hud = ensureUpgradeHudContainer();
+    const rows = Object.keys(UPGRADE_HUD_LABELS)
+      .map((key) => {
+        const label = UPGRADE_HUD_LABELS[key];
+        const level = Number(upgradeHudState.levels[key]) || 1;
+        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
+      })
+      .join("");
+    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Classic / Tycoon Upgrades</div>${rows}`;
+    hud.style.display = upgradeHudState.enabled ? "block" : "none";
+  }
+
+  function updateUpgradeHudLevels(nextLevels) {
+    if (!nextLevels || typeof nextLevels !== "object") return;
+    for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
+      if (typeof nextLevels[key] === "undefined") continue;
+      const n = Number(nextLevels[key]);
+      upgradeHudState.levels[key] = Number.isFinite(n) ? n : 1;
+    }
+    if (upgradeHudState.enabled) renderUpgradeHud();
+  }
+
+  function startUpgradeHud() {
+    upgradeHudState.enabled = true;
+    renderUpgradeHud();
+  }
+
+  function stopUpgradeHud() {
+    upgradeHudState.enabled = false;
+    if (upgradeHudState.container) {
+      upgradeHudState.container.style.display = "none";
+    }
+  }
+
+  function startAnswerPopup() {
+    answerPopupState.enabled = true;
+  }
+
+  function stopAnswerPopup() {
+    answerPopupState.enabled = false;
+    if (answerPopupState.timeoutId) {
+      clearTimeout(answerPopupState.timeoutId);
+      answerPopupState.timeoutId = null;
+    }
+    if (answerPopupState.container) {
+      answerPopupState.container.style.opacity = "0";
+      answerPopupState.container.style.display = "none";
+    }
   }
 
   function closeConfig() {
