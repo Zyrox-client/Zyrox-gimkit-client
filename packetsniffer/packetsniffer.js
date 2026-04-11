@@ -636,24 +636,6 @@
       }
       #zyrox-autoscroll-toggle.on #zyrox-autoscroll-dot { background: #00ff88; }
 
-      /* ── Hint tab ── */
-      #zyrox-hint {
-        position: fixed; top: 50%; right: 0;
-        transform: translateY(-50%);
-        z-index: 999998;
-        writing-mode: vertical-rl;
-        background: rgba(8,10,18,0.88);
-        border: 1px solid rgba(0,255,136,0.18); border-right: none;
-        color: rgba(0,255,136,0.45);
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 12px; letter-spacing: 0.1em;
-        padding: 12px 6px;
-        border-radius: 4px 0 0 4px;
-        cursor: pointer; transition: all 0.2s;
-        backdrop-filter: blur(8px);
-      }
-      #zyrox-hint:hover { color: #00ff88; background: rgba(0,255,136,0.07); }
-      #zyrox-hint.sidebar-open { opacity: 0; pointer-events: none; }
     `;
     document.head.appendChild(style);
   }
@@ -728,14 +710,6 @@
     countEl     = sidebar.querySelector("#zyrox-count");
     filterInput = sidebar.querySelector("#zyrox-filter-input");
     viewerPanel = sidebar.querySelector("#zyrox-viewer");
-
-    // Hint tab
-    const hint = document.createElement("div");
-    hint.id = "zyrox-hint";
-    hint.textContent = "PACKETS [K]";
-    if (sidebarOpen) hint.classList.add("sidebar-open");
-    hint.addEventListener("click", toggleSidebar);
-    document.body.appendChild(hint);
 
     // ── Wire events ──
     sidebar.querySelector("#zyrox-toggle-btn").addEventListener("click", toggleSidebar);
@@ -837,7 +811,6 @@
   function toggleSidebar() {
     sidebarOpen = !sidebarOpen;
     sidebar.classList.toggle("hidden", !sidebarOpen);
-    document.getElementById("zyrox-hint")?.classList.toggle("sidebar-open", sidebarOpen);
     applyPageMargin();
   }
 
