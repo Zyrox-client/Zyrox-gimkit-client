@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.7
+// @version      1.8.8
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.8.7";
+    const CLIENT_VERSION = "1.8.8";
     return CLIENT_VERSION;
   }
 
@@ -1167,6 +1167,14 @@
     }
   }
 
+  function applyUpgradeLevelsFromStateUpdate(stateUpdateData, source = "unknown") {
+    const levels = extractUpgradeLevelsFromStateUpdate(stateUpdateData);
+    if (!levels) return false;
+    upgradeHudLog(`UPGRADE_LEVELS detected via ${source}`, levels);
+    updateUpgradeHudLevels(levels);
+    return true;
+  }
+
   function hookSocketDrawIt(ws) {
     if (drawItHookedSockets.has(ws)) return;
     drawItHookedSockets.add(ws);
@@ -1175,7 +1183,10 @@
       if (!decoded?.key) return;
       const key = decoded.key;
       if (DRAWIT_SKIP.has(key)) return;
-      if (key === "STATE_UPDATE") logAnswerCandidatesDrawItExact(decoded.data);
+      if (key === "STATE_UPDATE") {
+        logAnswerCandidatesDrawItExact(decoded.data);
+        applyUpgradeLevelsFromStateUpdate(decoded.data, "raw-ws-hook");
+      }
     });
   }
 
@@ -1277,13 +1288,10 @@
     const key = packet?.key ?? packet?.payload?.key ?? packet?.data?.key;
     if (key !== "STATE_UPDATE") return;
     const stateUpdate = packet?.data ?? packet?.payload?.data ?? packet?.payload ?? packet;
-    const levels = extractUpgradeLevelsFromStateUpdate(stateUpdate);
-    if (!levels) {
+    const applied = applyUpgradeLevelsFromStateUpdate(stateUpdate, "socketManager");
+    if (!applied) {
       upgradeHudLog("STATE_UPDATE received but no UPGRADE_LEVELS found", { packet, stateUpdate });
-      return;
     }
-    upgradeHudLog("UPGRADE_LEVELS packet detected", { levels, packet });
-    updateUpgradeHudLevels(levels);
   });
 
   answerInterval = setInterval(() => {
