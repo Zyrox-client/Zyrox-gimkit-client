@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.9
+// @version      2.0.0
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.9";
+    const CLIENT_VERSION = "2.0.0";
     return CLIENT_VERSION;
   }
 
@@ -1286,10 +1286,12 @@
   socketManager.addEventListener("blueboatMessage", (event) => {
     const packet = event.detail;
     const key = packet?.key ?? packet?.payload?.key ?? packet?.data?.key;
-    if (key !== "STATE_UPDATE") return;
+    const directType = packet?.type ?? packet?.data?.type ?? packet?.payload?.data?.type ?? null;
+    if (key !== "STATE_UPDATE" && directType !== "BALANCE" && directType !== "UPGRADE_LEVELS") return;
     const stateUpdate = packet?.data ?? packet?.payload?.data ?? packet?.payload ?? packet;
-    if (stateUpdate?.type === "BALANCE") {
-      updateUpgradeHudBalance(stateUpdate?.value);
+    const balance = extractBalanceFromStateUpdate(stateUpdate);
+    if (balance != null) {
+      updateUpgradeHudBalance(balance);
       return;
     }
     const applied = applyUpgradeLevelsFromStateUpdate(stateUpdate, "socketManager");
@@ -3372,6 +3374,34 @@
       if (nested) return nested;
       const payloadNested = tryReadLevels(stateUpdate.payload?.data);
       if (payloadNested) return payloadNested;
+    }
+
+    return null;
+  }
+
+  function extractBalanceFromStateUpdate(stateUpdate) {
+    const tryReadBalance = (entry) => {
+      if (!entry || typeof entry !== "object") return null;
+      if (entry.type !== "BALANCE") return null;
+      const parsed = Number(entry.value);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const direct = tryReadBalance(stateUpdate);
+    if (direct != null) return direct;
+
+    if (Array.isArray(stateUpdate)) {
+      for (const entry of stateUpdate) {
+        const balance = extractBalanceFromStateUpdate(entry);
+        if (balance != null) return balance;
+      }
+    }
+
+    if (stateUpdate && typeof stateUpdate === "object") {
+      const nested = tryReadBalance(stateUpdate.data);
+      if (nested != null) return nested;
+      const payloadNested = tryReadBalance(stateUpdate.payload?.data);
+      if (payloadNested != null) return payloadNested;
     }
 
     return null;
