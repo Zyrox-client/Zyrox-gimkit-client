@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.6
+// @version      1.9.7
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.6";
+    const CLIENT_VERSION = "1.9.7";
     return CLIENT_VERSION;
   }
 
@@ -3313,7 +3313,15 @@
           const currentLevel = Number(upgradeHudState.levels[key]) || 1;
           const nextLevel = currentLevel + 1;
           const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
-          upgradeHudLog("Sending UPGRADE_PURCHASED", payload);
+          const roomId = socketManager?.blueboatRoomId;
+          const socket = socketManager?.socket;
+          if (socket && roomId) {
+            const encoded = blueboat.encode("UPGRADE_PURCHASED", payload, roomId);
+            socket.send(encoded);
+            upgradeHudLog("Sending UPGRADE_PURCHASED via blueboat", { roomId, payload });
+            return;
+          }
+          upgradeHudLog("Sending UPGRADE_PURCHASED via socketManager fallback", payload);
           socketManager.sendMessage("UPGRADE_PURCHASED", payload);
         });
       }
