@@ -23,13 +23,13 @@ otherwise the client will not open/load.\
 
 <br>
 
-If you have any questions or feature requests leave them [here](https://github.com/Zyrox-client/Zyrox-gimkit-client/issues/new).
+If you have any questions or feature requests leave them [here](https://github.com/Zyrox-client/Zyrox-gimkit-client/issues/new).\
+Or on the GreasyFork feedback page [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit/feedback).
 
 ## Files
-- `example.js`: Reference/example userscript hacked client.
 - `zyrox-base.js`: The main userscript file.
-- `classic-logger.js`: Packet logger helper for classic-mode auto-answer development (Colyseus/2D).
-
+- `example.js`: Reference/example userscript hacked client.
+- `packetsniffer.js`: A packet sniffer debug utility tool, with decoding for both blueboat and colyseus modes, made for developing more utlities/modules.
 <br>
 
 ## Roadmap/todo
