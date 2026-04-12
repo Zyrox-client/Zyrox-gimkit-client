@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.8.9
+// @version      1.9.3
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.8.9";
+    const CLIENT_VERSION = "1.9.3";
     return CLIENT_VERSION;
   }
 
@@ -3223,6 +3223,9 @@
     } catch (_) {
       return apply(upgradeHudState.config || defaults);
     }
+
+    hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
+    hud.style.setProperty("right", "14px");
   }
 
   function applyUpgradeHudPosition(hud, cfg) {
