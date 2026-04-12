@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.3
+// @version      1.9.4
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.3";
+    const CLIENT_VERSION = "1.9.4";
     return CLIENT_VERSION;
   }
 
@@ -3119,6 +3119,8 @@
   };
   const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
+  let getUpgradeHudModuleConfig = () => null;
+  let persistUpgradeHudSettings = () => {};
 
   function upgradeHudLog(message, extra) {
     if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
@@ -3159,7 +3161,8 @@
       };
     };
     const applyCustomPositionToConfig = (nextX, nextY) => {
-      const cfg = moduleCfg("Upgrade HUD");
+      const cfg = getUpgradeHudModuleConfig?.();
+      if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
       cfg.useCustomPosition = true;
       cfg.customX = clamped.x;
@@ -3185,7 +3188,7 @@
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      saveSettings();
+      persistUpgradeHudSettings?.();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -4854,6 +4857,9 @@
     }
     return cfg;
   }
+
+  getUpgradeHudModuleConfig = () => moduleCfg("Upgrade HUD");
+  persistUpgradeHudSettings = () => saveSettings();
 
   function setBindLabel(item, moduleName) {
     const label = item.querySelector(".zyrox-bind-label");
