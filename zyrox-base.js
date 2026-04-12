@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.4
+// @version      1.9.5
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.4";
+    const CLIENT_VERSION = "1.9.5";
     return CLIENT_VERSION;
   }
 
@@ -3106,6 +3106,8 @@
     config: {
       hudLocation: "topRight",
       displayTitle: true,
+      showLvlPrefix: false,
+      hudSize: 100,
       useCustomPosition: false,
       customX: null,
       customY: null,
@@ -3208,12 +3210,23 @@
   }
 
   function getUpgradeHudConfig() {
-    const defaults = { hudLocation: "topRight", displayTitle: true, useCustomPosition: false, customX: null, customY: null };
+    const defaults = {
+      hudLocation: "topRight",
+      displayTitle: true,
+      showLvlPrefix: false,
+      hudSize: 100,
+      useCustomPosition: false,
+      customX: null,
+      customY: null,
+    };
     const apply = (cfg) => {
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
       upgradeHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
       upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      upgradeHudState.config.showLvlPrefix = cfg?.showLvlPrefix !== undefined ? Boolean(cfg.showLvlPrefix) : defaults.showLvlPrefix;
+      const parsedSize = Number(cfg?.hudSize);
+      upgradeHudState.config.hudSize = Number.isFinite(parsedSize) ? Math.max(60, Math.min(180, parsedSize)) : defaults.hudSize;
       upgradeHudState.config.useCustomPosition = cfg?.useCustomPosition !== undefined ? Boolean(cfg.useCustomPosition) : defaults.useCustomPosition;
       const parsedX = Number(cfg?.customX);
       const parsedY = Number(cfg?.customY);
@@ -3226,9 +3239,6 @@
     } catch (_) {
       return apply(upgradeHudState.config || defaults);
     }
-
-    hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
-    hud.style.setProperty("right", "14px");
   }
 
   function applyUpgradeHudPosition(hud, cfg) {
@@ -3266,16 +3276,21 @@
   function renderUpgradeHud() {
     const hud = ensureUpgradeHudContainer();
     const cfg = getUpgradeHudConfig();
+    const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
+    hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
+    hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
+    hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
     applyUpgradeHudPosition(hud, cfg);
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
         const level = Number(upgradeHudState.levels[key]) || 1;
-        return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
+        const levelText = cfg.showLvlPrefix ? `Lvl ${level}` : `${level}`;
+        return `<div style="display:flex;justify-content:space-between;gap:${Math.round(12 * sizeScale)}px;padding:${Math.max(1, Math.round(2 * sizeScale))}px 0;font-size:${Math.max(11, Math.round(13 * sizeScale))}px;"><span style="opacity:.88;">${label}</span><b>${levelText}</b></div>`;
       })
       .join("");
     const titleRow = cfg.displayTitle
-      ? `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Upgrades</div>`
+      ? `<div style="font-size:${Math.max(10, Math.round(12 * sizeScale))}px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:${Math.max(4, Math.round(6 * sizeScale))}px;">Upgrades</div>`
       : "";
     hud.innerHTML = `${titleRow}${rows}`;
     hud.style.display = upgradeHudState.enabled ? "block" : "none";
@@ -3635,6 +3650,22 @@
                   label: "Display Title",
                   type: "checkbox",
                   default: true,
+                },
+                {
+                  id: "showLvlPrefix",
+                  label: "Show Lvl Prefix",
+                  type: "checkbox",
+                  default: false,
+                },
+                {
+                  id: "hudSize",
+                  label: "HUD Size",
+                  type: "slider",
+                  min: 60,
+                  max: 180,
+                  step: 5,
+                  default: 100,
+                  unit: "%",
                 },
               ],
             },
@@ -5698,6 +5729,10 @@
                   window.__zyroxAutoAnswer?.start(newVal);
                 }
               }
+              if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
+                upgradeHudState.config.hudSize = newVal;
+                renderUpgradeHud();
+              }
               saveSettings();
             });
           }
@@ -5714,8 +5749,8 @@
           if (settingInput) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
-              if (moduleName === "Upgrade HUD" && setting.id === "displayTitle") {
-                upgradeHudState.config.displayTitle = cfg[setting.id];
+              if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix")) {
+                upgradeHudState.config[setting.id] = cfg[setting.id];
                 renderUpgradeHud();
               }
               saveSettings();
