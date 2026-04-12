@@ -3099,7 +3099,7 @@
   }
 
   const UPGRADE_HUD_LABELS = {
-    moneyPerQuestion: "Money / Question",
+    moneyPerQuestion: "Money Per Question",
     streakBonus: "Streak Bonus",
     multiplier: "Multiplier",
     insurance: "Insurance",
