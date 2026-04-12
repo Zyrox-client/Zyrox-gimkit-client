@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.2
+// @version      1.9.3
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.2";
+    const CLIENT_VERSION = "1.9.3";
     return CLIENT_VERSION;
   }
 
@@ -3106,6 +3106,9 @@
     config: {
       hudLocation: "topRight",
       displayTitle: true,
+      useCustomPosition: false,
+      customX: null,
+      customY: null,
     },
     levels: {
       moneyPerQuestion: 1,
@@ -3141,20 +3144,78 @@
       "color:#fff",
       "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
       "display:none",
-      "pointer-events:none",
+      "pointer-events:auto",
+      "cursor:grab",
+      "user-select:none",
     ].join(";");
+    let dragState = null;
+    const clampToViewport = (nextX, nextY) => {
+      const rect = hud.getBoundingClientRect();
+      const maxX = Math.max(0, window.innerWidth - rect.width);
+      const maxY = Math.max(0, window.innerHeight - rect.height);
+      return {
+        x: Math.max(0, Math.min(maxX, Number(nextX) || 0)),
+        y: Math.max(0, Math.min(maxY, Number(nextY) || 0)),
+      };
+    };
+    const applyCustomPositionToConfig = (nextX, nextY) => {
+      const cfg = moduleCfg("Upgrade HUD");
+      const clamped = clampToViewport(nextX, nextY);
+      cfg.useCustomPosition = true;
+      cfg.customX = clamped.x;
+      cfg.customY = clamped.y;
+      upgradeHudState.config.useCustomPosition = true;
+      upgradeHudState.config.customX = clamped.x;
+      upgradeHudState.config.customY = clamped.y;
+      return clamped;
+    };
+    const handleMouseMove = (event) => {
+      if (!dragState) return;
+      const nextX = event.clientX - dragState.offsetX;
+      const nextY = event.clientY - dragState.offsetY;
+      const clamped = applyCustomPositionToConfig(nextX, nextY);
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${clamped.x}px`);
+      hud.style.setProperty("top", `${clamped.y}px`);
+    };
+    const handleMouseUp = () => {
+      if (!dragState) return;
+      dragState = null;
+      hud.style.cursor = "grab";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      saveSettings();
+    };
+    hud.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      const rect = hud.getBoundingClientRect();
+      dragState = {
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+      };
+      hud.style.cursor = "grabbing";
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+      event.preventDefault();
+    });
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
     return hud;
   }
 
   function getUpgradeHudConfig() {
-    const defaults = { hudLocation: "topRight", displayTitle: true };
+    const defaults = { hudLocation: "topRight", displayTitle: true, useCustomPosition: false, customX: null, customY: null };
     const apply = (cfg) => {
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
       upgradeHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
       upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      upgradeHudState.config.useCustomPosition = cfg?.useCustomPosition !== undefined ? Boolean(cfg.useCustomPosition) : defaults.useCustomPosition;
+      const parsedX = Number(cfg?.customX);
+      const parsedY = Number(cfg?.customY);
+      upgradeHudState.config.customX = Number.isFinite(parsedX) ? parsedX : defaults.customX;
+      upgradeHudState.config.customY = Number.isFinite(parsedY) ? parsedY : defaults.customY;
       return { ...upgradeHudState.config };
     };
     try {
@@ -3162,51 +3223,34 @@
     } catch (_) {
       return apply(upgradeHudState.config || defaults);
     }
-  }
-
-  function applyUpgradeHudPosition(hud, location) {
-    hud.style.removeProperty("top");
-    hud.style.removeProperty("right");
-    hud.style.removeProperty("bottom");
-    hud.style.removeProperty("left");
-
-    if (location === "topLeft") {
-      hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
-      hud.style.setProperty("left", "14px");
-      return;
-    }
-    if (location === "bottomRight") {
-      hud.style.setProperty("bottom", "14px");
-      hud.style.setProperty("right", "14px");
-      return;
-    }
-    if (location === "bottomLeft") {
-      hud.style.setProperty("bottom", "14px");
-      hud.style.setProperty("left", "14px");
-      return;
-    }
 
     hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
     hud.style.setProperty("right", "14px");
   }
 
-  function applyUpgradeHudPosition(hud, location) {
+  function applyUpgradeHudPosition(hud, cfg) {
     hud.style.removeProperty("top");
     hud.style.removeProperty("right");
     hud.style.removeProperty("bottom");
     hud.style.removeProperty("left");
 
-    if (location === "topLeft") {
+    if (cfg.useCustomPosition && Number.isFinite(Number(cfg.customX)) && Number.isFinite(Number(cfg.customY))) {
+      hud.style.setProperty("left", `${Math.max(0, Number(cfg.customX))}px`);
+      hud.style.setProperty("top", `${Math.max(0, Number(cfg.customY))}px`);
+      return;
+    }
+
+    if (cfg.hudLocation === "topLeft") {
       hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
       hud.style.setProperty("left", "14px");
       return;
     }
-    if (location === "bottomRight") {
+    if (cfg.hudLocation === "bottomRight") {
       hud.style.setProperty("bottom", "14px");
       hud.style.setProperty("right", "14px");
       return;
     }
-    if (location === "bottomLeft") {
+    if (cfg.hudLocation === "bottomLeft") {
       hud.style.setProperty("bottom", "14px");
       hud.style.setProperty("left", "14px");
       return;
@@ -3219,7 +3263,7 @@
   function renderUpgradeHud() {
     const hud = ensureUpgradeHudContainer();
     const cfg = getUpgradeHudConfig();
-    applyUpgradeHudPosition(hud, cfg.hudLocation);
+    applyUpgradeHudPosition(hud, cfg);
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
@@ -5697,6 +5741,12 @@
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
               if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") {
                 upgradeHudState.config.hudLocation = cfg[setting.id];
+                upgradeHudState.config.useCustomPosition = false;
+                upgradeHudState.config.customX = null;
+                upgradeHudState.config.customY = null;
+                cfg.useCustomPosition = false;
+                cfg.customX = null;
+                cfg.customY = null;
                 renderUpgradeHud();
               }
               saveSettings();
