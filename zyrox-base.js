@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.7
+// @version      1.9.8
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.7";
+    const CLIENT_VERSION = "1.9.8";
     return CLIENT_VERSION;
   }
 
@@ -1288,6 +1288,10 @@
     const key = packet?.key ?? packet?.payload?.key ?? packet?.data?.key;
     if (key !== "STATE_UPDATE") return;
     const stateUpdate = packet?.data ?? packet?.payload?.data ?? packet?.payload ?? packet;
+    if (stateUpdate?.type === "BALANCE") {
+      updateUpgradeHudBalance(stateUpdate?.value);
+      return;
+    }
     const applied = applyUpgradeLevelsFromStateUpdate(stateUpdate, "socketManager");
     if (!applied) {
       upgradeHudLog("STATE_UPDATE received but no UPGRADE_LEVELS found", { packet, stateUpdate });
@@ -3100,6 +3104,12 @@
     multiplier: "Multiplier",
     insurance: "Insurance",
   };
+  const UPGRADE_HUD_COSTS_BY_TARGET_LEVEL = {
+    moneyPerQuestion: { 2: 10, 3: 100, 4: 1000, 5: 10000, 6: 75000, 7: 300000, 8: 1000000, 9: 10000000, 10: 100000000 },
+    streakBonus: { 2: 20, 3: 200, 4: 2000, 5: 20000, 6: 200000, 7: 2000000, 8: 20000000, 9: 200000000, 10: 2000000000 },
+    multiplier: { 2: 50, 3: 300, 4: 2000, 5: 12000, 6: 85000, 7: 700000, 8: 6500000, 9: 65000000, 10: 1000000000 },
+    insurance: { 2: 10, 3: 250, 4: 1000, 5: 25000, 6: 100000, 7: 1000000, 8: 5000000, 9: 25000000, 10: 500000000 },
+  };
   const upgradeHudState = {
     enabled: false,
     container: null,
@@ -3119,6 +3129,7 @@
       multiplier: 1,
       insurance: 1,
     },
+    balance: 0,
   };
   const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
@@ -3289,8 +3300,16 @@
         const label = UPGRADE_HUD_LABELS[key];
         const level = Number(upgradeHudState.levels[key]) || 1;
         const levelText = cfg.showLvlPrefix ? `Lvl ${level}` : `${level}`;
+        const nextLevel = level + 1;
+        const nextCost = UPGRADE_HUD_COSTS_BY_TARGET_LEVEL[key]?.[nextLevel];
+        const canAfford = Number.isFinite(nextCost) && Number(upgradeHudState.balance) >= nextCost;
+        const isMaxed = !Number.isFinite(nextCost);
+        const costText = isMaxed ? "MAX" : `$${Number(nextCost).toLocaleString()}`;
+        const buttonBg = isMaxed ? "rgba(255,255,255,.09)" : (canAfford ? "rgba(46,204,113,.35)" : "rgba(255,255,255,.09)");
+        const buttonBorder = isMaxed ? "rgba(255,255,255,.24)" : (canAfford ? "rgba(46,204,113,.82)" : "rgba(255,255,255,.24)");
+        const buttonColor = isMaxed ? "rgba(255,255,255,.55)" : "#fff";
         const buttonHtml = cfg.showUpgradeButton
-          ? `<button class="zyrox-upgrade-hud-button" data-upgrade-key="${key}" style="appearance:none;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.09);color:#fff;border-radius:${Math.max(5, Math.round(6 * sizeScale))}px;padding:${Math.max(2, Math.round(3 * sizeScale))}px ${Math.max(6, Math.round(8 * sizeScale))}px;font-size:${Math.max(10, Math.round(11 * sizeScale))}px;font-weight:700;line-height:1;cursor:pointer;">+</button>`
+          ? `<button class="zyrox-upgrade-hud-button" data-upgrade-key="${key}" data-upgrade-cost="${isMaxed ? "" : nextCost}" ${isMaxed ? "disabled" : ""} style="appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:${Math.max(5, Math.round(6 * sizeScale))}px;padding:${Math.max(2, Math.round(3 * sizeScale))}px ${Math.max(6, Math.round(8 * sizeScale))}px;font-size:${Math.max(10, Math.round(11 * sizeScale))}px;font-weight:700;line-height:1;cursor:${isMaxed ? "default" : "pointer"};">${costText}</button>`
           : "";
         return `<div style="display:flex;justify-content:space-between;gap:${Math.round(12 * sizeScale)}px;padding:${Math.max(1, Math.round(2 * sizeScale))}px 0;font-size:${Math.max(11, Math.round(13 * sizeScale))}px;"><span style="opacity:.88;">${label}</span><div style="display:flex;align-items:center;gap:${Math.max(6, Math.round(8 * sizeScale))}px;"><b>${levelText}</b>${buttonHtml}</div></div>`;
       })
@@ -3310,6 +3329,8 @@
           event.stopPropagation();
           const key = String(button.getAttribute("data-upgrade-key") || "");
           if (!key || !UPGRADE_HUD_LABELS[key]) return;
+          const cost = Number(button.getAttribute("data-upgrade-cost"));
+          if (Number.isFinite(cost) && Number(upgradeHudState.balance) < cost) return;
           const currentLevel = Number(upgradeHudState.levels[key]) || 1;
           const nextLevel = currentLevel + 1;
           const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
@@ -3365,6 +3386,13 @@
       upgradeHudState.levels[key] = Number.isFinite(n) ? n : 1;
     }
     upgradeHudLog("Applied UPGRADE_LEVELS update", { before, incoming: nextLevels, after: { ...upgradeHudState.levels } });
+    if (upgradeHudState.enabled) renderUpgradeHud();
+  }
+
+  function updateUpgradeHudBalance(nextBalance) {
+    const parsed = Number(nextBalance);
+    if (!Number.isFinite(parsed)) return;
+    upgradeHudState.balance = parsed;
     if (upgradeHudState.enabled) renderUpgradeHud();
   }
 
