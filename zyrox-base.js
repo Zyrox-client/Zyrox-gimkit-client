@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.1
+// @version      2.0.2
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.1";
+    const CLIENT_VERSION = "2.0.2";
     return CLIENT_VERSION;
   }
 
@@ -3149,6 +3149,17 @@
 
   function ensureUpgradeHudContainer() {
     if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
+    if (!document.getElementById("zyrox-upgrade-hud-style")) {
+      const style = document.createElement("style");
+      style.id = "zyrox-upgrade-hud-style";
+      style.textContent = `
+        .zyrox-upgrade-hud-button:hover:not(:disabled) {
+          outline: 2px solid rgba(255,255,255,.95);
+          outline-offset: 1px;
+        }
+      `;
+      document.documentElement.appendChild(style);
+    }
     const hud = document.createElement("div");
     hud.className = "zyrox-upgrade-hud";
     hud.style.cssText = [
@@ -3315,9 +3326,9 @@
         const buttonBorder = isMaxed ? "rgba(255,255,255,.24)" : (canAfford ? "rgba(46,204,113,.82)" : "rgba(255,255,255,.24)");
         const buttonColor = isMaxed ? "rgba(255,255,255,.55)" : "#fff";
         const buttonHtml = cfg.showUpgradeButton
-          ? `<button class="zyrox-upgrade-hud-button" data-upgrade-key="${key}" data-upgrade-cost="${isMaxed ? "" : nextCost}" ${isMaxed ? "disabled" : ""} style="appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:${Math.max(5, Math.round(6 * sizeScale))}px;padding:${Math.max(2, Math.round(3 * sizeScale))}px ${Math.max(6, Math.round(8 * sizeScale))}px;font-size:${Math.max(10, Math.round(11 * sizeScale))}px;font-weight:700;line-height:1;cursor:${isMaxed ? "default" : "pointer"};">${costText}</button>`
+          ? `<button class="zyrox-upgrade-hud-button" data-upgrade-key="${key}" data-upgrade-cost="${isMaxed ? "" : nextCost}" ${isMaxed ? "disabled" : ""} style="appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:${Math.max(5, Math.round(6 * sizeScale))}px;padding:${Math.max(2, Math.round(3 * sizeScale))}px ${Math.max(6, Math.round(8 * sizeScale))}px;font-size:${Math.max(10, Math.round(11 * sizeScale))}px;font-weight:700;line-height:1;cursor:${isMaxed ? "default" : "pointer"};min-width:${Math.max(62, Math.round(72 * sizeScale))}px;text-align:center;">${costText}</button>`
           : "";
-        return `<div style="display:flex;justify-content:space-between;gap:${Math.round(12 * sizeScale)}px;padding:${Math.max(1, Math.round(2 * sizeScale))}px 0;font-size:${Math.max(11, Math.round(13 * sizeScale))}px;"><span style="opacity:.88;">${label}</span><div style="display:flex;align-items:center;gap:${Math.max(6, Math.round(8 * sizeScale))}px;"><b>${levelText}</b>${buttonHtml}</div></div>`;
+        return `<div style="display:grid;grid-template-columns:minmax(0,1fr) ${Math.max(28, Math.round(34 * sizeScale))}px auto;align-items:center;column-gap:${Math.round(10 * sizeScale)}px;padding:${Math.max(1, Math.round(2 * sizeScale))}px 0;font-size:${Math.max(11, Math.round(13 * sizeScale))}px;"><span style="opacity:.88;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span><b style="text-align:right;">${levelText}</b>${buttonHtml || '<span></span>'}</div>`;
       })
       .join("");
     const titleRow = cfg.displayTitle
