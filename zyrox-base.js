@@ -3103,6 +3103,10 @@
   const upgradeHudState = {
     enabled: false,
     container: null,
+    config: {
+      hudLocation: "topRight",
+      displayTitle: true,
+    },
     levels: {
       moneyPerQuestion: 1,
       streakBonus: 1,
@@ -3145,37 +3149,51 @@
   }
 
   function getUpgradeHudConfig() {
-    const defaults = { hudLocation: "topRight" };
-    try {
-      const cfg = moduleCfg("Upgrade HUD");
+    const defaults = { hudLocation: "topRight", displayTitle: true };
+    const apply = (cfg) => {
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
-      return { hudLocation: allowed.has(loc) ? loc : defaults.hudLocation };
+      upgradeHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      return { ...upgradeHudState.config };
+    };
+    try {
+      return apply(moduleCfg("Upgrade HUD"));
     } catch (_) {
-      return defaults;
+      return apply(upgradeHudState.config || defaults);
     }
+  }
+
+  function applyUpgradeHudPosition(hud, location) {
+    hud.style.removeProperty("top");
+    hud.style.removeProperty("right");
+    hud.style.removeProperty("bottom");
+    hud.style.removeProperty("left");
+
+    if (location === "topLeft") {
+      hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
+      hud.style.setProperty("left", "14px");
+      return;
+    }
+    if (location === "bottomRight") {
+      hud.style.setProperty("bottom", "14px");
+      hud.style.setProperty("right", "14px");
+      return;
+    }
+    if (location === "bottomLeft") {
+      hud.style.setProperty("bottom", "14px");
+      hud.style.setProperty("left", "14px");
+      return;
+    }
+
+    hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
+    hud.style.setProperty("right", "14px");
   }
 
   function renderUpgradeHud() {
     const hud = ensureUpgradeHudContainer();
     const cfg = getUpgradeHudConfig();
-    hud.style.top = "";
-    hud.style.right = "";
-    hud.style.bottom = "";
-    hud.style.left = "";
-    if (cfg.hudLocation === "topLeft") {
-      hud.style.top = `${UPGRADE_HUD_TOP_OFFSET_PX}px`;
-      hud.style.left = "14px";
-    } else if (cfg.hudLocation === "bottomRight") {
-      hud.style.bottom = "14px";
-      hud.style.right = "14px";
-    } else if (cfg.hudLocation === "bottomLeft") {
-      hud.style.bottom = "14px";
-      hud.style.left = "14px";
-    } else {
-      hud.style.top = `${UPGRADE_HUD_TOP_OFFSET_PX}px`;
-      hud.style.right = "14px";
-    }
+    applyUpgradeHudPosition(hud, cfg.hudLocation);
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
@@ -3183,7 +3201,10 @@
         return `<div style="display:flex;justify-content:space-between;gap:12px;padding:2px 0;"><span style="opacity:.88;">${label}</span><b>Lvl ${level}</b></div>`;
       })
       .join("");
-    hud.innerHTML = `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Upgrades</div>${rows}`;
+    const titleRow = cfg.displayTitle
+      ? `<div style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:6px;">Upgrades</div>`
+      : "";
+    hud.innerHTML = `${titleRow}${rows}`;
     hud.style.display = upgradeHudState.enabled ? "block" : "none";
   }
 
@@ -3359,7 +3380,7 @@
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
-    "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a top-right HUD.",
+    "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
   };
 
   // --- End of Core Utilities ---
@@ -3535,6 +3556,12 @@
                     { value: "bottomRight", label: "Bottom Right" },
                     { value: "bottomLeft", label: "Bottom Left" },
                   ],
+                },
+                {
+                  id: "displayTitle",
+                  label: "Display Title",
+                  type: "checkbox",
+                  default: true,
                 },
               ],
             },
@@ -4721,7 +4748,7 @@
     if (state.moduleConfig && typeof state.moduleConfig === "object") {
       for (const [moduleName, cfg] of Object.entries(state.moduleConfig)) {
         if (cfg && typeof cfg === "object") {
-          recovered.set(moduleName, { keybind: cfg.keybind || null });
+          recovered.set(moduleName, { ...cfg, keybind: cfg.keybind || null });
         }
       }
     }
@@ -4731,8 +4758,8 @@
 
   function moduleCfg(name) {
     const store = ensureModuleConfigStore();
+    const layout = getModuleLayoutConfig(name);
     if (!store.has(name)) {
-      const layout = getModuleLayoutConfig(name);
       const settings = {};
       if (layout && Array.isArray(layout.settings)) {
         for (const setting of layout.settings) {
@@ -4742,6 +4769,12 @@
       store.set(name, { keybind: null, ...settings });
     }
     const cfg = store.get(name);
+    if (cfg && layout && Array.isArray(layout.settings)) {
+      for (const setting of layout.settings) {
+        if (cfg[setting.id] !== undefined) continue;
+        cfg[setting.id] = setting.default ?? setting.min ?? 0;
+      }
+    }
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
     } else if (name === "Triggerbot (Autoshoot)") {
@@ -5605,6 +5638,10 @@
           if (settingInput) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
+              if (moduleName === "Upgrade HUD" && setting.id === "displayTitle") {
+                upgradeHudState.config.displayTitle = cfg[setting.id];
+                renderUpgradeHud();
+              }
               saveSettings();
             });
           }
@@ -5632,7 +5669,10 @@
                 openConfig(moduleName);
               }
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
-              if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") renderUpgradeHud();
+              if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") {
+                upgradeHudState.config.hudLocation = cfg[setting.id];
+                renderUpgradeHud();
+              }
               saveSettings();
             });
           }
