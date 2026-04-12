@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.2
+// @version      2.0.3
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.2";
+    const CLIENT_VERSION = "2.0.3";
     return CLIENT_VERSION;
   }
 
@@ -4237,6 +4237,7 @@
     .zyrox-config {
       position: relative;
       z-index: 2147483649;
+      width: min(460px, 92vw);
       min-width: 340px;
       border-radius: 11px;
       border: 1px solid var(--zyx-border);
@@ -4247,7 +4248,7 @@
 
     .zyrox-config.hidden { display: none !important; }
     /* FIX: config header now uses settings-header vars so it follows the theme */
-    .zyrox-config-header { padding: 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
+    .zyrox-config-header { padding: 11px 46px 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
     .zyrox-config-title { color: var(--zyx-settings-text); font-size: 14px; font-weight: 700; margin-bottom: 3px; }
     .zyrox-config-sub { color: var(--zyx-settings-subtext); font-size: 12px; }
     .zyrox-config-body { padding: 13px; color: var(--zyx-settings-text); }
