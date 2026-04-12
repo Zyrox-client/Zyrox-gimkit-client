@@ -4743,7 +4743,7 @@
     if (state.moduleConfig && typeof state.moduleConfig === "object") {
       for (const [moduleName, cfg] of Object.entries(state.moduleConfig)) {
         if (cfg && typeof cfg === "object") {
-          recovered.set(moduleName, { keybind: cfg.keybind || null });
+          recovered.set(moduleName, { ...cfg, keybind: cfg.keybind || null });
         }
       }
     }
@@ -4753,8 +4753,8 @@
 
   function moduleCfg(name) {
     const store = ensureModuleConfigStore();
+    const layout = getModuleLayoutConfig(name);
     if (!store.has(name)) {
-      const layout = getModuleLayoutConfig(name);
       const settings = {};
       if (layout && Array.isArray(layout.settings)) {
         for (const setting of layout.settings) {
@@ -4764,6 +4764,12 @@
       store.set(name, { keybind: null, ...settings });
     }
     const cfg = store.get(name);
+    if (cfg && layout && Array.isArray(layout.settings)) {
+      for (const setting of layout.settings) {
+        if (cfg[setting.id] !== undefined) continue;
+        cfg[setting.id] = setting.default ?? setting.min ?? 0;
+      }
+    }
     if (name === "ESP") {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
     } else if (name === "Triggerbot (Autoshoot)") {
