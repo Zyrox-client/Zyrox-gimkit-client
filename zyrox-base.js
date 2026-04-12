@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      1.9.1
+// @version      1.9.2
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -537,7 +537,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "1.9.1";
+    const CLIENT_VERSION = "1.9.2";
     return CLIENT_VERSION;
   }
 
@@ -3103,6 +3103,10 @@
   const upgradeHudState = {
     enabled: false,
     container: null,
+    config: {
+      hudLocation: "topRight",
+      displayTitle: true,
+    },
     levels: {
       moneyPerQuestion: 1,
       streakBonus: 1,
@@ -3146,17 +3150,44 @@
 
   function getUpgradeHudConfig() {
     const defaults = { hudLocation: "topRight", displayTitle: true };
-    try {
-      const cfg = moduleCfg("Upgrade HUD");
+    const apply = (cfg) => {
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
-      return {
-        hudLocation: allowed.has(loc) ? loc : defaults.hudLocation,
-        displayTitle: cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
-      };
+      upgradeHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      return { ...upgradeHudState.config };
+    };
+    try {
+      return apply(moduleCfg("Upgrade HUD"));
     } catch (_) {
-      return defaults;
+      return apply(upgradeHudState.config || defaults);
     }
+  }
+
+  function applyUpgradeHudPosition(hud, location) {
+    hud.style.removeProperty("top");
+    hud.style.removeProperty("right");
+    hud.style.removeProperty("bottom");
+    hud.style.removeProperty("left");
+
+    if (location === "topLeft") {
+      hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
+      hud.style.setProperty("left", "14px");
+      return;
+    }
+    if (location === "bottomRight") {
+      hud.style.setProperty("bottom", "14px");
+      hud.style.setProperty("right", "14px");
+      return;
+    }
+    if (location === "bottomLeft") {
+      hud.style.setProperty("bottom", "14px");
+      hud.style.setProperty("left", "14px");
+      return;
+    }
+
+    hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
+    hud.style.setProperty("right", "14px");
   }
 
   function applyUpgradeHudPosition(hud, location) {
@@ -5633,7 +5664,10 @@
           if (settingInput) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
-              if (moduleName === "Upgrade HUD" && setting.id === "displayTitle") renderUpgradeHud();
+              if (moduleName === "Upgrade HUD" && setting.id === "displayTitle") {
+                upgradeHudState.config.displayTitle = cfg[setting.id];
+                renderUpgradeHud();
+              }
               saveSettings();
             });
           }
@@ -5661,7 +5695,10 @@
                 openConfig(moduleName);
               }
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
-              if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") renderUpgradeHud();
+              if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") {
+                upgradeHudState.config.hudLocation = cfg[setting.id];
+                renderUpgradeHud();
+              }
               saveSettings();
             });
           }
