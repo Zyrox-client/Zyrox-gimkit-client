@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.1.0
+// @version      1.2.0
 // @description  Logs websocket packets with a split-pane inspector UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -299,6 +299,26 @@
       .zyrox-context-item:hover { background: rgba(255,255,255,0.08); }
       #zyrox-diff-pane pre { margin:0; font-size:12px; white-space:pre-wrap; color: rgba(255,255,255,0.86); }
       #zyrox-legend { display:none; padding: 4px 12px; font-size:11px; color: rgba(255,255,255,0.45); border-bottom:1px solid rgba(255,255,255,0.05); }
+
+      #zyrox-list, .zyrox-view-pane, #zyrox-resend-editor {
+        scrollbar-width: thin;
+        scrollbar-color: rgba(0,255,136,0.55) rgba(0,0,0,0.8);
+      }
+      #zyrox-list::-webkit-scrollbar, .zyrox-view-pane::-webkit-scrollbar, #zyrox-resend-editor::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      #zyrox-list::-webkit-scrollbar-track, .zyrox-view-pane::-webkit-scrollbar-track, #zyrox-resend-editor::-webkit-scrollbar-track {
+        background: rgba(0,0,0,0.85);
+      }
+      #zyrox-list::-webkit-scrollbar-thumb, .zyrox-view-pane::-webkit-scrollbar-thumb, #zyrox-resend-editor::-webkit-scrollbar-thumb {
+        background: linear-gradient(180deg, rgba(0,255,136,0.7), rgba(0,190,102,0.7));
+        border-radius: 6px;
+        border: 1px solid rgba(0,0,0,0.65);
+      }
+      #zyrox-list::-webkit-scrollbar-thumb:hover, .zyrox-view-pane::-webkit-scrollbar-thumb:hover, #zyrox-resend-editor::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(180deg, rgba(0,255,136,0.95), rgba(0,220,120,0.95));
+      }
       #zyrox-footer { padding: 6px 12px; font-size:11px; color: rgba(255,255,255,0.35); border-top:1px solid rgba(255,255,255,0.06); }
     `;
     document.head.appendChild(style);
