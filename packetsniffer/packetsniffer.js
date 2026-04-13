@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.1.0
+// @version      1.2.0
 // @description  Logs websocket packets with a split-pane inspector UI.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
