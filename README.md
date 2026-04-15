@@ -29,7 +29,7 @@ otherwise the client will not open/load.\
 <br>
 
 If you have any questions or feature requests leave them [here](https://github.com/Zyrox-client/Zyrox-gimkit-client/issues/new).\
-Or on the GreasyFork feedback page [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit/feedback).
+Or on the [GreasyFork feedback page](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit/feedback).
 
 ## Files
 - `zyrox-base.js`: The main userscript file.
