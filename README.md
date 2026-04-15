@@ -38,11 +38,9 @@ Or on the GreasyFork feedback page [here](https://greasyfork.org/en/scripts/5724
 <br>
 
 ## Roadmap/todo
-- ~~Fix new issues from adding crosshair~~
-- ~~Add reset button for all setting~~
-- ~~Improve ESP & aimbot modules~~
 - Improve default settings
 - Add descriptions
 - Add more modules (visual: freecam. classic/tycoon: autobuy, ability hud. core: instant-continue (if possible))
 - Add tutorial/introduction on first launch
-   
+- Fix tab placement bug when adding new module (remove hide non working modules setting)
+- Improve appearance/preset (possibly)
