@@ -29,6 +29,10 @@ otherwise the client will not open/load.\
 
 <br>
 
+<img src="https://greasyfork.s3.us-east-2.amazonaws.com/irs6i39o97zh5rlh1n8milv44wnq" width="600">
+
+<br>
+
 If you have any questions or feature requests leave them [here](https://github.com/Zyrox-client/Zyrox-gimkit-client/issues/new).\
 Or on the [GreasyFork feedback page](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit/feedback).
 
