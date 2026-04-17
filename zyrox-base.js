@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.7
+// @version      2.0.8
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.7";
+    const CLIENT_VERSION = "2.0.8";
     return CLIENT_VERSION;
   }
 
@@ -3676,7 +3676,7 @@
           ],
         },
         {
-          name: "Quality of life",
+          name: "Qol",
           modules: [
             {
               name: ANIMATION_SKIP_MODULE_NAME,
@@ -4212,23 +4212,29 @@
 
     .zyrox-hidden-category-btn {
       border: 1px solid var(--zyx-outline-color);
-      border-radius: 999px;
-      background: rgba(0, 0, 0, 0.26);
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(0, 0, 0, 0.16));
       color: var(--zyx-settings-text);
-      padding: 5px 10px;
+      padding: 6px 11px;
       font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
       cursor: pointer;
-      transition: background .12s ease, border-color .12s ease, opacity .12s ease;
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+      transition: background .12s ease, border-color .12s ease, opacity .12s ease, transform .12s ease;
     }
 
     .zyrox-hidden-category-btn:hover {
-      background: var(--zyx-btn-hover-bg);
+      background: linear-gradient(180deg, var(--zyx-btn-hover-bg), rgba(0, 0, 0, 0.22));
       border-color: var(--zyx-panel-count-border);
+      transform: translateY(-1px);
     }
 
     .zyrox-hidden-category-btn.is-hidden {
-      opacity: 0.55;
+      opacity: 0.72;
       text-decoration: line-through;
+      border-color: rgba(255, 120, 120, 0.44);
+      background: linear-gradient(180deg, rgba(255, 80, 80, 0.18), rgba(55, 0, 0, 0.2));
     }
 
     .zyrox-module-list { margin: 0; padding: 7px; list-style: none; display: flex; flex-direction: column; gap: 5px; }
@@ -6829,7 +6835,7 @@
       btn.type = "button";
       btn.className = "zyrox-hidden-category-btn";
       btn.dataset.panelName = panelName;
-      btn.textContent = `(${panelName})`;
+      btn.textContent = panelName;
       btn.classList.toggle("is-hidden", isPanelHidden(panelName));
       btn.title = isPanelHidden(panelName) ? "Currently hidden. Click to show." : "Currently visible. Click to hide.";
       btn.addEventListener("click", () => {
@@ -6922,6 +6928,15 @@
         }
         if (saved.collapsedPanels && typeof saved.collapsedPanels === "object") {
           state.collapsedPanels = saved.collapsedPanels;
+          if (saved.collapsedPanels["Quality of life"] !== undefined && saved.collapsedPanels.Qol === undefined) {
+            state.collapsedPanels.Qol = !!saved.collapsedPanels["Quality of life"];
+          }
+        }
+        if (saved.hiddenCategories && typeof saved.hiddenCategories === "object") {
+          state.hiddenCategories = saved.hiddenCategories;
+          if (saved.hiddenCategories["Quality of life"] !== undefined && saved.hiddenCategories.Qol === undefined) {
+            state.hiddenCategories.Qol = !!saved.hiddenCategories["Quality of life"];
+          }
         }
         if (saved.hiddenCategories && typeof saved.hiddenCategories === "object") {
           state.hiddenCategories = saved.hiddenCategories;
