@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.3
+// @version      2.0.5
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -282,12 +282,23 @@
 
       const state = {
         questions: [],
+        questionById: new Map(),
         answerDeviceId: null,
         currentQuestionId: null,
         questionIdList: [],
         currentQuestionIndex: -1,
         sentQuestionIds: new Set(),
       };
+
+      function setQuestions(questions) {
+        state.questions = Array.isArray(questions) ? questions : [];
+        const nextQuestionById = new Map();
+        for (const question of state.questions) {
+          const id = question?._id || question?.id;
+          if (id) nextQuestionById.set(id, question);
+        }
+        state.questionById = nextQuestionById;
+      }
 
       function asArray(value) {
         if (Array.isArray(value)) return value;
@@ -301,7 +312,8 @@
       }
 
       function findQuestionById(id) {
-        return state.questions.find((q) => q?._id == id || q?.id == id) || null;
+        if (id == null) return null;
+        return state.questionById.get(id) || state.questionById.get(String(id)) || null;
       }
 
       function setCurrentQuestionIndex(nextIndex) {
@@ -344,7 +356,7 @@
         if (key === "STATE_UPDATE") {
           const type = data?.type;
           if (type === "GAME_QUESTIONS") {
-            state.questions = Array.isArray(data?.value) ? data.value : [];
+            setQuestions(data?.value);
           } else if (type === "PLAYER_QUESTION_LIST") {
             state.questionIdList = data?.value?.questionList || [];
             if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
@@ -359,11 +371,14 @@
         } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
           setCurrentQuestionIndex(data);
         } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
-          state.questions = data;
+          setQuestions(data);
         } else if (key === "QUESTION_REVEALED" && data) {
           const question = data?.question || data;
           const questionId = question?._id || question?.id;
-          if (questionId && !findQuestionById(questionId)) state.questions.push(question);
+          if (questionId && !findQuestionById(questionId)) {
+            state.questions.push(question);
+            state.questionById.set(questionId, question);
+          }
         }
       }
 
@@ -410,7 +425,7 @@
         for (const { id, data } of event.detail || []) {
           for (const key in data || {}) {
             if (key === "GLOBAL_questions") {
-              state.questions = JSON.parse(data[key]);
+              setQuestions(JSON.parse(data[key]));
               state.answerDeviceId = id;
               console.log(LOG, "Got questions", state.questions.length);
             }
@@ -481,9 +496,17 @@
         camera: null,
         players: [],
       };
+      const UPDATE_INTERVAL_MS = 50;
+      let lastProcessedAt = 0;
       window.__zyroxEspShared = shared;
 
       function tick() {
+        const now = performance.now();
+        if (now - lastProcessedAt < UPDATE_INTERVAL_MS) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        lastProcessedAt = now;
         const serializer = window?.serializer;
         const characters = serializer?.state?.characters?.$items;
         const camera = window?.stores?.phaser?.scene?.cameras?.cameras?.[0];
@@ -537,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.3";
+    const CLIENT_VERSION = "2.0.5";
     return CLIENT_VERSION;
   }
 
@@ -563,6 +586,7 @@
     ROOM_DATA_SCHEMA: 16,
     ROOM_DATA_BYTES: 17,
   };
+  const colyseusProtocolCodeSet = new Set(Object.values(colyseusProtocol));
 
   function utf8Read(view, offset) {
     const length = view[offset++];
@@ -905,8 +929,8 @@
           case 219: n = this.s.getUint32(this.t); this.t += 4; return this.h(n);
           case 220: n = this.s.getUint16(this.t); this.t += 2; return this.g(n);
           case 221: n = this.s.getUint32(this.t); this.t += 4; return this.g(n);
-          case 222: n = this.s.getUint16(this.t); this.t += 2; this.M(n); break;
-          case 223: n = this.s.getUint32(this.t); this.t += 4; this.M(n); break;
+          case 222: n = this.s.getUint16(this.t); this.t += 2; return this.M(n);
+          case 223: n = this.s.getUint32(this.t); this.t += 4; return this.M(n);
         }
         return null;
       };
@@ -986,7 +1010,7 @@
           }
         })();
         if (this.transportType === "unknown" && firstByte != null) {
-          if (Object.values(colyseusProtocol).includes(firstByte)) this.transportType = "colyseus";
+          if (colyseusProtocolCodeSet.has(firstByte)) this.transportType = "colyseus";
           else this.transportType = "blueboat";
         }
 
@@ -3564,7 +3588,6 @@
       onDisable: stopDrawItAnswerReveal,
     },
   };
-  const WORKING_MODULES = new Set(["Auto Answer", ANIMATION_SKIP_MODULE_NAME, "ESP", "Crosshair", "Triggerbot (Autoshoot)", "Aimbot", "Answer Popup", "Upgrade HUD", "Answer Reveal"]);
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
@@ -3844,7 +3867,6 @@
     listeningForBind: null,
     listeningForMenuBind: false,
     searchAutofocus: true,
-    hideBrokenModules: true,
     displayMode: "loose",
     looseInitialized: false,
     loosePositions: {
@@ -4625,10 +4647,6 @@
             <label>Auto Focus Search</label>
             <input type="checkbox" class="set-search-autofocus" checked />
           </div>
-          <div class="zyrox-setting-card">
-            <label>Hide Non-Working Modules</label>
-            <input type="checkbox" class="set-hide-broken-modules" checked />
-          </div>
         </div>
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="theme">
@@ -4876,7 +4894,6 @@
   const settingsSaveBtn = settingsMenu.querySelector(".settings-save");
   const presetButtons = [...settingsMenu.querySelectorAll(".zyrox-preset-btn")];
   const searchAutofocusInput = settingsMenu.querySelector(".set-search-autofocus");
-  const hideBrokenModulesInput = settingsMenu.querySelector(".set-hide-broken-modules");
   const accentInput = settingsMenu.querySelector(".set-accent");
   const shellBgStartInput = settingsMenu.querySelector(".set-shell-bg-start");
   const shellBgEndInput = settingsMenu.querySelector(".set-shell-bg-end");
@@ -4938,10 +4955,6 @@
   function setCurrentBindText(bind) {
     if (!currentBindTextEl) return;
     currentBindTextEl.textContent = bind ? `Keybind: ${bind}` : "Keybind: none";
-  }
-
-  function isModuleHiddenByWorkState(moduleName) {
-    return state.hideBrokenModules && !WORKING_MODULES.has(moduleName);
   }
 
   function getModuleLayoutConfig(moduleName) {
@@ -5013,7 +5026,6 @@
   }
 
   function toggleModule(moduleName) {
-    if (isModuleHiddenByWorkState(moduleName)) return;
     const item = state.moduleItems.get(moduleName);
     const moduleInstance = state.modules.get(moduleName);
     if (!item || !moduleInstance) return;
@@ -5965,7 +5977,6 @@
       toggleKey: CONFIG.toggleKey,
       globalPreset: state.globalPreset,
       searchAutofocus: searchAutofocusInput.checked,
-      hideBrokenModules: hideBrokenModulesInput.checked,
       accent: accentInput.value,
       shellBgStart: shellBgStartInput.value,
       shellBgEnd: shellBgEndInput.value,
@@ -6073,24 +6084,27 @@
     };
   }
 
-  function captureLoosePanelPositionsFromMerged() {
+  function getMergedPanelPositionsSnapshot() {
+    const snapshot = {};
+    shell.classList.remove("loose-mode");
     const shellRect = shell.getBoundingClientRect();
     for (const [name, panel] of panelByName.entries()) {
       const rect = panel.getBoundingClientRect();
-      state.loosePanelPositions[name] = {
+      snapshot[name] = {
         x: Math.round(rect.left - shellRect.left),
         y: Math.round(rect.top - shellRect.top),
       };
     }
+    return snapshot;
   }
 
   function setDisplayMode(mode) {
     const nextMode = mode === "loose" ? "loose" : "merged";
+    const mergedSnapshot = nextMode === "loose" ? getMergedPanelPositionsSnapshot() : null;
 
     if (nextMode === "loose" && !state.looseInitialized) {
       // Capture while still in merged flow layout so the first loose layout mirrors merged positions.
-      shell.classList.remove("loose-mode");
-      captureLoosePanelPositionsFromMerged();
+      state.loosePanelPositions = { ...mergedSnapshot };
       state.looseInitialized = true;
     }
 
@@ -6118,7 +6132,9 @@
 
       for (const [name, panel] of panelByName.entries()) {
         const existingRect = panel.getBoundingClientRect();
-        const pos = state.loosePanelPositions[name] || {
+        const pos = state.loosePanelPositions[name]
+          || mergedSnapshot?.[name]
+          || {
           x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
           y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
         };
@@ -6377,10 +6393,8 @@
     const query = state.searchQuery.trim().toLowerCase();
 
     for (const entry of state.moduleEntries) {
-      const hiddenByWorkState = isModuleHiddenByWorkState(entry.name);
       const visibleByQuery = !query || entry.name.toLowerCase().includes(query);
-      const visible = !hiddenByWorkState && visibleByQuery;
-      entry.item.style.display = visible ? "" : "none";
+      entry.item.style.display = visibleByQuery ? "" : "none";
     }
 
     for (const [panel, meta] of state.modulePanels.entries()) {
@@ -6561,17 +6575,6 @@
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
   });
-  hideBrokenModulesInput.addEventListener("change", () => {
-    state.hideBrokenModules = hideBrokenModulesInput.checked;
-    if (state.hideBrokenModules) {
-      for (const moduleName of [...state.enabledModules]) {
-        if (isModuleHiddenByWorkState(moduleName)) toggleModule(moduleName);
-      }
-      if (openConfigModule && isModuleHiddenByWorkState(openConfigModule)) closeConfig();
-    }
-    applySearchFilter();
-  });
-
   settingsResetBtn.addEventListener("click", () => {
     accentInput.value = "#ff3d3d";
     shellBgStartInput.value = "#ff3d3d";
@@ -6609,8 +6612,6 @@
     espValueTextColorInput.value = "#ffffff";
     searchAutofocusInput.checked = true;
     state.searchAutofocus = true;
-    hideBrokenModulesInput.checked = true;
-    state.hideBrokenModules = true;
     state.globalPreset = "default";
     scaleInput.value = "100";
     radiusInput.value = "14";
@@ -6702,8 +6703,6 @@
     // Reset search autofocus
     state.searchAutofocus = true;
     searchAutofocusInput.checked = true;
-    state.hideBrokenModules = true;
-    hideBrokenModulesInput.checked = true;
 
     // Trigger the full appearance reset too
     settingsResetBtn.click();
@@ -6788,10 +6787,6 @@
         if (typeof saved.searchAutofocus === "boolean") {
           state.searchAutofocus = saved.searchAutofocus;
           searchAutofocusInput.checked = saved.searchAutofocus;
-        }
-        if (typeof saved.hideBrokenModules === "boolean") {
-          state.hideBrokenModules = saved.hideBrokenModules;
-          hideBrokenModulesInput.checked = saved.hideBrokenModules;
         }
         const assign = (input, key) => {
           if (saved[key] !== undefined && input) input.value = String(saved[key]);
@@ -6878,7 +6873,6 @@
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
     if (!moduleInstance || moduleInstance.enabled) continue;
-    if (isModuleHiddenByWorkState(moduleName)) continue;
     toggleModule(moduleName);
   }
 
