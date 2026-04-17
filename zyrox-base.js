@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.5
+// @version      2.0.8
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.5";
+    const CLIENT_VERSION = "2.0.8";
     return CLIENT_VERSION;
   }
 
@@ -6937,6 +6937,9 @@
           if (saved.hiddenCategories["Quality of life"] !== undefined && saved.hiddenCategories.Qol === undefined) {
             state.hiddenCategories.Qol = !!saved.hiddenCategories["Quality of life"];
           }
+        }
+        if (saved.hiddenCategories && typeof saved.hiddenCategories === "object") {
+          state.hiddenCategories = saved.hiddenCategories;
         }
         const savedModuleConfig = Array.isArray(saved.moduleConfig)
           ? saved.moduleConfig
