@@ -4,10 +4,11 @@
     <h1>Zyrox client</h1>
     <h3>A modern userscript hacked client for <a href=https://www.gimkit.com>gimkit</a>.</h3>
     <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">
-    <img alt="Dynamic JSON Badge" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.greasyfork.org%2Fen%2Fscripts%2F572408-zyrox-client-gimkit.json&query=total_installs&style=flat&label=Total%20installs&labelColor=%23222&color=%23ff3333"></a>
+    <img alt="Total installs" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.greasyfork.org%2Fen%2Fscripts%2F572408-zyrox-client-gimkit.json&query=total_installs&style=flat&label=Total%20installs&labelColor=%23222&color=%23ff3333"></a>
     <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">
-    <img alt="Dynamic JSON Badge" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.greasyfork.org%2Fen%2Fscripts%2F572408-zyrox-client-gimkit.json&query=version&style=flat&logoSize=200&label=Version&labelColor=%23333&color=%23661100"></a>
-
+    <img alt="Userscript version" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.greasyfork.org%2Fen%2Fscripts%2F572408-zyrox-client-gimkit.json&query=version&style=flat&logoSize=200&label=Version&labelColor=%23333&color=%23661100"></a>
+    <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">
+    <img alt="Good ratings" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.greasyfork.org%2Fen%2Fscripts%2F572408-zyrox-client-gimkit.json&query=good_ratings&style=flat&label=Good%20ratings&labelColor=%23333&color=%23993027"></a>
 </div>
 
 Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.
