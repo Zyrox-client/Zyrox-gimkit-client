@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.6
+// @version      2.0.7
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.6";
+    const CLIENT_VERSION = "2.0.7";
     return CLIENT_VERSION;
   }
 
@@ -4205,22 +4205,30 @@
 
     .zyrox-hidden-categories-list {
       display: flex;
-      flex-direction: column;
+      flex-wrap: wrap;
       gap: 6px;
       margin-top: 4px;
     }
 
-    .zyrox-hidden-category-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
+    .zyrox-hidden-category-btn {
+      border: 1px solid var(--zyx-outline-color);
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.26);
       color: var(--zyx-settings-text);
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .12s ease, border-color .12s ease, opacity .12s ease;
     }
 
-    .zyrox-hidden-category-item input {
-      margin: 0;
-      accent-color: var(--zyx-checkmark-color);
+    .zyrox-hidden-category-btn:hover {
+      background: var(--zyx-btn-hover-bg);
+      border-color: var(--zyx-panel-count-border);
+    }
+
+    .zyrox-hidden-category-btn.is-hidden {
+      opacity: 0.55;
+      text-decoration: line-through;
     }
 
     .zyrox-module-list { margin: 0; padding: 7px; list-style: none; display: flex; flex-direction: column; gap: 5px; }
@@ -4670,7 +4678,7 @@
           </div>
           <div class="zyrox-subheading">Modules</div>
           <div class="zyrox-setting-card">
-            <label>Hidden Categories</label>
+            <label>Hidden Categories (click to toggle)</label>
             <div class="zyrox-hidden-categories-list"></div>
           </div>
         </div>
@@ -6817,20 +6825,21 @@
     if (!hiddenCategoriesList) return;
     hiddenCategoriesList.innerHTML = "";
     for (const panelName of panelByName.keys()) {
-      const row = document.createElement("label");
-      row.className = "zyrox-hidden-category-item";
-      row.innerHTML = `
-        <input type="checkbox" data-panel-name="${panelName}" ${isPanelHidden(panelName) ? "checked" : ""} />
-        <span>${panelName}</span>
-      `;
-      const input = row.querySelector("input");
-      if (input) {
-        input.addEventListener("change", () => {
-          setPanelHidden(panelName, input.checked);
-          saveSettings();
-        });
-      }
-      hiddenCategoriesList.appendChild(row);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "zyrox-hidden-category-btn";
+      btn.dataset.panelName = panelName;
+      btn.textContent = `(${panelName})`;
+      btn.classList.toggle("is-hidden", isPanelHidden(panelName));
+      btn.title = isPanelHidden(panelName) ? "Currently hidden. Click to show." : "Currently visible. Click to hide.";
+      btn.addEventListener("click", () => {
+        const nextHidden = !isPanelHidden(panelName);
+        setPanelHidden(panelName, nextHidden);
+        btn.classList.toggle("is-hidden", nextHidden);
+        btn.title = nextHidden ? "Currently hidden. Click to show." : "Currently visible. Click to hide.";
+        saveSettings();
+      });
+      hiddenCategoriesList.appendChild(btn);
     }
   }
 
