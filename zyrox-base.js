@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.3
+// @version      2.0.4
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -282,12 +282,23 @@
 
       const state = {
         questions: [],
+        questionById: new Map(),
         answerDeviceId: null,
         currentQuestionId: null,
         questionIdList: [],
         currentQuestionIndex: -1,
         sentQuestionIds: new Set(),
       };
+
+      function setQuestions(questions) {
+        state.questions = Array.isArray(questions) ? questions : [];
+        const nextQuestionById = new Map();
+        for (const question of state.questions) {
+          const id = question?._id || question?.id;
+          if (id) nextQuestionById.set(id, question);
+        }
+        state.questionById = nextQuestionById;
+      }
 
       function asArray(value) {
         if (Array.isArray(value)) return value;
@@ -301,7 +312,8 @@
       }
 
       function findQuestionById(id) {
-        return state.questions.find((q) => q?._id == id || q?.id == id) || null;
+        if (id == null) return null;
+        return state.questionById.get(id) || state.questionById.get(String(id)) || null;
       }
 
       function setCurrentQuestionIndex(nextIndex) {
@@ -344,7 +356,7 @@
         if (key === "STATE_UPDATE") {
           const type = data?.type;
           if (type === "GAME_QUESTIONS") {
-            state.questions = Array.isArray(data?.value) ? data.value : [];
+            setQuestions(data?.value);
           } else if (type === "PLAYER_QUESTION_LIST") {
             state.questionIdList = data?.value?.questionList || [];
             if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
@@ -359,11 +371,14 @@
         } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
           setCurrentQuestionIndex(data);
         } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
-          state.questions = data;
+          setQuestions(data);
         } else if (key === "QUESTION_REVEALED" && data) {
           const question = data?.question || data;
           const questionId = question?._id || question?.id;
-          if (questionId && !findQuestionById(questionId)) state.questions.push(question);
+          if (questionId && !findQuestionById(questionId)) {
+            state.questions.push(question);
+            state.questionById.set(questionId, question);
+          }
         }
       }
 
@@ -410,7 +425,7 @@
         for (const { id, data } of event.detail || []) {
           for (const key in data || {}) {
             if (key === "GLOBAL_questions") {
-              state.questions = JSON.parse(data[key]);
+              setQuestions(JSON.parse(data[key]));
               state.answerDeviceId = id;
               console.log(LOG, "Got questions", state.questions.length);
             }
@@ -481,9 +496,17 @@
         camera: null,
         players: [],
       };
+      const UPDATE_INTERVAL_MS = 50;
+      let lastProcessedAt = 0;
       window.__zyroxEspShared = shared;
 
       function tick() {
+        const now = performance.now();
+        if (now - lastProcessedAt < UPDATE_INTERVAL_MS) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        lastProcessedAt = now;
         const serializer = window?.serializer;
         const characters = serializer?.state?.characters?.$items;
         const camera = window?.stores?.phaser?.scene?.cameras?.cameras?.[0];
@@ -537,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.3";
+    const CLIENT_VERSION = "2.0.4";
     return CLIENT_VERSION;
   }
 
@@ -563,6 +586,7 @@
     ROOM_DATA_SCHEMA: 16,
     ROOM_DATA_BYTES: 17,
   };
+  const colyseusProtocolCodeSet = new Set(Object.values(colyseusProtocol));
 
   function utf8Read(view, offset) {
     const length = view[offset++];
@@ -905,8 +929,8 @@
           case 219: n = this.s.getUint32(this.t); this.t += 4; return this.h(n);
           case 220: n = this.s.getUint16(this.t); this.t += 2; return this.g(n);
           case 221: n = this.s.getUint32(this.t); this.t += 4; return this.g(n);
-          case 222: n = this.s.getUint16(this.t); this.t += 2; this.M(n); break;
-          case 223: n = this.s.getUint32(this.t); this.t += 4; this.M(n); break;
+          case 222: n = this.s.getUint16(this.t); this.t += 2; return this.M(n);
+          case 223: n = this.s.getUint32(this.t); this.t += 4; return this.M(n);
         }
         return null;
       };
@@ -986,7 +1010,7 @@
           }
         })();
         if (this.transportType === "unknown" && firstByte != null) {
-          if (Object.values(colyseusProtocol).includes(firstByte)) this.transportType = "colyseus";
+          if (colyseusProtocolCodeSet.has(firstByte)) this.transportType = "colyseus";
           else this.transportType = "blueboat";
         }
 
