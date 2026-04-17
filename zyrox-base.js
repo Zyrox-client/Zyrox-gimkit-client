@@ -3864,6 +3864,7 @@
     moduleEntries: [],
     moduleConfig: new Map(),
     collapsedPanels: {},
+    hiddenCategories: {},
     listeningForBind: null,
     listeningForMenuBind: false,
     searchAutofocus: true,
@@ -4188,18 +4189,38 @@
     }
 
     .zyrox-panel-collapse-btn {
-      font-size: 10px;
+      font-size: 14px;
       color: var(--zyx-panel-count-text);
-      background: var(--zyx-panel-count-bg);
-      border: 1px solid var(--zyx-panel-count-border);
-      border-radius: 999px;
-      padding: 3px 7px;
+      background: transparent;
+      border: none;
+      padding: 0;
       line-height: 1;
       cursor: pointer;
+      user-select: none;
     }
 
     .zyrox-panel-collapse-btn.collapsed {
       opacity: 0.62;
+    }
+
+    .zyrox-hidden-categories-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 4px;
+    }
+
+    .zyrox-hidden-category-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--zyx-settings-text);
+    }
+
+    .zyrox-hidden-category-item input {
+      margin: 0;
+      accent-color: var(--zyx-checkmark-color);
     }
 
     .zyrox-module-list { margin: 0; padding: 7px; list-style: none; display: flex; flex-direction: column; gap: 5px; }
@@ -4647,6 +4668,11 @@
             <label>Auto Focus Search</label>
             <input type="checkbox" class="set-search-autofocus" checked />
           </div>
+          <div class="zyrox-subheading">Modules</div>
+          <div class="zyrox-setting-card">
+            <label>Hidden Categories</label>
+            <div class="zyrox-hidden-categories-list"></div>
+          </div>
         </div>
       </div>
       <div class="zyrox-settings-pane hidden" data-pane="theme">
@@ -4894,6 +4920,7 @@
   const settingsSaveBtn = settingsMenu.querySelector(".settings-save");
   const presetButtons = [...settingsMenu.querySelectorAll(".zyrox-preset-btn")];
   const searchAutofocusInput = settingsMenu.querySelector(".set-search-autofocus");
+  const hiddenCategoriesList = settingsMenu.querySelector(".zyrox-hidden-categories-list");
   const accentInput = settingsMenu.querySelector(".set-accent");
   const shellBgStartInput = settingsMenu.querySelector(".set-shell-bg-start");
   const shellBgEndInput = settingsMenu.querySelector(".set-shell-bg-end");
@@ -6020,6 +6047,7 @@
       loosePositions: state.loosePositions,
       loosePanelPositions: state.loosePanelPositions,
       collapsedPanels: state.collapsedPanels,
+      hiddenCategories: state.hiddenCategories,
       enabledModules: Array.from(state.enabledModules),
       moduleConfig: Array.from(ensureModuleConfigStore().entries()),
     };
@@ -6049,6 +6077,15 @@
       button.setAttribute("aria-label", button.title);
       button.classList.toggle("collapsed", collapsed);
     }
+  }
+
+  function isPanelHidden(panelName) {
+    return !!state.hiddenCategories[panelName];
+  }
+
+  function setPanelHidden(panelName, hidden) {
+    state.hiddenCategories[panelName] = !!hidden;
+    applySearchFilter();
   }
 
   function clampToViewport(x, y, el) {
@@ -6398,6 +6435,11 @@
     }
 
     for (const [panel, meta] of state.modulePanels.entries()) {
+      const panelName = panel.dataset.panelName || "";
+      if (isPanelHidden(panelName)) {
+        panel.style.display = "none";
+        continue;
+      }
       let visibleCount = 0;
       for (const moduleName of meta.modules) {
         const item = state.moduleItems.get(moduleName);
@@ -6419,16 +6461,23 @@
     const title = document.createElement("span");
     title.textContent = name;
 
-    const collapseButton = document.createElement("button");
-    collapseButton.type = "button";
+    const collapseButton = document.createElement("span");
     collapseButton.className = "zyrox-panel-collapse-btn";
     collapseButton.textContent = "▾";
     collapseButton.title = "Collapse category";
+    collapseButton.setAttribute("role", "button");
+    collapseButton.setAttribute("tabindex", "0");
     collapseButton.setAttribute("aria-label", "Collapse category");
-    collapseButton.addEventListener("click", (event) => {
+    const toggleCollapsed = (event) => {
       event.stopPropagation();
       const nextCollapsed = !state.collapsedPanels[name];
       setPanelCollapsed(name, nextCollapsed);
+    };
+    collapseButton.addEventListener("click", toggleCollapsed);
+    collapseButton.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleCollapsed(event);
     });
 
     header.appendChild(title);
@@ -6764,6 +6813,29 @@
     collapseRow.appendChild(btn);
   }
 
+  function renderHiddenCategorySettings() {
+    if (!hiddenCategoriesList) return;
+    hiddenCategoriesList.innerHTML = "";
+    for (const panelName of panelByName.keys()) {
+      const row = document.createElement("label");
+      row.className = "zyrox-hidden-category-item";
+      row.innerHTML = `
+        <input type="checkbox" data-panel-name="${panelName}" ${isPanelHidden(panelName) ? "checked" : ""} />
+        <span>${panelName}</span>
+      `;
+      const input = row.querySelector("input");
+      if (input) {
+        input.addEventListener("change", () => {
+          setPanelHidden(panelName, input.checked);
+          saveSettings();
+        });
+      }
+      hiddenCategoriesList.appendChild(row);
+    }
+  }
+
+  renderHiddenCategorySettings();
+
   shell.appendChild(topbar);
   shell.appendChild(generalSection);
   shell.appendChild(gamemodeSection);
@@ -6842,6 +6914,9 @@
         if (saved.collapsedPanels && typeof saved.collapsedPanels === "object") {
           state.collapsedPanels = saved.collapsedPanels;
         }
+        if (saved.hiddenCategories && typeof saved.hiddenCategories === "object") {
+          state.hiddenCategories = saved.hiddenCategories;
+        }
         const savedModuleConfig = Array.isArray(saved.moduleConfig)
           ? saved.moduleConfig
           : (Array.isArray(saved.moduleSettings) ? saved.moduleSettings : null);
@@ -6866,6 +6941,7 @@
   for (const panelName of panelByName.keys()) {
     setPanelCollapsed(panelName, !!state.collapsedPanels[panelName]);
   }
+  renderHiddenCategorySettings();
   syncCollapseButtons();
   applyAppearance();
   setDisplayMode(state.displayMode);
