@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.1.4
+// @version      2.1.5
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.1.4";
+    const CLIENT_VERSION = "2.1.5";
     return CLIENT_VERSION;
   }
 
@@ -3541,15 +3541,7 @@
     return candidates[0] || null;
   }
 
-  function sendUpgradePurchase(key, nextLevel, source = "manual") {
-    if (!key || !UPGRADE_HUD_LABELS[key]) return false;
-    if (source === "auto") {
-      const cfg = getAutoUpgradeConfig();
-      if (cfg[key] !== true) {
-        autoUpgradeLog("Skipped disabled upgrade category", { key, nextLevel });
-        return false;
-      }
-    }
+  function sendUpgradePacketForCategory(key, nextLevel) {
     const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
     const roomId = socketManager?.blueboatRoomId;
     const socket = socketManager?.socket;
@@ -3560,6 +3552,47 @@
     }
     socketManager.sendMessage("UPGRADE_PURCHASED", payload);
     return true;
+  }
+
+  function sendMultiplierUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.multiplier !== true) return false;
+    return sendUpgradePacketForCategory("multiplier", nextLevel);
+  }
+
+  function sendMoneyPerQuestionUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.moneyPerQuestion !== true) return false;
+    return sendUpgradePacketForCategory("moneyPerQuestion", nextLevel);
+  }
+
+  function sendStreakBonusUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.streakBonus !== true) return false;
+    return sendUpgradePacketForCategory("streakBonus", nextLevel);
+  }
+
+  function sendInsuranceUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.insurance !== true) return false;
+    return sendUpgradePacketForCategory("insurance", nextLevel);
+  }
+
+  function sendUpgradePurchase(key, nextLevel, source = "manual") {
+    if (!key || !UPGRADE_HUD_LABELS[key]) return false;
+    if (source === "auto") {
+      const cfg = getAutoUpgradeConfig();
+      if (cfg[key] !== true) {
+        autoUpgradeLog("Skipped disabled upgrade category", { key, nextLevel });
+        return false;
+      }
+    }
+
+    if (key === "multiplier") return sendMultiplierUpgrade(nextLevel);
+    if (key === "moneyPerQuestion") return sendMoneyPerQuestionUpgrade(nextLevel);
+    if (key === "streakBonus") return sendStreakBonusUpgrade(nextLevel);
+    if (key === "insurance") return sendInsuranceUpgrade(nextLevel);
+    return false;
   }
 
   function tickAutoUpgrade() {
