@@ -3162,6 +3162,12 @@
     balance: 0,
   };
   const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
+  const AUTO_UPGRADE_LOG_PREFIX = "[Auto Upgrade]";
+  const AUTO_UPGRADE_TIE_BREAK_ORDER = ["multiplier", "moneyPerQuestion", "streakBonus", "insurance"];
+  const autoUpgradeState = {
+    enabled: false,
+    intervalId: null,
+  };
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
   let getUpgradeHudModuleConfig = () => null;
   let persistUpgradeHudSettings = () => {};
@@ -3374,17 +3380,8 @@
           if (Number.isFinite(cost) && Number(upgradeHudState.balance) < cost) return;
           const currentLevel = Number(upgradeHudState.levels[key]) || 1;
           const nextLevel = currentLevel + 1;
-          const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
-          const roomId = socketManager?.blueboatRoomId;
-          const socket = socketManager?.socket;
-          if (socket && roomId) {
-            const encoded = blueboat.encode("UPGRADE_PURCHASED", payload, roomId);
-            socket.send(encoded);
-            upgradeHudLog("Sending UPGRADE_PURCHASED via blueboat", { roomId, payload });
-            return;
-          }
-          upgradeHudLog("Sending UPGRADE_PURCHASED via socketManager fallback", payload);
-          socketManager.sendMessage("UPGRADE_PURCHASED", payload);
+          const sent = sendUpgradePurchase(key, nextLevel);
+          if (sent) upgradeHudLog("Sent UPGRADE_PURCHASED", { key, nextLevel });
         });
       }
     }
@@ -3477,6 +3474,72 @@
     if (upgradeHudState.container) {
       upgradeHudState.container.style.display = "none";
     }
+  }
+
+
+  function autoUpgradeLog(message, extra) {
+    if (extra === undefined) console.log(`${AUTO_UPGRADE_LOG_PREFIX} ${message}`);
+    else console.log(`${AUTO_UPGRADE_LOG_PREFIX} ${message}`, extra);
+  }
+
+  function getAutoUpgradeSelection() {
+    const balance = Number(upgradeHudState.balance);
+    if (!Number.isFinite(balance) || balance <= 0) return null;
+
+    const candidates = [];
+    for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
+      const level = Number(upgradeHudState.levels[key]) || 1;
+      const nextLevel = level + 1;
+      const cost = Number(UPGRADE_HUD_COSTS_BY_TARGET_LEVEL[key]?.[nextLevel]);
+      if (!Number.isFinite(cost) || cost > balance) continue;
+      candidates.push({ key, level, nextLevel, cost });
+    }
+    if (!candidates.length) return null;
+
+    candidates.sort((a, b) => {
+      if (a.cost !== b.cost) return a.cost - b.cost;
+      return AUTO_UPGRADE_TIE_BREAK_ORDER.indexOf(a.key) - AUTO_UPGRADE_TIE_BREAK_ORDER.indexOf(b.key);
+    });
+
+    return candidates[0] || null;
+  }
+
+  function sendUpgradePurchase(key, nextLevel) {
+    if (!key || !UPGRADE_HUD_LABELS[key]) return false;
+    const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
+    const roomId = socketManager?.blueboatRoomId;
+    const socket = socketManager?.socket;
+    if (socket && roomId) {
+      const encoded = blueboat.encode("UPGRADE_PURCHASED", payload, roomId);
+      socket.send(encoded);
+      return true;
+    }
+    socketManager.sendMessage("UPGRADE_PURCHASED", payload);
+    return true;
+  }
+
+  function tickAutoUpgrade() {
+    if (!autoUpgradeState.enabled) return;
+    const selection = getAutoUpgradeSelection();
+    if (!selection) return;
+    const sent = sendUpgradePurchase(selection.key, selection.nextLevel);
+    if (sent) autoUpgradeLog("Purchased cheapest available upgrade", selection);
+  }
+
+  function startAutoUpgrade() {
+    autoUpgradeState.enabled = true;
+    if (autoUpgradeState.intervalId) clearInterval(autoUpgradeState.intervalId);
+    autoUpgradeState.intervalId = setInterval(tickAutoUpgrade, 150);
+    autoUpgradeLog("Enabled");
+  }
+
+  function stopAutoUpgrade() {
+    autoUpgradeState.enabled = false;
+    if (autoUpgradeState.intervalId) {
+      clearInterval(autoUpgradeState.intervalId);
+      autoUpgradeState.intervalId = null;
+    }
+    autoUpgradeLog("Disabled");
   }
 
   const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
@@ -3583,6 +3646,10 @@
       onEnable: startUpgradeHud,
       onDisable: stopUpgradeHud,
     },
+    "Auto Upgrade": {
+      onEnable: startAutoUpgrade,
+      onDisable: stopAutoUpgrade,
+    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
@@ -3598,6 +3665,7 @@
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
+    "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
   };
 
   // --- End of Core Utilities ---
@@ -3803,6 +3871,11 @@
                   unit: "%",
                 },
               ],
+            },
+            {
+              name: "Auto Upgrade",
+              description: MODULE_DESCRIPTIONS["Auto Upgrade"],
+              settings: [],
             },
           ],
         },
