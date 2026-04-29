@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.1.0
+// @version      2.1.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.1.0";
+    const CLIENT_VERSION = "2.1.1";
     return CLIENT_VERSION;
   }
 
@@ -3490,13 +3490,24 @@
       streakBonus: true,
       insurance: true,
     };
+    const parseToggle = (value, fallback) => {
+      if (value === undefined || value === null) return fallback;
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return value !== 0;
+      if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["false", "0", "off", "no", "disabled"].includes(normalized)) return false;
+        if (["true", "1", "on", "yes", "enabled"].includes(normalized)) return true;
+      }
+      return Boolean(value);
+    };
     try {
       const cfg = moduleCfg("Auto Upgrade") || {};
       return {
-        multiplier: cfg.multiplier !== undefined ? Boolean(cfg.multiplier) : defaults.multiplier,
-        moneyPerQuestion: cfg.moneyPerQuestion !== undefined ? Boolean(cfg.moneyPerQuestion) : defaults.moneyPerQuestion,
-        streakBonus: cfg.streakBonus !== undefined ? Boolean(cfg.streakBonus) : defaults.streakBonus,
-        insurance: cfg.insurance !== undefined ? Boolean(cfg.insurance) : defaults.insurance,
+        multiplier: parseToggle(cfg.multiplier, defaults.multiplier),
+        moneyPerQuestion: parseToggle(cfg.moneyPerQuestion, defaults.moneyPerQuestion),
+        streakBonus: parseToggle(cfg.streakBonus, defaults.streakBonus),
+        insurance: parseToggle(cfg.insurance, defaults.insurance),
       };
     } catch (_) {
       return defaults;
