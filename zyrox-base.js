@@ -3162,6 +3162,18 @@
     balance: 0,
   };
   const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
+  const AUTO_UPGRADE_LOG_PREFIX = "[Auto Upgrade]";
+  const AUTO_UPGRADE_TIE_BREAK_ORDER = ["multiplier", "moneyPerQuestion", "streakBonus", "insurance"];
+  const autoUpgradeState = {
+    enabled: false,
+    intervalId: null,
+    toggles: {
+      multiplier: true,
+      moneyPerQuestion: true,
+      streakBonus: true,
+      insurance: true,
+    },
+  };
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
   let getUpgradeHudModuleConfig = () => null;
   let persistUpgradeHudSettings = () => {};
@@ -3374,17 +3386,8 @@
           if (Number.isFinite(cost) && Number(upgradeHudState.balance) < cost) return;
           const currentLevel = Number(upgradeHudState.levels[key]) || 1;
           const nextLevel = currentLevel + 1;
-          const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
-          const roomId = socketManager?.blueboatRoomId;
-          const socket = socketManager?.socket;
-          if (socket && roomId) {
-            const encoded = blueboat.encode("UPGRADE_PURCHASED", payload, roomId);
-            socket.send(encoded);
-            upgradeHudLog("Sending UPGRADE_PURCHASED via blueboat", { roomId, payload });
-            return;
-          }
-          upgradeHudLog("Sending UPGRADE_PURCHASED via socketManager fallback", payload);
-          socketManager.sendMessage("UPGRADE_PURCHASED", payload);
+          const sent = sendUpgradePurchase(key, nextLevel);
+          if (sent) upgradeHudLog("Sent UPGRADE_PURCHASED", { key, nextLevel });
         });
       }
     }
@@ -3477,6 +3480,144 @@
     if (upgradeHudState.container) {
       upgradeHudState.container.style.display = "none";
     }
+  }
+
+
+  function autoUpgradeLog(message, extra) {
+    if (extra === undefined) console.log(`${AUTO_UPGRADE_LOG_PREFIX} ${message}`);
+    else console.log(`${AUTO_UPGRADE_LOG_PREFIX} ${message}`, extra);
+  }
+
+
+  function getAutoUpgradeConfig() {
+    const defaults = { ...autoUpgradeState.toggles };
+    const parseToggle = (value, fallback) => {
+      if (value === undefined || value === null) return fallback;
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number") return value === 1;
+      if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["false", "0", "off", "no", "disabled"].includes(normalized)) return false;
+        if (["true", "1", "on", "yes", "enabled"].includes(normalized)) return true;
+      }
+      return false;
+    };
+    try {
+      const cfg = moduleCfg("Auto Upgrade") || {};
+      const resolved = {
+        multiplier: parseToggle(cfg.multiplier, defaults.multiplier),
+        moneyPerQuestion: parseToggle(cfg.moneyPerQuestion, defaults.moneyPerQuestion),
+        streakBonus: parseToggle(cfg.streakBonus, defaults.streakBonus),
+        insurance: parseToggle(cfg.insurance, defaults.insurance),
+      };
+      autoUpgradeState.toggles = { ...resolved };
+      return resolved;
+    } catch (_) {
+      return { ...defaults };
+    }
+  }
+
+  function getAutoUpgradeSelection() {
+    const balance = Number(upgradeHudState.balance);
+    if (!Number.isFinite(balance) || balance <= 0) return null;
+
+    const cfg = getAutoUpgradeConfig();
+    const candidates = [];
+    for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
+      if (cfg[key] !== true) continue;
+      const level = Number(upgradeHudState.levels[key]) || 1;
+      const nextLevel = level + 1;
+      const cost = Number(UPGRADE_HUD_COSTS_BY_TARGET_LEVEL[key]?.[nextLevel]);
+      if (!Number.isFinite(cost) || cost > balance) continue;
+      candidates.push({ key, level, nextLevel, cost });
+    }
+    if (!candidates.length) return null;
+
+    candidates.sort((a, b) => {
+      if (a.cost !== b.cost) return a.cost - b.cost;
+      return AUTO_UPGRADE_TIE_BREAK_ORDER.indexOf(a.key) - AUTO_UPGRADE_TIE_BREAK_ORDER.indexOf(b.key);
+    });
+
+    return candidates[0] || null;
+  }
+
+  function sendUpgradePacketForCategory(key, nextLevel) {
+    const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
+    const roomId = socketManager?.blueboatRoomId;
+    const socket = socketManager?.socket;
+    if (socket && roomId) {
+      const encoded = blueboat.encode("UPGRADE_PURCHASED", payload, roomId);
+      socket.send(encoded);
+      return true;
+    }
+    socketManager.sendMessage("UPGRADE_PURCHASED", payload);
+    return true;
+  }
+
+  function sendMultiplierUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.multiplier !== true) return false;
+    return sendUpgradePacketForCategory("multiplier", nextLevel);
+  }
+
+  function sendMoneyPerQuestionUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.moneyPerQuestion !== true) return false;
+    return sendUpgradePacketForCategory("moneyPerQuestion", nextLevel);
+  }
+
+  function sendStreakBonusUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.streakBonus !== true) return false;
+    return sendUpgradePacketForCategory("streakBonus", nextLevel);
+  }
+
+  function sendInsuranceUpgrade(nextLevel) {
+    const cfg = getAutoUpgradeConfig();
+    if (cfg.insurance !== true) return false;
+    return sendUpgradePacketForCategory("insurance", nextLevel);
+  }
+
+  function sendUpgradePurchase(key, nextLevel, source = "manual") {
+    if (!key || !UPGRADE_HUD_LABELS[key]) return false;
+    if (source === "auto") {
+      const cfg = getAutoUpgradeConfig();
+      if (cfg[key] !== true) {
+        autoUpgradeLog("Skipped disabled upgrade category", { key, nextLevel });
+        return false;
+      }
+    }
+
+    if (key === "multiplier") return sendMultiplierUpgrade(nextLevel);
+    if (key === "moneyPerQuestion") return sendMoneyPerQuestionUpgrade(nextLevel);
+    if (key === "streakBonus") return sendStreakBonusUpgrade(nextLevel);
+    if (key === "insurance") return sendInsuranceUpgrade(nextLevel);
+    return false;
+  }
+
+  function tickAutoUpgrade() {
+    if (!autoUpgradeState.enabled) return;
+    const selection = getAutoUpgradeSelection();
+    if (!selection) return;
+    const sent = sendUpgradePurchase(selection.key, selection.nextLevel, "auto");
+    if (sent) autoUpgradeLog("Purchased cheapest available upgrade", selection);
+  }
+
+  function startAutoUpgrade() {
+    autoUpgradeState.enabled = true;
+    getAutoUpgradeConfig();
+    if (autoUpgradeState.intervalId) clearInterval(autoUpgradeState.intervalId);
+    autoUpgradeState.intervalId = setInterval(tickAutoUpgrade, 150);
+    autoUpgradeLog("Enabled");
+  }
+
+  function stopAutoUpgrade() {
+    autoUpgradeState.enabled = false;
+    if (autoUpgradeState.intervalId) {
+      clearInterval(autoUpgradeState.intervalId);
+      autoUpgradeState.intervalId = null;
+    }
+    autoUpgradeLog("Disabled");
   }
 
   const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
@@ -3583,6 +3724,10 @@
       onEnable: startUpgradeHud,
       onDisable: stopUpgradeHud,
     },
+    "Auto Upgrade": {
+      onEnable: startAutoUpgrade,
+      onDisable: stopAutoUpgrade,
+    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
@@ -3598,6 +3743,7 @@
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
+    "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
   };
 
   // --- End of Core Utilities ---
@@ -3802,6 +3948,16 @@
                   default: 100,
                   unit: "%",
                 },
+              ],
+            },
+            {
+              name: "Auto Upgrade",
+              description: MODULE_DESCRIPTIONS["Auto Upgrade"],
+              settings: [
+                { id: "multiplier", label: "Multiplier", type: "checkbox", default: true },
+                { id: "moneyPerQuestion", label: "Money / Question", type: "checkbox", default: true },
+                { id: "streakBonus", label: "Streak Bonus", type: "checkbox", default: true },
+                { id: "insurance", label: "Insurance", type: "checkbox", default: true },
               ],
             },
           ],
@@ -5918,6 +6074,9 @@
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 renderUpgradeHud();
+              }
+              if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
+                autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
               }
               saveSettings();
             });
