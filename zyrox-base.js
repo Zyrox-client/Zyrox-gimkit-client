@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.1.9
+// @version      2.2.0
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.1.9";
+    const CLIENT_VERSION = "2.2.0";
     return CLIENT_VERSION;
   }
 
@@ -6065,7 +6065,7 @@
             <span style="opacity:.7;">☰</span>
             <span>${UPGRADE_HUD_LABELS[key]}</span>
           </span>
-          <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${key}" ${cfg[key] ? "checked" : ""} />
+          <input type="checkbox" class="set-module-setting-checkbox" style="accent-color:var(--zyx-checkmark-color);" data-setting-id="${key}" ${cfg[key] ? "checked" : ""} />
         `;
         row.querySelector(".set-module-setting-checkbox")?.addEventListener("change", (event) => {
           cfg[key] = Boolean(event.target.checked);
