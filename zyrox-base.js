@@ -3167,6 +3167,12 @@
   const autoUpgradeState = {
     enabled: false,
     intervalId: null,
+    toggles: {
+      multiplier: true,
+      moneyPerQuestion: true,
+      streakBonus: true,
+      insurance: true,
+    },
   };
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
   let getUpgradeHudModuleConfig = () => null;
@@ -3484,12 +3490,7 @@
 
 
   function getAutoUpgradeConfig() {
-    const defaults = {
-      multiplier: true,
-      moneyPerQuestion: true,
-      streakBonus: true,
-      insurance: true,
-    };
+    const defaults = { ...autoUpgradeState.toggles };
     const parseToggle = (value, fallback) => {
       if (value === undefined || value === null) return fallback;
       if (typeof value === "boolean") return value;
@@ -3503,14 +3504,16 @@
     };
     try {
       const cfg = moduleCfg("Auto Upgrade") || {};
-      return {
+      const resolved = {
         multiplier: parseToggle(cfg.multiplier, defaults.multiplier),
         moneyPerQuestion: parseToggle(cfg.moneyPerQuestion, defaults.moneyPerQuestion),
         streakBonus: parseToggle(cfg.streakBonus, defaults.streakBonus),
         insurance: parseToggle(cfg.insurance, defaults.insurance),
       };
+      autoUpgradeState.toggles = { ...resolved };
+      return resolved;
     } catch (_) {
-      return defaults;
+      return { ...defaults };
     }
   }
 
@@ -3569,6 +3572,7 @@
 
   function startAutoUpgrade() {
     autoUpgradeState.enabled = true;
+    getAutoUpgradeConfig();
     if (autoUpgradeState.intervalId) clearInterval(autoUpgradeState.intervalId);
     autoUpgradeState.intervalId = setInterval(tickAutoUpgrade, 150);
     autoUpgradeLog("Enabled");
@@ -6037,6 +6041,9 @@
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 renderUpgradeHud();
+              }
+              if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
+                autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
               }
               saveSettings();
             });
