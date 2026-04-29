@@ -6037,12 +6037,12 @@
 
       const settingCard = document.createElement("div");
       settingCard.className = "zyrox-setting-card";
-      settingCard.innerHTML = `<label>Enabled Upgrade Categories (drag to prioritize same-cost buys)</label>`;
+      settingCard.innerHTML = `<label style="display:block;margin-bottom:8px;">Upgrade Order</label>`;
       const list = document.createElement("div");
       list.style.display = "flex";
       list.style.flexDirection = "column";
       list.style.gap = "8px";
-      list.style.marginTop = "8px";
+      list.style.marginTop = "2px";
 
       const rowByKey = new Map();
       const createRow = (key) => {
@@ -6057,8 +6057,9 @@
         row.style.borderRadius = "8px";
         row.style.background = "rgba(0,0,0,.22)";
         row.style.cursor = "grab";
+        row.style.transition = "transform .12s ease, border-color .12s ease, background-color .12s ease, opacity .12s ease";
         row.innerHTML = `
-          <span style="display:flex;align-items:center;gap:8px;">
+          <span style="display:flex;align-items:center;gap:8px;pointer-events:none;">
             <span style="opacity:.7;">☰</span>
             <span>${UPGRADE_HUD_LABELS[key]}</span>
           </span>
@@ -6078,28 +6079,53 @@
       configBody.appendChild(settingCard);
 
       let draggingKey = null;
+      const dropIndicator = document.createElement("div");
+      dropIndicator.style.height = "0";
+      dropIndicator.style.borderTop = "2px solid rgba(94, 185, 255, 0.95)";
+      dropIndicator.style.margin = "0";
+      dropIndicator.style.borderRadius = "2px";
+      dropIndicator.style.opacity = "0";
+      dropIndicator.style.transition = "opacity .1s ease";
+
       list.addEventListener("dragstart", (event) => {
         const row = event.target.closest("[data-upgrade-key]");
         if (!row) return;
         draggingKey = row.dataset.upgradeKey;
         row.style.opacity = "0.55";
+        row.style.transform = "scale(0.985)";
+        row.style.borderColor = "rgba(94, 185, 255, 0.8)";
       });
       list.addEventListener("dragend", () => {
+        draggingKey = null;
+        dropIndicator.remove();
         for (const row of list.querySelectorAll("[data-upgrade-key]")) row.style.opacity = "1";
+        for (const row of list.querySelectorAll("[data-upgrade-key]")) {
+          row.style.transform = "scale(1)";
+          row.style.borderColor = "rgba(255,255,255,.12)";
+        }
       });
       list.addEventListener("dragover", (event) => {
         event.preventDefault();
+        if (!draggingKey) return;
+        const target = event.target.closest("[data-upgrade-key]");
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const insertAfter = event.clientY > rect.top + rect.height / 2;
+        if (insertAfter) target.after(dropIndicator);
+        else target.before(dropIndicator);
+        dropIndicator.style.opacity = "1";
       });
       list.addEventListener("drop", (event) => {
         event.preventDefault();
         if (!draggingKey) return;
-        const dropTarget = event.target.closest("[data-upgrade-key]");
+        const dropTarget = dropIndicator.parentElement === list
+          ? (dropIndicator.nextElementSibling || null)
+          : event.target.closest("[data-upgrade-key]");
         const draggedRow = rowByKey.get(draggingKey);
-        if (!dropTarget || !draggedRow || dropTarget === draggedRow) return;
-        const rect = dropTarget.getBoundingClientRect();
-        const insertAfter = event.clientY > rect.top + rect.height / 2;
-        if (insertAfter) dropTarget.after(draggedRow);
-        else dropTarget.before(draggedRow);
+        if (!draggedRow) return;
+        if (!dropTarget) list.appendChild(draggedRow);
+        else if (dropTarget !== draggedRow) dropTarget.before(draggedRow);
+        dropIndicator.remove();
         const nextOrder = [...list.querySelectorAll("[data-upgrade-key]")].map((row) => row.dataset.upgradeKey);
         cfg.order = nextOrder;
         autoUpgradeState.order = [...nextOrder];
