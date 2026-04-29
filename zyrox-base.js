@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.0
+// @version      2.2.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -559,8 +559,8 @@
   })();
 
   function readUserscriptVersion() {
-    // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.2.0";
+    
+    const CLIENT_VERSION = "2.2.1";
     return CLIENT_VERSION;
   }
 
@@ -6109,12 +6109,17 @@
       list.addEventListener("dragover", (event) => {
         event.preventDefault();
         if (!draggingKey) return;
-        const target = event.target.closest("[data-upgrade-key]");
-        if (!target) return;
-        const rect = target.getBoundingClientRect();
-        const insertAfter = event.clientY > rect.top + rect.height / 2;
-        if (insertAfter) target.after(dropIndicator);
-        else target.before(dropIndicator);
+        const rows = [...list.querySelectorAll("[data-upgrade-key]")].filter((row) => row.dataset.upgradeKey !== draggingKey);
+        let insertBeforeRow = null;
+        for (const row of rows) {
+          const rect = row.getBoundingClientRect();
+          if (event.clientY < rect.top + rect.height / 2) {
+            insertBeforeRow = row;
+            break;
+          }
+        }
+        if (insertBeforeRow) list.insertBefore(dropIndicator, insertBeforeRow);
+        else list.appendChild(dropIndicator);
         dropIndicator.style.opacity = "1";
       });
       list.addEventListener("drop", (event) => {
@@ -6123,7 +6128,7 @@
         const draggedRow = rowByKey.get(draggingKey);
         if (!draggedRow) return;
         if (dropIndicator.parentElement === list) {
-          list.insertBefore(draggedRow, dropIndicator.nextSibling);
+          list.insertBefore(draggedRow, dropIndicator);
         } else {
           const dropTarget = event.target.closest("[data-upgrade-key]");
           if (!dropTarget) list.appendChild(draggedRow);
