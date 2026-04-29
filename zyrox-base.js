@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.1.3
+// @version      2.1.4
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.1.3";
+    const CLIENT_VERSION = "2.1.4";
     return CLIENT_VERSION;
   }
 
@@ -3494,13 +3494,13 @@
     const parseToggle = (value, fallback) => {
       if (value === undefined || value === null) return fallback;
       if (typeof value === "boolean") return value;
-      if (typeof value === "number") return value !== 0;
+      if (typeof value === "number") return value === 1;
       if (typeof value === "string") {
         const normalized = value.trim().toLowerCase();
         if (["false", "0", "off", "no", "disabled"].includes(normalized)) return false;
         if (["true", "1", "on", "yes", "enabled"].includes(normalized)) return true;
       }
-      return Boolean(value);
+      return false;
     };
     try {
       const cfg = moduleCfg("Auto Upgrade") || {};
@@ -3524,7 +3524,7 @@
     const cfg = getAutoUpgradeConfig();
     const candidates = [];
     for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
-      if (cfg[key] === false) continue;
+      if (cfg[key] !== true) continue;
       const level = Number(upgradeHudState.levels[key]) || 1;
       const nextLevel = level + 1;
       const cost = Number(UPGRADE_HUD_COSTS_BY_TARGET_LEVEL[key]?.[nextLevel]);
@@ -3545,7 +3545,7 @@
     if (!key || !UPGRADE_HUD_LABELS[key]) return false;
     if (source === "auto") {
       const cfg = getAutoUpgradeConfig();
-      if (cfg[key] === false) {
+      if (cfg[key] !== true) {
         autoUpgradeLog("Skipped disabled upgrade category", { key, nextLevel });
         return false;
       }
