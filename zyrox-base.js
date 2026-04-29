@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.1.1
+// @version      2.1.2
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.1.1";
+    const CLIENT_VERSION = "2.1.2";
     return CLIENT_VERSION;
   }
 
@@ -3538,8 +3538,15 @@
     return candidates[0] || null;
   }
 
-  function sendUpgradePurchase(key, nextLevel) {
+  function sendUpgradePurchase(key, nextLevel, source = "manual") {
     if (!key || !UPGRADE_HUD_LABELS[key]) return false;
+    if (source === "auto") {
+      const cfg = getAutoUpgradeConfig();
+      if (cfg[key] === false) {
+        autoUpgradeLog("Skipped disabled upgrade category", { key, nextLevel });
+        return false;
+      }
+    }
     const payload = { upgradeName: UPGRADE_HUD_LABELS[key], level: nextLevel };
     const roomId = socketManager?.blueboatRoomId;
     const socket = socketManager?.socket;
@@ -3556,7 +3563,7 @@
     if (!autoUpgradeState.enabled) return;
     const selection = getAutoUpgradeSelection();
     if (!selection) return;
-    const sent = sendUpgradePurchase(selection.key, selection.nextLevel);
+    const sent = sendUpgradePurchase(selection.key, selection.nextLevel, "auto");
     if (sent) autoUpgradeLog("Purchased cheapest available upgrade", selection);
   }
 
