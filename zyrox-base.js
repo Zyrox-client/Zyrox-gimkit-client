@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.0.9
+// @version      2.1.0
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.0.9";
+    const CLIENT_VERSION = "2.1.0";
     return CLIENT_VERSION;
   }
 
@@ -3482,12 +3482,35 @@
     else console.log(`${AUTO_UPGRADE_LOG_PREFIX} ${message}`, extra);
   }
 
+
+  function getAutoUpgradeConfig() {
+    const defaults = {
+      multiplier: true,
+      moneyPerQuestion: true,
+      streakBonus: true,
+      insurance: true,
+    };
+    try {
+      const cfg = moduleCfg("Auto Upgrade") || {};
+      return {
+        multiplier: cfg.multiplier !== undefined ? Boolean(cfg.multiplier) : defaults.multiplier,
+        moneyPerQuestion: cfg.moneyPerQuestion !== undefined ? Boolean(cfg.moneyPerQuestion) : defaults.moneyPerQuestion,
+        streakBonus: cfg.streakBonus !== undefined ? Boolean(cfg.streakBonus) : defaults.streakBonus,
+        insurance: cfg.insurance !== undefined ? Boolean(cfg.insurance) : defaults.insurance,
+      };
+    } catch (_) {
+      return defaults;
+    }
+  }
+
   function getAutoUpgradeSelection() {
     const balance = Number(upgradeHudState.balance);
     if (!Number.isFinite(balance) || balance <= 0) return null;
 
+    const cfg = getAutoUpgradeConfig();
     const candidates = [];
     for (const key of Object.keys(UPGRADE_HUD_LABELS)) {
+      if (cfg[key] === false) continue;
       const level = Number(upgradeHudState.levels[key]) || 1;
       const nextLevel = level + 1;
       const cost = Number(UPGRADE_HUD_COSTS_BY_TARGET_LEVEL[key]?.[nextLevel]);
@@ -3875,7 +3898,12 @@
             {
               name: "Auto Upgrade",
               description: MODULE_DESCRIPTIONS["Auto Upgrade"],
-              settings: [],
+              settings: [
+                { id: "multiplier", label: "Multiplier", type: "checkbox", default: true },
+                { id: "moneyPerQuestion", label: "Money / Question", type: "checkbox", default: true },
+                { id: "streakBonus", label: "Streak Bonus", type: "checkbox", default: true },
+                { id: "insurance", label: "Insurance", type: "checkbox", default: true },
+              ],
             },
           ],
         },
