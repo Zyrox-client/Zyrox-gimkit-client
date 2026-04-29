@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.1.8
+// @version      2.1.9
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -560,7 +560,7 @@
 
   function readUserscriptVersion() {
     // Update this variable whenever you bump @version above.
-    const CLIENT_VERSION = "2.1.8";
+    const CLIENT_VERSION = "2.1.9";
     return CLIENT_VERSION;
   }
 
@@ -6036,7 +6036,9 @@
       autoUpgradeState.order = [...order];
 
       const settingCard = document.createElement("div");
-      settingCard.className = "zyrox-setting-card";
+      settingCard.style.display = "block";
+      settingCard.style.width = "100%";
+      settingCard.style.padding = "10px 0";
       settingCard.innerHTML = `<label style="display:block;margin-bottom:8px;">Upgrade Order</label>`;
       const list = document.createElement("div");
       list.style.display = "flex";
@@ -6081,7 +6083,7 @@
       let draggingKey = null;
       const dropIndicator = document.createElement("div");
       dropIndicator.style.height = "0";
-      dropIndicator.style.borderTop = "2px solid rgba(94, 185, 255, 0.95)";
+      dropIndicator.style.borderTop = "2px solid var(--zyx-slider-color)";
       dropIndicator.style.margin = "0";
       dropIndicator.style.borderRadius = "2px";
       dropIndicator.style.opacity = "0";
@@ -6093,7 +6095,7 @@
         draggingKey = row.dataset.upgradeKey;
         row.style.opacity = "0.55";
         row.style.transform = "scale(0.985)";
-        row.style.borderColor = "rgba(94, 185, 255, 0.8)";
+        row.style.borderColor = "var(--zyx-slider-color)";
       });
       list.addEventListener("dragend", () => {
         draggingKey = null;
@@ -6118,13 +6120,15 @@
       list.addEventListener("drop", (event) => {
         event.preventDefault();
         if (!draggingKey) return;
-        const dropTarget = dropIndicator.parentElement === list
-          ? (dropIndicator.nextElementSibling || null)
-          : event.target.closest("[data-upgrade-key]");
         const draggedRow = rowByKey.get(draggingKey);
         if (!draggedRow) return;
-        if (!dropTarget) list.appendChild(draggedRow);
-        else if (dropTarget !== draggedRow) dropTarget.before(draggedRow);
+        if (dropIndicator.parentElement === list) {
+          list.insertBefore(draggedRow, dropIndicator.nextSibling);
+        } else {
+          const dropTarget = event.target.closest("[data-upgrade-key]");
+          if (!dropTarget) list.appendChild(draggedRow);
+          else if (dropTarget !== draggedRow) dropTarget.before(draggedRow);
+        }
         dropIndicator.remove();
         const nextOrder = [...list.querySelectorAll("[data-upgrade-key]")].map((row) => row.dataset.upgradeKey);
         cfg.order = nextOrder;
