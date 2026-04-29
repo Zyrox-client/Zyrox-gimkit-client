@@ -3163,7 +3163,7 @@
   };
   const UPGRADE_HUD_LOG_PREFIX = "[Upgrade HUD]";
   const AUTO_UPGRADE_LOG_PREFIX = "[Auto Upgrade]";
-  const AUTO_UPGRADE_TIE_BREAK_ORDER = ["multiplier", "moneyPerQuestion", "streakBonus", "insurance"];
+  const AUTO_UPGRADE_TIE_BREAK_ORDER = ["moneyPerQuestion", "streakBonus", "multiplier", "insurance"];
   const autoUpgradeState = {
     enabled: false,
     intervalId: null,
@@ -3173,6 +3173,7 @@
       streakBonus: true,
       insurance: true,
     },
+    order: [...AUTO_UPGRADE_TIE_BREAK_ORDER],
   };
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
   let getUpgradeHudModuleConfig = () => null;
@@ -3491,6 +3492,7 @@
 
   function getAutoUpgradeConfig() {
     const defaults = { ...autoUpgradeState.toggles };
+    const defaultOrder = [...AUTO_UPGRADE_TIE_BREAK_ORDER];
     const parseToggle = (value, fallback) => {
       if (value === undefined || value === null) return fallback;
       if (typeof value === "boolean") return value;
@@ -3510,9 +3512,14 @@
         streakBonus: parseToggle(cfg.streakBonus, defaults.streakBonus),
         insurance: parseToggle(cfg.insurance, defaults.insurance),
       };
+      const configuredOrder = Array.isArray(cfg.order) ? cfg.order.filter((key) => defaultOrder.includes(key)) : [];
+      const normalizedOrder = [...configuredOrder];
+      for (const key of defaultOrder) if (!normalizedOrder.includes(key)) normalizedOrder.push(key);
       autoUpgradeState.toggles = { ...resolved };
+      autoUpgradeState.order = normalizedOrder;
       return resolved;
     } catch (_) {
+      autoUpgradeState.order = [...defaultOrder];
       return { ...defaults };
     }
   }
@@ -3535,7 +3542,7 @@
 
     candidates.sort((a, b) => {
       if (a.cost !== b.cost) return a.cost - b.cost;
-      return AUTO_UPGRADE_TIE_BREAK_ORDER.indexOf(a.key) - AUTO_UPGRADE_TIE_BREAK_ORDER.indexOf(b.key);
+      return autoUpgradeState.order.indexOf(a.key) - autoUpgradeState.order.indexOf(b.key);
     });
 
     return candidates[0] || null;
@@ -6018,6 +6025,116 @@
           });
         }
       }
+    } else if (moduleName === "Auto Upgrade") {
+      const defaults = getAutoUpgradeConfig();
+      Object.assign(cfg, { ...defaults, ...cfg });
+      const defaultOrder = [...AUTO_UPGRADE_TIE_BREAK_ORDER];
+      const configuredOrder = Array.isArray(cfg.order) ? cfg.order.filter((key) => defaultOrder.includes(key)) : [];
+      const order = [...configuredOrder];
+      for (const key of defaultOrder) if (!order.includes(key)) order.push(key);
+      cfg.order = [...order];
+      autoUpgradeState.order = [...order];
+
+      const settingCard = document.createElement("div");
+      settingCard.style.display = "block";
+      settingCard.style.width = "100%";
+      settingCard.style.padding = "10px 0";
+      settingCard.innerHTML = `<label style="display:block;margin-bottom:8px;">Upgrade Order</label>`;
+      const list = document.createElement("div");
+      list.style.display = "flex";
+      list.style.flexDirection = "column";
+      list.style.gap = "8px";
+      list.style.marginTop = "2px";
+
+      const rowByKey = new Map();
+      const createRow = (key) => {
+        const row = document.createElement("div");
+        row.draggable = true;
+        row.dataset.upgradeKey = key;
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.justifyContent = "space-between";
+        row.style.padding = "8px 10px";
+        row.style.border = "1px solid rgba(255,255,255,.12)";
+        row.style.borderRadius = "8px";
+        row.style.background = "rgba(0,0,0,.22)";
+        row.style.cursor = "grab";
+        row.style.transition = "transform .12s ease, border-color .12s ease, background-color .12s ease, opacity .12s ease";
+        row.innerHTML = `
+          <span style="display:flex;align-items:center;gap:8px;pointer-events:none;">
+            <span style="opacity:.7;">☰</span>
+            <span>${UPGRADE_HUD_LABELS[key]}</span>
+          </span>
+          <input type="checkbox" class="set-module-setting-checkbox" data-setting-id="${key}" ${cfg[key] ? "checked" : ""} />
+        `;
+        row.querySelector(".set-module-setting-checkbox")?.addEventListener("change", (event) => {
+          cfg[key] = Boolean(event.target.checked);
+          autoUpgradeState.toggles[key] = cfg[key];
+          saveSettings();
+        });
+        rowByKey.set(key, row);
+        return row;
+      };
+
+      for (const key of order) list.appendChild(createRow(key));
+      settingCard.appendChild(list);
+      configBody.appendChild(settingCard);
+
+      let draggingKey = null;
+      const dropIndicator = document.createElement("div");
+      dropIndicator.style.height = "0";
+      dropIndicator.style.borderTop = "2px solid var(--zyx-slider-color)";
+      dropIndicator.style.margin = "0";
+      dropIndicator.style.borderRadius = "2px";
+      dropIndicator.style.opacity = "0";
+      dropIndicator.style.transition = "opacity .1s ease";
+
+      list.addEventListener("dragstart", (event) => {
+        const row = event.target.closest("[data-upgrade-key]");
+        if (!row) return;
+        draggingKey = row.dataset.upgradeKey;
+        row.style.opacity = "0.55";
+        row.style.transform = "scale(0.985)";
+        row.style.borderColor = "var(--zyx-slider-color)";
+      });
+      list.addEventListener("dragend", () => {
+        draggingKey = null;
+        dropIndicator.remove();
+        for (const row of list.querySelectorAll("[data-upgrade-key]")) row.style.opacity = "1";
+        for (const row of list.querySelectorAll("[data-upgrade-key]")) {
+          row.style.transform = "scale(1)";
+          row.style.borderColor = "rgba(255,255,255,.12)";
+        }
+      });
+      list.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        if (!draggingKey) return;
+        const target = event.target.closest("[data-upgrade-key]");
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const insertAfter = event.clientY > rect.top + rect.height / 2;
+        if (insertAfter) target.after(dropIndicator);
+        else target.before(dropIndicator);
+        dropIndicator.style.opacity = "1";
+      });
+      list.addEventListener("drop", (event) => {
+        event.preventDefault();
+        if (!draggingKey) return;
+        const draggedRow = rowByKey.get(draggingKey);
+        if (!draggedRow) return;
+        if (dropIndicator.parentElement === list) {
+          list.insertBefore(draggedRow, dropIndicator.nextSibling);
+        } else {
+          const dropTarget = event.target.closest("[data-upgrade-key]");
+          if (!dropTarget) list.appendChild(draggedRow);
+          else if (dropTarget !== draggedRow) dropTarget.before(draggedRow);
+        }
+        dropIndicator.remove();
+        const nextOrder = [...list.querySelectorAll("[data-upgrade-key]")].map((row) => row.dataset.upgradeKey);
+        cfg.order = nextOrder;
+        autoUpgradeState.order = [...nextOrder];
+        saveSettings();
+      });
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
         const settingCard = document.createElement("div");
