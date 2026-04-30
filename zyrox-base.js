@@ -1222,6 +1222,13 @@
     }
   }
 
+
+  const lavaBuildingHudState = {
+    enabled: false,
+    container: null,
+    balance: 0,
+  };
+
   function applyUpgradeLevelsFromStateUpdate(stateUpdateData, source = "unknown") {
     const levels = extractUpgradeLevelsFromStateUpdate(stateUpdateData);
     if (!levels) return false;
@@ -1243,6 +1250,8 @@
         const parsedBalance = extractBalanceFromStateUpdate(decoded.data);
         if (parsedBalance != null) {
           updateUpgradeHudBalance(parsedBalance);
+          lavaBuildingHudState.balance = parsedBalance;
+          if (lavaBuildingHudState.enabled) renderLavaBuildingHud();
         }
         applyUpgradeLevelsFromStateUpdate(decoded.data, "raw-ws-hook");
       }
@@ -1351,6 +1360,8 @@
     const balance = extractBalanceFromStateUpdate(stateUpdate);
     if (balance != null) {
       updateUpgradeHudBalance(balance);
+      lavaBuildingHudState.balance = balance;
+      if (lavaBuildingHudState.enabled) renderLavaBuildingHud();
       return;
     }
     const applied = applyUpgradeLevelsFromStateUpdate(stateUpdate, "socketManager");
@@ -3340,6 +3351,29 @@
     }
   }
 
+
+  function getLavaBuildingHudConfig() {
+    const defaults = {
+      hudLocation: "topRight",
+      displayTitle: true,
+      hudSize: 100,
+    };
+    const apply = (cfg) => {
+      const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
+      const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
+      return {
+        hudLocation: allowed.has(loc) ? loc : defaults.hudLocation,
+        displayTitle: cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
+        hudSize: Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
+      };
+    };
+    try {
+      return apply(moduleCfg("Building HUD"));
+    } catch (_) {
+      return apply(defaults);
+    }
+  }
+
   function applyUpgradeHudPosition(hud, cfg) {
     hud.style.removeProperty("top");
     hud.style.removeProperty("right");
@@ -3654,6 +3688,85 @@
     autoUpgradeLog("Disabled");
   }
 
+
+  const LAVA_BUILDING_OPTIONS = [
+    { label: "Plank", cost: 5, packetType: "plank" },
+    { label: "Brick", cost: 50, packetType: "brick" },
+    { label: "Staircase", cost: 500, packetType: "Wall" },
+    { label: "House", cost: 5000, packetType: "house" },
+    { label: "Shopping Mall", cost: 50000, packetType: "shoppingMall" },
+    { label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
+    { label: "Mountain", cost: 5000000, packetType: "mountain" },
+    { label: "Space Elevator", cost: 50000000, packetType: "spaceElevator" },
+  ];
+
+  function sendLavaBuildingPurchase(packetType) {
+    if (!packetType) return false;
+    const payload = { type: packetType };
+    const roomId = socketManager?.blueboatRoomId;
+    const socket = socketManager?.socket;
+    if (socket && roomId) {
+      const encoded = blueboat.encode("LAVA_PURCHASE_PIECE", payload, roomId);
+      socket.send(encoded);
+      return true;
+    }
+    socketManager.sendMessage("LAVA_PURCHASE_PIECE", payload);
+    return true;
+  }
+
+  function ensureLavaBuildingHudContainer() {
+    if (lavaBuildingHudState.container?.isConnected) return lavaBuildingHudState.container;
+    const hud = document.createElement("div");
+    hud.className = "zyrox-upgrade-hud";
+    hud.style.cssText = "position:fixed;top:39px;right:14px;min-width:220px;max-width:min(38vw,360px);padding:10px 12px;border-radius:10px;background:rgba(8,12,17,.88);border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 30px rgba(0,0,0,.42);z-index:2147483646;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;display:none;pointer-events:auto;";
+    document.documentElement.appendChild(hud);
+    lavaBuildingHudState.container = hud;
+    return hud;
+  }
+
+  function renderLavaBuildingHud() {
+    const hud = ensureLavaBuildingHudContainer();
+    const cfg = getLavaBuildingHudConfig();
+    const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
+    hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
+    hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
+    hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
+    applyUpgradeHudPosition(hud, {
+      hudLocation: cfg.hudLocation || "topRight",
+      useCustomPosition: false,
+    });
+
+    const titleRow = cfg.displayTitle !== false
+      ? `<div style="font-size:${Math.max(10, Math.round(12 * sizeScale))}px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:${Math.max(4, Math.round(6 * sizeScale))}px;">Buildings</div>`
+      : "";
+    const rows = LAVA_BUILDING_OPTIONS.map((build) => {
+      const canAfford = lavaBuildingHudState.balance >= build.cost;
+      return `<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:${Math.round(10 * sizeScale)}px;padding:${Math.max(1, Math.round(2 * sizeScale))}px 0;font-size:${Math.max(11, Math.round(13 * sizeScale))}px;"><span style="opacity:.88;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${build.label}</span><button class="zyrox-upgrade-hud-button" data-lava-type="${build.packetType}" ${canAfford ? "" : "disabled"} style="appearance:none;border:1px solid ${canAfford ? "rgba(46,204,113,.82)" : "rgba(255,255,255,.24)"};background:${canAfford ? "rgba(46,204,113,.35)" : "rgba(255,255,255,.09)"};color:#fff;border-radius:${Math.max(5, Math.round(6 * sizeScale))}px;padding:${Math.max(2, Math.round(3 * sizeScale))}px ${Math.max(6, Math.round(8 * sizeScale))}px;font-size:${Math.max(10, Math.round(11 * sizeScale))}px;font-weight:700;line-height:1;cursor:${canAfford ? "pointer" : "default"};min-width:${Math.max(62, Math.round(72 * sizeScale))}px;text-align:center;">$${build.cost.toLocaleString()}</button></div>`;
+    }).join("");
+    hud.innerHTML = `${titleRow}${rows}`;
+    for (const button of hud.querySelectorAll("[data-lava-type]")) {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const packetType = String(button.getAttribute("data-lava-type") || "");
+        sendLavaBuildingPurchase(packetType);
+      });
+    }
+    hud.style.display = lavaBuildingHudState.enabled ? "block" : "none";
+  }
+
+  function startLavaBuildingHud() {
+    lavaBuildingHudState.enabled = true;
+    const hud = ensureLavaBuildingHudContainer();
+    hud.style.display = "block";
+    renderLavaBuildingHud();
+  }
+
+  function stopLavaBuildingHud() {
+    lavaBuildingHudState.enabled = false;
+    if (lavaBuildingHudState.container) lavaBuildingHudState.container.style.display = "none";
+  }
+
   const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
   const LEGACY_ANIMATION_SKIP_MODULE_NAME = "Animation Skip";
   const ANIMATION_SKIP_STYLE_ID = "zyrox-animation-skip-style";
@@ -3762,6 +3875,10 @@
       onEnable: startAutoUpgrade,
       onDisable: stopAutoUpgrade,
     },
+    "Building HUD": {
+      onEnable: startLavaBuildingHud,
+      onDisable: stopLavaBuildingHud,
+    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
@@ -3778,6 +3895,7 @@
     "Answer Popup": "Displays detected Draw It answers in a popup.",
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
     "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
+    "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
   };
 
   // --- End of Core Utilities ---
@@ -3992,6 +4110,31 @@
                 { id: "moneyPerQuestion", label: "Money / Question", type: "checkbox", default: true },
                 { id: "streakBonus", label: "Streak Bonus", type: "checkbox", default: true },
                 { id: "insurance", label: "Insurance", type: "checkbox", default: true },
+              ],
+            },
+          ],
+        },
+        {
+          name: "Floor is Lava",
+          modules: [
+            {
+              name: "Building HUD",
+              description: MODULE_DESCRIPTIONS["Building HUD"],
+              settings: [
+                {
+                  id: "hudLocation",
+                  label: "HUD Location",
+                  type: "select",
+                  default: "topRight",
+                  options: [
+                    { value: "topRight", label: "Top Right" },
+                    { value: "topLeft", label: "Top Left" },
+                    { value: "bottomRight", label: "Bottom Right" },
+                    { value: "bottomLeft", label: "Bottom Left" },
+                  ],
+                },
+                { id: "displayTitle", label: "Display Title", type: "checkbox", default: true },
+                { id: "hudSize", label: "HUD Size", type: "slider", min: 60, max: 180, step: 5, default: 100, unit: "%" },
               ],
             },
           ],
@@ -6204,6 +6347,9 @@
                 upgradeHudState.config.hudSize = newVal;
                 renderUpgradeHud();
               }
+              if (moduleName === "Building HUD" && setting.id === "hudSize") {
+                renderLavaBuildingHud();
+              }
               saveSettings();
             });
           }
@@ -6223,6 +6369,9 @@
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 renderUpgradeHud();
+              }
+              if (moduleName === "Building HUD" && setting.id === "displayTitle") {
+                renderLavaBuildingHud();
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
@@ -6263,6 +6412,9 @@
                 cfg.customX = null;
                 cfg.customY = null;
                 renderUpgradeHud();
+              }
+              if (moduleName === "Building HUD" && setting.id === "hudLocation") {
+                renderLavaBuildingHud();
               }
               saveSettings();
             });
@@ -6824,12 +6976,22 @@
       const behavior = MODULE_BEHAVIORS[moduleName];
       const moduleInstance = new Module(moduleName, {
         onEnable: () => {
-          console.log(`${moduleName} enabled`);
-          if (behavior?.onEnable) behavior.onEnable();
+          console.log(`[Zyrox] ${moduleName} enable requested`);
+          try {
+            if (behavior?.onEnable) behavior.onEnable();
+            console.log(`[Zyrox] ${moduleName} enabled`);
+          } catch (error) {
+            console.error(`[Zyrox] ${moduleName} failed to enable`, error);
+          }
         },
         onDisable: () => {
-          console.log(`${moduleName} disabled`);
-          if (behavior?.onDisable) behavior.onDisable();
+          console.log(`[Zyrox] ${moduleName} disable requested`);
+          try {
+            if (behavior?.onDisable) behavior.onDisable();
+            console.log(`[Zyrox] ${moduleName} disabled`);
+          } catch (error) {
+            console.error(`[Zyrox] ${moduleName} failed to disable`, error);
+          }
         },
       });
       state.modules.set(moduleName, moduleInstance);
