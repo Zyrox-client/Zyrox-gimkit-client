@@ -55,13 +55,16 @@ Prompt: ${String(prompt).slice(0, 90)}`;
 
   function getFiberRootCandidates() {
     const candidates = [];
-    const appRoot = document.querySelector("#root,[data-reactroot]");
-    if (appRoot) {
-      const keys = Object.keys(appRoot);
-      for (const k of keys) {
-        if ((k.startsWith("__reactContainer$") || k.startsWith("__reactFiber$")) && appRoot[k]) candidates.push(appRoot[k]);
+    try {
+      const appRoot = document.querySelector("#root,[data-reactroot]");
+      if (appRoot) {
+        const keys = Object.keys(appRoot);
+        for (const k of keys) {
+          if ((k.startsWith("__reactContainer$") || k.startsWith("__reactFiber$")) && appRoot[k]) candidates.push(appRoot[k]);
+        }
       }
-    }
+    } catch (_) {}
+    return candidates;
   }
 
   function maybeUseBag(bag, source) {
@@ -87,7 +90,8 @@ Prompt: ${String(prompt).slice(0, 90)}`;
   }
 
   function scanFiber() {
-    const roots = getFiberRootCandidates();
+    const rootsRaw = getFiberRootCandidates();
+    const roots = Array.isArray(rootsRaw) ? rootsRaw : [];
     for (const root of roots) {
       const start = root.current || root;
       const stack = [start];
@@ -156,8 +160,12 @@ Prompt: ${String(prompt).slice(0, 90)}`;
     state.scanScheduled = true;
     setTimeout(() => {
       state.scanScheduled = false;
-      scanFiber();
-      correlateText();
+      try {
+        scanFiber();
+        correlateText();
+      } catch (error) {
+        console.warn(LOG_PREFIX, "scan error", error);
+      }
     }, 120);
   }
 
