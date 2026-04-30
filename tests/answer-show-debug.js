@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox Gimkit Question ID Extractor (Debug)
 // @namespace    https://github.com/zyrox
-// @version      0.2.2
+// @version      0.2.3
 // @description  Extract and display the current Gimkit question ID with low-overhead React/state inspection.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
