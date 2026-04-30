@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.9
+// @version      2.3.0
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -591,7 +591,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.2.9";
+    const CLIENT_VERSION = "2.3.0";
     return CLIENT_VERSION;
   }
 
@@ -3792,10 +3792,7 @@
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
-    applyUpgradeHudPosition(hud, {
-      hudLocation: cfg.hudLocation || "topRight",
-      useCustomPosition: false,
-    });
+    applyUpgradeHudPosition(hud, cfg);
 
     const titleRow = cfg.displayTitle !== false
       ? `<div style="font-size:${Math.max(10, Math.round(12 * sizeScale))}px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:${Math.max(4, Math.round(6 * sizeScale))}px;">Buildings</div>`
@@ -6411,6 +6408,7 @@
                 renderUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
+                lavaBuildingHudState.config.hudSize = newVal;
                 renderLavaBuildingHud();
               }
               saveSettings();
@@ -6434,6 +6432,7 @@
                 renderUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
+                lavaBuildingHudState.config.displayTitle = cfg[setting.id];
                 renderLavaBuildingHud();
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
