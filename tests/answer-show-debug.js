@@ -1,10 +1,11 @@
 // ==UserScript==
-// @name         Zyrox answer show debug
+// @name         Zyrox Gimkit Question ID Extractor (Debug)
 // @namespace    https://github.com/zyrox
-// @version      0.1.1
-// @description  Logs the current Classic question to the console from packet data.
+// @version      0.2.1
+// @description  Extracts and displays the current Gimkit question ID in real-time using React Fiber + packet fallbacks.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
+// @match        https://www.gimkit.com/play*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -12,237 +13,227 @@
 (() => {
   "use strict";
 
-  const LOG_PREFIX = "[ZyroxAnswerShowDebug]";
+  const LOG_PREFIX = "[ZyroxQuestionIdExtractor]";
+  const ID_LIKE_RE = /^[a-f0-9]{8,}$/i;
+  const BAD_IDS = new Set(["content", "question", "game", "player", "host", "team", "true", "false"]);
 
   const state = {
-    questions: [],
-    questionIdList: [],
-    currentQuestionIndex: -1,
-    loggedQuestionIds: new Set(),
-    hasLoggedFullSet: false,
+    currentQuestionId: null,
+    source: null,
+    questionsById: new Map(),
+    namedIdMap: new Map(),
+    aliasMap: new Map(),
+    lastQuestionSignature: null,
   };
 
-  function msgpackDecode(buffer, startOffset = 0) {
-    const view = new DataView(buffer);
-    let offset = startOffset;
-
-    const readString = (len) => {
-      let out = "";
-      const end = offset + len;
-      while (offset < end) {
-        const byte = view.getUint8(offset++);
-        if ((byte & 0x80) === 0) out += String.fromCharCode(byte);
-        else if ((byte & 0xe0) === 0xc0) out += String.fromCharCode(((byte & 0x1f) << 6) | (view.getUint8(offset++) & 0x3f));
-        else if ((byte & 0xf0) === 0xe0) out += String.fromCharCode(((byte & 0x0f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f));
-      }
-      return out;
-    };
-
-    const read = () => {
-      const token = view.getUint8(offset++);
-      if (token < 0x80) return token;
-      if (token < 0x90) { const size = token & 0x0f; const map = {}; for (let i = 0; i < size; i++) map[read()] = read(); return map; }
-      if (token < 0xa0) { const size = token & 0x0f; const arr = []; for (let i = 0; i < size; i++) arr.push(read()); return arr; }
-      if (token < 0xc0) return readString(token & 0x1f);
-      if (token > 0xdf) return token - 256;
-
-      switch (token) {
-        case 192: return null;
-        case 194: return false;
-        case 195: return true;
-        case 196: { const n = view.getUint8(offset); offset += 1; const out = buffer.slice(offset, offset + n); offset += n; return out; }
-        case 197: { const n = view.getUint16(offset); offset += 2; const out = buffer.slice(offset, offset + n); offset += n; return out; }
-        case 198: { const n = view.getUint32(offset); offset += 4; const out = buffer.slice(offset, offset + n); offset += n; return out; }
-        case 202: { const v = view.getFloat32(offset); offset += 4; return v; }
-        case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
-        case 204: { const v = view.getUint8(offset); offset += 1; return v; }
-        case 205: { const v = view.getUint16(offset); offset += 2; return v; }
-        case 206: { const v = view.getUint32(offset); offset += 4; return v; }
-        case 208: { const v = view.getInt8(offset); offset += 1; return v; }
-        case 209: { const v = view.getInt16(offset); offset += 2; return v; }
-        case 210: { const v = view.getInt32(offset); offset += 4; return v; }
-        case 217: { const n = view.getUint8(offset); offset += 1; return readString(n); }
-        case 218: { const n = view.getUint16(offset); offset += 2; return readString(n); }
-        case 219: { const n = view.getUint32(offset); offset += 4; return readString(n); }
-        case 220: { const n = view.getUint16(offset); offset += 2; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
-        case 221: { const n = view.getUint32(offset); offset += 4; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
-        case 222: { const n = view.getUint16(offset); offset += 2; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
-        case 223: { const n = view.getUint32(offset); offset += 4; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
-        default: return null;
-      }
-    };
-
-    return { value: read(), offset };
+  function isLikelyQuestionId(value) {
+    if (typeof value !== "string") return false;
+    const v = value.trim();
+    if (!v || v.length < 8) return false;
+    if (BAD_IDS.has(v.toLowerCase())) return false;
+    if (v.includes(" ")) return false;
+    return ID_LIKE_RE.test(v) || v.includes("_") || v.includes("-");
   }
 
-  function decodeBlueboatBinary(packet) {
-    if (!(packet instanceof ArrayBuffer)) return null;
-    const bytes = new Uint8Array(packet);
-    if (!bytes.byteLength || bytes[0] !== 4) return null;
-
-    const decoded = msgpackDecode(packet.slice(1), 0)?.value;
-    if (!decoded || typeof decoded !== "object") return null;
-
-    const data = decoded?.data;
-    const eventName = Array.isArray(data) ? data[0] : null;
-    const eventPayload = Array.isArray(data) ? data[1] : data;
-
-    return { eventName, payload: eventPayload };
+  function resolveId(id, seen = new Set()) {
+    if (!id || seen.has(id)) return id || null;
+    seen.add(id);
+    const redirected = state.aliasMap.get(id) || state.namedIdMap.get(id);
+    return redirected ? resolveId(redirected, seen) : id;
   }
 
-  function asArray(value) {
-    if (Array.isArray(value)) return value;
-    return value == null ? [] : [value];
+  function setCurrentQuestionId(id, source, extra = {}) {
+    if (!isLikelyQuestionId(id)) return;
+    const resolved = resolveId(id);
+    if (!isLikelyQuestionId(resolved)) return;
+    if (resolved === state.currentQuestionId && source === state.source) return;
+
+    state.currentQuestionId = resolved;
+    state.source = source;
+
+    const question = state.questionsById.get(resolved) || null;
+    updateWidget(resolved, source, question);
+    console.log(LOG_PREFIX, "Current question ID:", resolved, { source, question, ...extra });
   }
 
-  function extractBlueboatStateCandidates(payload) {
-    const candidates = [];
-    for (const item of asArray(payload)) {
-      if (!item || typeof item !== "object") continue;
-      if (typeof item.key === "string") candidates.push(item);
-      if (item.data && typeof item.data === "object" && typeof item.data.key === "string") candidates.push(item.data);
-      if (Array.isArray(item.events)) {
-        for (const eventItem of item.events) {
-          if (eventItem && typeof eventItem === "object" && typeof eventItem.key === "string") candidates.push(eventItem);
+  let widgetEl;
+  function ensureWidget() {
+    if (widgetEl && document.contains(widgetEl)) return widgetEl;
+    widgetEl = document.createElement("div");
+    widgetEl.id = "zyrox-question-id-widget";
+    widgetEl.style.cssText = "position:fixed;right:10px;bottom:10px;z-index:999999;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.3;background:rgba(0,0,0,.82);color:#7CFF9D;padding:8px 10px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:340px;pointer-events:none;white-space:pre-wrap;";
+    document.documentElement.appendChild(widgetEl);
+    return widgetEl;
+  }
+
+  function updateWidget(id, source, question) {
+    const el = ensureWidget();
+    const prompt = question?.text || question?.prompt || "(prompt unavailable)";
+    el.textContent = `Question ID: ${id}\nSource: ${source}\nPrompt: ${String(prompt).slice(0, 90)}`;
+  }
+
+  function walk(value, visit, seen = new WeakSet()) {
+    if (!value || typeof value !== "object" || seen.has(value)) return;
+    seen.add(value);
+    visit(value);
+    if (Array.isArray(value)) {
+      for (const v of value) walk(v, visit, seen);
+      return;
+    }
+    for (const key of Object.keys(value)) {
+      const v = value[key];
+      if (v && typeof v === "object") walk(v, visit, seen);
+    }
+  }
+
+  function collectMapsFromObject(root) {
+    walk(root, (obj) => {
+      if (!(obj instanceof Map) || !obj.size) return;
+      for (const [k, v] of obj.entries()) {
+        if (typeof k === "string" && v && typeof v === "object") {
+          const qid = v._id || v.id || k;
+          if (isLikelyQuestionId(qid)) state.questionsById.set(qid, v);
+        }
+        if (typeof k === "string" && typeof v === "string") {
+          if (isLikelyQuestionId(v)) state.namedIdMap.set(k, v);
+          if (isLikelyQuestionId(k) && isLikelyQuestionId(v)) state.aliasMap.set(k, v);
         }
       }
-    }
-    return candidates;
-  }
-
-  function getQuestionById(questionId) {
-    if (!questionId) return null;
-    return state.questions.find((q) => q?._id === questionId || q?.id === questionId) || null;
-  }
-
-  function upsertQuestion(question) {
-    const questionId = question?._id || question?.id;
-    if (!questionId) return;
-
-    const existingIndex = state.questions.findIndex((q) => (q?._id || q?.id) === questionId);
-    if (existingIndex === -1) state.questions.push(question);
-    else state.questions[existingIndex] = question;
-  }
-
-  function logQuestion(reason, question, index) {
-    if (!question) return;
-
-    const questionId = question?._id || question?.id;
-    if (!questionId || state.loggedQuestionIds.has(questionId)) return;
-    state.loggedQuestionIds.add(questionId);
-
-    console.log(LOG_PREFIX, reason, {
-      index,
-      questionId,
-      type: question.type,
-      text: question.text,
-      prompt: question.prompt,
-      answers: question.answers,
-      question,
     });
   }
 
-  function getOrderedResolvedQuestions() {
-    const ordered = [];
-    for (let i = 0; i < state.questionIdList.length; i++) {
-      const questionId = state.questionIdList[i];
-      const question = getQuestionById(questionId);
-      if (!question) return null;
-      ordered.push({ index: i, questionId, question });
+  function maybeExtractQuestionFromBag(bag, source, meta) {
+    if (!bag || typeof bag !== "object") return false;
+
+    const directCandidates = [bag.questionId, bag.currentQuestionId, bag.activeQuestionId, bag.question_id, bag.currentQuestionID];
+    for (const c of directCandidates) {
+      if (isLikelyQuestionId(c)) {
+        setCurrentQuestionId(c, source, meta);
+        return true;
+      }
     }
-    return ordered;
-  }
 
-  function logAllQuestionsOnce(reason) {
-    if (state.hasLoggedFullSet) return;
-    if (!state.questionIdList.length) return;
-
-    const resolved = getOrderedResolvedQuestions();
-    if (!resolved) return;
-
-    state.hasLoggedFullSet = true;
-    console.group(`${LOG_PREFIX} ${reason} (all questions)`);
-    for (const entry of resolved) {
-      state.loggedQuestionIds.add(entry.questionId);
-      console.log(`${LOG_PREFIX} question`, {
-        index: entry.index,
-        questionId: entry.questionId,
-        type: entry.question.type,
-        text: entry.question.text,
-        prompt: entry.question.prompt,
-        answers: entry.question.answers,
-        question: entry.question,
-      });
+    const questionObj = bag.question || bag.currentQuestion || bag.activeQuestion || bag.item;
+    const qid = questionObj?._id || questionObj?.id;
+    if (isLikelyQuestionId(qid)) {
+      setCurrentQuestionId(qid, source, meta);
+      return true;
     }
-    console.groupEnd();
+
+    const list = bag.questionList || bag.questions || bag.items;
+    const idx = bag.questionIndex ?? bag.currentQuestionIndex ?? bag.activeQuestionIndex;
+    if (Array.isArray(list) && Number.isInteger(idx) && isLikelyQuestionId(list[idx])) {
+      setCurrentQuestionId(list[idx], source, { ...meta, idx });
+      return true;
+    }
+
+    return false;
   }
 
-  function logCurrentQuestion(reason) {
-    const currentId = state.questionIdList[state.currentQuestionIndex];
-    const question = getQuestionById(currentId);
-    logQuestion(reason, question, state.currentQuestionIndex);
+  function scanFiberForQuestionId() {
+    const roots = [];
+    for (const node of document.querySelectorAll("*")) {
+      const key = Object.keys(node).find((k) => k.startsWith("__reactFiber$") || k.startsWith("__reactInternalInstance$"));
+      if (key && node[key]) roots.push({ node, fiber: node[key] });
+    }
+
+    for (const { node, fiber } of roots) {
+      const stack = [fiber];
+      const seen = new Set();
+      let steps = 0;
+
+      while (stack.length && steps < 8000) {
+        steps++;
+        const f = stack.pop();
+        if (!f || seen.has(f)) continue;
+        seen.add(f);
+
+        const props = f.memoizedProps;
+        const memoState = f.memoizedState;
+
+        collectMapsFromObject(props);
+        collectMapsFromObject(memoState);
+
+        if (maybeExtractQuestionFromBag(props, "react-fiber-props", { node: node.tagName })) return true;
+        if (maybeExtractQuestionFromBag(memoState, "react-fiber-state", { node: node.tagName })) return true;
+
+        if (f.child) stack.push(f.child);
+        if (f.sibling) stack.push(f.sibling);
+        if (f.return) stack.push(f.return);
+      }
+    }
+    return false;
   }
 
-  function applyBlueboatStateUpdate(packet) {
-    const key = packet?.key;
-    const data = packet?.data;
-    if (typeof key !== "string") return;
+  function correlateVisibleQuestionText() {
+    const joinedText = Array.from(document.querySelectorAll("h1,h2,h3,[class*='question'],[data-testid*='question']"))
+      .slice(0, 16)
+      .map((n) => n.textContent?.trim())
+      .filter(Boolean)
+      .join(" ");
+    if (!joinedText || joinedText.length < 12) return;
 
-    if (key === "STATE_UPDATE") {
-      const type = data?.type;
-      if (type === "GAME_QUESTIONS") {
-        state.questions = Array.isArray(data?.value) ? data.value : [];
-        for (let i = 0; i < state.questionIdList.length; i++) {
-          const q = getQuestionById(state.questionIdList[i]);
-          logQuestion("GAME_QUESTIONS list", q, i);
+    if (joinedText === state.lastQuestionSignature) return;
+    state.lastQuestionSignature = joinedText;
+
+    for (const [id, question] of state.questionsById.entries()) {
+      const text = question?.text || question?.prompt || "";
+      if (typeof text === "string" && text.length > 12 && joinedText.includes(text.slice(0, 24))) {
+        setCurrentQuestionId(id, "mutation-text-correlation");
+        break;
+      }
+    }
+  }
+
+  const observer = new MutationObserver(() => {
+    scanFiberForQuestionId();
+    correlateVisibleQuestionText();
+  });
+
+  function processPlainObjectPayload(payload) {
+    if (!payload || typeof payload !== "object") return;
+    const items = Array.isArray(payload) ? payload : [payload];
+
+    for (const item of items) {
+      const candidate = item?.data && typeof item.data === "object" ? item.data : item;
+      if (!candidate || typeof candidate !== "object") continue;
+      const key = candidate.key;
+      const data = candidate.data;
+
+      const isQuestions = key === "GAME_QUESTIONS" || data?.type === "GAME_QUESTIONS";
+      if (isQuestions) {
+        const questions = Array.isArray(data?.value) ? data.value : Array.isArray(data) ? data : [];
+        for (const q of questions) {
+          const id = q?._id || q?.id;
+          if (isLikelyQuestionId(id)) state.questionsById.set(id, q);
         }
-        logAllQuestionsOnce("GAME_QUESTIONS");
-        logCurrentQuestion("GAME_QUESTIONS current");
-      } else if (type === "PLAYER_QUESTION_LIST") {
-        state.questionIdList = data?.value?.questionList || [];
-        state.hasLoggedFullSet = false;
-        if (Number.isInteger(data?.value?.questionIndex)) state.currentQuestionIndex = data.value.questionIndex;
-        for (let i = 0; i < state.questionIdList.length; i++) {
-          const q = getQuestionById(state.questionIdList[i]);
-          logQuestion("PLAYER_QUESTION_LIST", q, i);
+      }
+
+      const isList = key === "PLAYER_QUESTION_LIST" || data?.type === "PLAYER_QUESTION_LIST";
+      if (isList) {
+        const list = data?.value?.questionList || data?.questionList || [];
+        const idx = data?.value?.questionIndex ?? data?.questionIndex ?? 0;
+        if (Array.isArray(list) && isLikelyQuestionId(list[idx])) {
+          setCurrentQuestionId(list[idx], "packet-player-question-list", { idx });
         }
-        logAllQuestionsOnce("PLAYER_QUESTION_LIST");
-        logCurrentQuestion("PLAYER_QUESTION_LIST current");
-      } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
-        if (Number.isInteger(data?.value)) state.currentQuestionIndex = data.value;
-        logAllQuestionsOnce("PLAYER_QUESTION_LIST_INDEX");
-        logCurrentQuestion("PLAYER_QUESTION_LIST_INDEX");
       }
-    } else if (key === "PLAYER_QUESTION_LIST" && data?.questionList) {
-      state.questionIdList = data.questionList;
-      state.hasLoggedFullSet = false;
-      if (Number.isInteger(data?.questionIndex)) state.currentQuestionIndex = data.questionIndex;
-      for (let i = 0; i < state.questionIdList.length; i++) {
-        const q = getQuestionById(state.questionIdList[i]);
-        logQuestion("PLAYER_QUESTION_LIST direct", q, i);
+
+      if (key === "PLAYER_QUESTION_LIST_INDEX" || data?.type === "PLAYER_QUESTION_LIST_INDEX") {
+        const idx = data?.value ?? data;
+        const list = data?.questionList || data?.value?.questionList;
+        if (Array.isArray(list) && Number.isInteger(idx) && isLikelyQuestionId(list[idx])) {
+          setCurrentQuestionId(list[idx], "packet-player-question-index", { idx });
+        }
       }
-      logAllQuestionsOnce("PLAYER_QUESTION_LIST direct");
-      logCurrentQuestion("PLAYER_QUESTION_LIST direct current");
-    } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
-      state.currentQuestionIndex = data;
-      logAllQuestionsOnce("PLAYER_QUESTION_LIST_INDEX direct");
-      logCurrentQuestion("PLAYER_QUESTION_LIST_INDEX direct");
-    } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
-      state.questions = data;
-      for (let i = 0; i < state.questionIdList.length; i++) {
-        const q = getQuestionById(state.questionIdList[i]);
-        logQuestion("GAME_QUESTIONS direct", q, i);
+
+      if (key === "QUESTION_REVEALED") {
+        const q = data?.question || data;
+        const qid = q?._id || q?.id;
+        if (isLikelyQuestionId(qid)) {
+          state.questionsById.set(qid, q);
+          setCurrentQuestionId(qid, "packet-question-revealed");
+        }
       }
-      logAllQuestionsOnce("GAME_QUESTIONS direct");
-      logCurrentQuestion("GAME_QUESTIONS direct current");
-    } else if (key === "QUESTION_REVEALED" && data) {
-      const q = data?.question || data;
-      upsertQuestion(q);
-      const qid = q?._id || q?.id;
-      const index = state.questionIdList.findIndex((id) => id === qid);
-      logQuestion("QUESTION_REVEALED", q, index);
-      logAllQuestionsOnce("QUESTION_REVEALED");
-      logCurrentQuestion("QUESTION_REVEALED current");
     }
   }
 
@@ -250,48 +241,55 @@
     if (raw instanceof ArrayBuffer) return raw;
     if (ArrayBuffer.isView(raw)) return raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
     if (typeof Blob !== "undefined" && raw instanceof Blob) return raw.arrayBuffer();
-    return raw;
+    return null;
   }
 
-  async function inspectPacket(raw) {
-    const normalized = await normalizeData(raw);
-    if (!(normalized instanceof ArrayBuffer)) return;
+  function safelyParseJson(str) {
+    try { return JSON.parse(str); } catch { return null; }
+  }
 
-    const decoded = decodeBlueboatBinary(normalized);
-    if (!decoded?.payload || typeof decoded.payload !== "object") return;
+  function inspectRawMessage(rawData) {
+    if (typeof rawData === "string") {
+      const parsed = safelyParseJson(rawData);
+      if (parsed) processPlainObjectPayload(parsed);
+      return;
+    }
 
-    const candidates = extractBlueboatStateCandidates(decoded.payload);
-    for (const candidate of candidates) applyBlueboatStateUpdate(candidate);
+    if (!(rawData instanceof ArrayBuffer)) return;
+    const bytes = new Uint8Array(rawData);
+    if (!bytes.byteLength) return;
+
+    if (bytes[0] === 4) {
+      // Keep parse shallow; several environments wrap payload in nested objects.
+      try {
+        const decodedText = new TextDecoder().decode(bytes.slice(1));
+        const parsed = safelyParseJson(decodedText);
+        if (parsed) processPlainObjectPayload(parsed);
+      } catch (_) {}
+    }
   }
 
   const nativeAddEventListener = WebSocket.prototype.addEventListener;
   WebSocket.prototype.addEventListener = function (type, listener, options) {
-    if (type === "message" && !this.__zyroxAnswerShowPatched) {
-      this.__zyroxAnswerShowPatched = true;
+    if (type === "message" && !this.__zyroxQidPatched) {
+      this.__zyroxQidPatched = true;
       nativeAddEventListener.call(this, "message", (event) => {
-        inspectPacket(event.data).catch(() => {});
+        normalizeData(event.data).then(inspectRawMessage).catch(() => {});
       });
     }
     return nativeAddEventListener.call(this, type, listener, options);
   };
 
-  const nativeOnMessage = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
-  if (nativeOnMessage?.set) {
-    Object.defineProperty(WebSocket.prototype, "onmessage", {
-      configurable: true,
-      enumerable: nativeOnMessage.enumerable,
-      get: nativeOnMessage.get,
-      set(handler) {
-        if (!this.__zyroxAnswerShowPatched) {
-          this.__zyroxAnswerShowPatched = true;
-          this.addEventListener("message", (event) => {
-            inspectPacket(event.data).catch(() => {});
-          });
-        }
-        return nativeOnMessage.set.call(this, handler);
-      },
-    });
-  }
+  window.addEventListener("load", () => {
+    ensureWidget();
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
 
-  console.log(LOG_PREFIX, "Loaded. Watching packets for current question updates.");
+    setInterval(() => {
+      scanFiberForQuestionId();
+      correlateVisibleQuestionText();
+      collectMapsFromObject(window);
+    }, 700);
+
+    console.log(LOG_PREFIX, "Loaded. Extractor active (React Fiber primary, network/mutation/storage fallbacks).");
+  });
 })();
