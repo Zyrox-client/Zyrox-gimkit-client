@@ -3707,14 +3707,14 @@
 
 
   const LAVA_BUILDING_OPTIONS = [
-    { label: "Plank", cost: 5, packetType: "plank" },
-    { label: "Brick", cost: 50, packetType: "brick" },
-    { label: "Staircase", cost: 500, packetType: "wall" },
-    { label: "House", cost: 5000, packetType: "house" },
-    { label: "Shopping Mall", cost: 50000, packetType: "shoppingMall" },
-    { label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
-    { label: "Mountain", cost: 5000000, packetType: "mountain" },
-    { label: "Space Elevator", cost: 50000000, packetType: "spaceElevator" },
+    { label: "plank", cost: 5, packetType: "plank" },
+    { label: "brick", cost: 50, packetType: "brick" },
+    { label: "staircase", cost: 500, packetType: "wall" },
+    { label: "house", cost: 5000, packetType: "house" },
+    { label: "shopping mall", cost: 50000, packetType: "shoppingMall" },
+    { label: "skyscraper", cost: 500000, packetType: "skyscraper" },
+    { label: "mountain", cost: 5000000, packetType: "mountain" },
+    { label: "space elevator", cost: 50000000, packetType: "spaceElevator" },
   ];
 
   function sendLavaBuildingPurchase(packetType) {
