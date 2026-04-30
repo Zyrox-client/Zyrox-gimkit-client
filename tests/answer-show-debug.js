@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox answer show debug
 // @namespace    https://github.com/zyrox
-// @version      0.1.0
+// @version      0.1.1
 // @description  Logs the current Classic question to the console from packet data.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -18,7 +18,7 @@
     questions: [],
     questionIdList: [],
     currentQuestionIndex: -1,
-    lastLoggedQuestionId: null,
+    loggedQuestionIds: new Set(),
   };
 
   function msgpackDecode(buffer, startOffset = 0) {
@@ -109,22 +109,29 @@
     return candidates;
   }
 
-  function getCurrentQuestion() {
-    const currentId = state.questionIdList[state.currentQuestionIndex];
-    if (!currentId) return null;
-    return state.questions.find((q) => q?._id === currentId || q?.id === currentId) || null;
+  function getQuestionById(questionId) {
+    if (!questionId) return null;
+    return state.questions.find((q) => q?._id === questionId || q?.id === questionId) || null;
   }
 
-  function logCurrentQuestion(reason) {
-    const question = getCurrentQuestion();
+  function upsertQuestion(question) {
+    const questionId = question?._id || question?.id;
+    if (!questionId) return;
+
+    const existingIndex = state.questions.findIndex((q) => (q?._id || q?.id) === questionId);
+    if (existingIndex === -1) state.questions.push(question);
+    else state.questions[existingIndex] = question;
+  }
+
+  function logQuestion(reason, question, index) {
     if (!question) return;
 
     const questionId = question?._id || question?.id;
-    if (!questionId || state.lastLoggedQuestionId === questionId) return;
-    state.lastLoggedQuestionId = questionId;
+    if (!questionId || state.loggedQuestionIds.has(questionId)) return;
+    state.loggedQuestionIds.add(questionId);
 
     console.log(LOG_PREFIX, reason, {
-      index: state.currentQuestionIndex,
+      index,
       questionId,
       type: question.type,
       text: question.text,
@@ -132,6 +139,12 @@
       answers: question.answers,
       question,
     });
+  }
+
+  function logCurrentQuestion(reason) {
+    const currentId = state.questionIdList[state.currentQuestionIndex];
+    const question = getQuestionById(currentId);
+    logQuestion(reason, question, state.currentQuestionIndex);
   }
 
   function applyBlueboatStateUpdate(packet) {
@@ -143,11 +156,19 @@
       const type = data?.type;
       if (type === "GAME_QUESTIONS") {
         state.questions = Array.isArray(data?.value) ? data.value : [];
-        logCurrentQuestion("GAME_QUESTIONS");
+        for (let i = 0; i < state.questionIdList.length; i++) {
+          const q = getQuestionById(state.questionIdList[i]);
+          logQuestion("GAME_QUESTIONS list", q, i);
+        }
+        logCurrentQuestion("GAME_QUESTIONS current");
       } else if (type === "PLAYER_QUESTION_LIST") {
         state.questionIdList = data?.value?.questionList || [];
         if (Number.isInteger(data?.value?.questionIndex)) state.currentQuestionIndex = data.value.questionIndex;
-        logCurrentQuestion("PLAYER_QUESTION_LIST");
+        for (let i = 0; i < state.questionIdList.length; i++) {
+          const q = getQuestionById(state.questionIdList[i]);
+          logQuestion("PLAYER_QUESTION_LIST", q, i);
+        }
+        logCurrentQuestion("PLAYER_QUESTION_LIST current");
       } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
         if (Number.isInteger(data?.value)) state.currentQuestionIndex = data.value;
         logCurrentQuestion("PLAYER_QUESTION_LIST_INDEX");
@@ -155,13 +176,28 @@
     } else if (key === "PLAYER_QUESTION_LIST" && data?.questionList) {
       state.questionIdList = data.questionList;
       if (Number.isInteger(data?.questionIndex)) state.currentQuestionIndex = data.questionIndex;
-      logCurrentQuestion("PLAYER_QUESTION_LIST direct");
+      for (let i = 0; i < state.questionIdList.length; i++) {
+        const q = getQuestionById(state.questionIdList[i]);
+        logQuestion("PLAYER_QUESTION_LIST direct", q, i);
+      }
+      logCurrentQuestion("PLAYER_QUESTION_LIST direct current");
     } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
       state.currentQuestionIndex = data;
       logCurrentQuestion("PLAYER_QUESTION_LIST_INDEX direct");
     } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
       state.questions = data;
-      logCurrentQuestion("GAME_QUESTIONS direct");
+      for (let i = 0; i < state.questionIdList.length; i++) {
+        const q = getQuestionById(state.questionIdList[i]);
+        logQuestion("GAME_QUESTIONS direct", q, i);
+      }
+      logCurrentQuestion("GAME_QUESTIONS direct current");
+    } else if (key === "QUESTION_REVEALED" && data) {
+      const q = data?.question || data;
+      upsertQuestion(q);
+      const qid = q?._id || q?.id;
+      const index = state.questionIdList.findIndex((id) => id === qid);
+      logQuestion("QUESTION_REVEALED", q, index);
+      logCurrentQuestion("QUESTION_REVEALED current");
     }
   }
 
