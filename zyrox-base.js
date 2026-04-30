@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.5
+// @version      2.2.6
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -591,7 +591,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.2.5";
+    const CLIENT_VERSION = "2.2.6";
     return CLIENT_VERSION;
   }
 
@@ -3703,7 +3703,9 @@
 
   function renderLavaBuildingHud() {
     const hud = ensureLavaBuildingHudContainer();
-    const cfg = moduleCfg("Building HUD") || {};
+    const cfg = (() => {
+      try { return moduleCfg("Building HUD") || {}; } catch (_) { return {}; }
+    })();
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
@@ -3734,6 +3736,8 @@
 
   function startLavaBuildingHud() {
     lavaBuildingHudState.enabled = true;
+    const hud = ensureLavaBuildingHudContainer();
+    hud.style.display = "block";
     renderLavaBuildingHud();
   }
 
