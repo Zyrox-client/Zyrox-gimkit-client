@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.3
+// @version      2.2.4
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -591,7 +591,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.2.3";
+    const CLIENT_VERSION = "2.2.4";
     return CLIENT_VERSION;
   }
 
@@ -1221,6 +1221,13 @@
       }
     }
   }
+
+
+  const lavaBuildingHudState = {
+    enabled: false,
+    container: null,
+    balance: 0,
+  };
 
   function applyUpgradeLevelsFromStateUpdate(stateUpdateData, source = "unknown") {
     const levels = extractUpgradeLevelsFromStateUpdate(stateUpdateData);
@@ -3669,11 +3676,6 @@
     { label: "Mountain", cost: 5000000, packetType: "mountain" },
     { label: "Space Elevator", cost: 50000000, packetType: "space elevator" },
   ];
-  const lavaBuildingHudState = {
-    enabled: false,
-    container: null,
-    balance: 0,
-  };
 
   function sendLavaBuildingPurchase(packetType) {
     if (!packetType) return false;
