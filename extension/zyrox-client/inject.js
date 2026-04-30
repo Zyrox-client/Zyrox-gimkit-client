@@ -3704,7 +3704,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     { label: "Staircase", cost: 500, packetType: "wall" },
     { label: "House", cost: 5000, packetType: "house" },
     { label: "Shopping Mall", cost: 50000, packetType: "shoppingMall" },
-    { label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
+    { label: "Skyscraper", cost: 500000, packetType: "skyscaper" },
     { label: "Mountain", cost: 5000000, packetType: "mountain" },
     { label: "Space Elevator", cost: 50000000, packetType: "spaceElevator" },
   ];
