@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.6
+// @version      2.2.7
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -591,7 +591,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.2.6";
+    const CLIENT_VERSION = "2.2.7";
     return CLIENT_VERSION;
   }
 
@@ -3351,6 +3351,29 @@
     }
   }
 
+
+  function getLavaBuildingHudConfig() {
+    const defaults = {
+      hudLocation: "topRight",
+      displayTitle: true,
+      hudSize: 100,
+    };
+    const apply = (cfg) => {
+      const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
+      const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
+      return {
+        hudLocation: allowed.has(loc) ? loc : defaults.hudLocation,
+        displayTitle: cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
+        hudSize: Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
+      };
+    };
+    try {
+      return apply(moduleCfg("Building HUD"));
+    } catch (_) {
+      return apply(defaults);
+    }
+  }
+
   function applyUpgradeHudPosition(hud, cfg) {
     hud.style.removeProperty("top");
     hud.style.removeProperty("right");
@@ -3703,9 +3726,7 @@
 
   function renderLavaBuildingHud() {
     const hud = ensureLavaBuildingHudContainer();
-    const cfg = (() => {
-      try { return moduleCfg("Building HUD") || {}; } catch (_) { return {}; }
-    })();
+    const cfg = getLavaBuildingHudConfig();
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
@@ -6326,6 +6347,9 @@
                 upgradeHudState.config.hudSize = newVal;
                 renderUpgradeHud();
               }
+              if (moduleName === "Building HUD" && setting.id === "hudSize") {
+                renderLavaBuildingHud();
+              }
               saveSettings();
             });
           }
@@ -6345,6 +6369,9 @@
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 renderUpgradeHud();
+              }
+              if (moduleName === "Building HUD" && setting.id === "displayTitle") {
+                renderLavaBuildingHud();
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
@@ -6385,6 +6412,9 @@
                 cfg.customX = null;
                 cfg.customY = null;
                 renderUpgradeHud();
+              }
+              if (moduleName === "Building HUD" && setting.id === "hudLocation") {
+                renderLavaBuildingHud();
               }
               saveSettings();
             });
