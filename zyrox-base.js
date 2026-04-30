@@ -3693,11 +3693,11 @@
     { label: "Plank", cost: 5, packetType: "plank" },
     { label: "Brick", cost: 50, packetType: "brick" },
     { label: "Staircase", cost: 500, packetType: "Wall" },
-    { label: "House", cost: 50000, packetType: "house" },
-    { label: "Shopping Mall", cost: 50000, packetType: "shopping mall" },
+    { label: "House", cost: 5000, packetType: "house" },
+    { label: "Shopping Mall", cost: 50000, packetType: "shoppingMall" },
     { label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
     { label: "Mountain", cost: 5000000, packetType: "mountain" },
-    { label: "Space Elevator", cost: 50000000, packetType: "space elevator" },
+    { label: "Space Elevator", cost: 50000000, packetType: "spaceElevator" },
   ];
 
   function sendLavaBuildingPurchase(packetType) {
