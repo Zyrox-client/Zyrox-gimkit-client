@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.2
+// @version      2.2.3
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -591,7 +591,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.2.2";
+    const CLIENT_VERSION = "2.2.3";
     return CLIENT_VERSION;
   }
 
@@ -3660,14 +3660,14 @@
 
 
   const LAVA_BUILDING_OPTIONS = [
-    { key: "plank", label: "Plank", cost: 5, packetType: "plank" },
-    { key: "brick", label: "Brick", cost: 50, packetType: "brick" },
-    { key: "staircase", label: "Staircase", cost: 500, packetType: "Wall" },
-    { key: "house", label: "House", cost: 50000, packetType: "house" },
-    { key: "shoppingMall", label: "Shopping Mall", cost: 50000, packetType: "shoppingMall" },
-    { key: "skyscraper", label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
-    { key: "mountain", label: "Mountain", cost: 5000000, packetType: "mountain" },
-    { key: "spaceElevator", label: "Space Elevator", cost: 50000000, packetType: "spaceElevator" },
+    { label: "Plank", cost: 5, packetType: "plank" },
+    { label: "Brick", cost: 50, packetType: "brick" },
+    { label: "Staircase", cost: 500, packetType: "Wall" },
+    { label: "House", cost: 50000, packetType: "house" },
+    { label: "Shopping Mall", cost: 50000, packetType: "shopping mall" },
+    { label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
+    { label: "Mountain", cost: 5000000, packetType: "mountain" },
+    { label: "Space Elevator", cost: 50000000, packetType: "space elevator" },
   ];
   const lavaBuildingHudState = {
     enabled: false,
