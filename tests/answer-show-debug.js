@@ -19,6 +19,7 @@
     questionIdList: [],
     currentQuestionIndex: -1,
     loggedQuestionIds: new Set(),
+    hasLoggedFullSet: false,
   };
 
   function msgpackDecode(buffer, startOffset = 0) {
@@ -141,6 +142,41 @@
     });
   }
 
+  function getOrderedResolvedQuestions() {
+    const ordered = [];
+    for (let i = 0; i < state.questionIdList.length; i++) {
+      const questionId = state.questionIdList[i];
+      const question = getQuestionById(questionId);
+      if (!question) return null;
+      ordered.push({ index: i, questionId, question });
+    }
+    return ordered;
+  }
+
+  function logAllQuestionsOnce(reason) {
+    if (state.hasLoggedFullSet) return;
+    if (!state.questionIdList.length) return;
+
+    const resolved = getOrderedResolvedQuestions();
+    if (!resolved) return;
+
+    state.hasLoggedFullSet = true;
+    console.group(`${LOG_PREFIX} ${reason} (all questions)`);
+    for (const entry of resolved) {
+      state.loggedQuestionIds.add(entry.questionId);
+      console.log(`${LOG_PREFIX} question`, {
+        index: entry.index,
+        questionId: entry.questionId,
+        type: entry.question.type,
+        text: entry.question.text,
+        prompt: entry.question.prompt,
+        answers: entry.question.answers,
+        question: entry.question,
+      });
+    }
+    console.groupEnd();
+  }
+
   function logCurrentQuestion(reason) {
     const currentId = state.questionIdList[state.currentQuestionIndex];
     const question = getQuestionById(currentId);
@@ -160,29 +196,36 @@
           const q = getQuestionById(state.questionIdList[i]);
           logQuestion("GAME_QUESTIONS list", q, i);
         }
+        logAllQuestionsOnce("GAME_QUESTIONS");
         logCurrentQuestion("GAME_QUESTIONS current");
       } else if (type === "PLAYER_QUESTION_LIST") {
         state.questionIdList = data?.value?.questionList || [];
+        state.hasLoggedFullSet = false;
         if (Number.isInteger(data?.value?.questionIndex)) state.currentQuestionIndex = data.value.questionIndex;
         for (let i = 0; i < state.questionIdList.length; i++) {
           const q = getQuestionById(state.questionIdList[i]);
           logQuestion("PLAYER_QUESTION_LIST", q, i);
         }
+        logAllQuestionsOnce("PLAYER_QUESTION_LIST");
         logCurrentQuestion("PLAYER_QUESTION_LIST current");
       } else if (type === "PLAYER_QUESTION_LIST_INDEX") {
         if (Number.isInteger(data?.value)) state.currentQuestionIndex = data.value;
+        logAllQuestionsOnce("PLAYER_QUESTION_LIST_INDEX");
         logCurrentQuestion("PLAYER_QUESTION_LIST_INDEX");
       }
     } else if (key === "PLAYER_QUESTION_LIST" && data?.questionList) {
       state.questionIdList = data.questionList;
+      state.hasLoggedFullSet = false;
       if (Number.isInteger(data?.questionIndex)) state.currentQuestionIndex = data.questionIndex;
       for (let i = 0; i < state.questionIdList.length; i++) {
         const q = getQuestionById(state.questionIdList[i]);
         logQuestion("PLAYER_QUESTION_LIST direct", q, i);
       }
+      logAllQuestionsOnce("PLAYER_QUESTION_LIST direct");
       logCurrentQuestion("PLAYER_QUESTION_LIST direct current");
     } else if (key === "PLAYER_QUESTION_LIST_INDEX" && Number.isInteger(data)) {
       state.currentQuestionIndex = data;
+      logAllQuestionsOnce("PLAYER_QUESTION_LIST_INDEX direct");
       logCurrentQuestion("PLAYER_QUESTION_LIST_INDEX direct");
     } else if (key === "GAME_QUESTIONS" && Array.isArray(data)) {
       state.questions = data;
@@ -190,6 +233,7 @@
         const q = getQuestionById(state.questionIdList[i]);
         logQuestion("GAME_QUESTIONS direct", q, i);
       }
+      logAllQuestionsOnce("GAME_QUESTIONS direct");
       logCurrentQuestion("GAME_QUESTIONS direct current");
     } else if (key === "QUESTION_REVEALED" && data) {
       const q = data?.question || data;
@@ -197,6 +241,7 @@
       const qid = q?._id || q?.id;
       const index = state.questionIdList.findIndex((id) => id === qid);
       logQuestion("QUESTION_REVEALED", q, index);
+      logAllQuestionsOnce("QUESTION_REVEALED");
       logCurrentQuestion("QUESTION_REVEALED current");
     }
   }
