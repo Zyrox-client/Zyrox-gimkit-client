@@ -3709,7 +3709,7 @@
   const LAVA_BUILDING_OPTIONS = [
     { label: "Plank", cost: 5, packetType: "plank" },
     { label: "Brick", cost: 50, packetType: "brick" },
-    { label: "Staircase", cost: 500, packetType: "Wall" },
+    { label: "Staircase", cost: 500, packetType: "wall" },
     { label: "House", cost: 5000, packetType: "house" },
     { label: "Shopping Mall", cost: 50000, packetType: "shoppingMall" },
     { label: "Skyscraper", cost: 500000, packetType: "skyscraper" },
