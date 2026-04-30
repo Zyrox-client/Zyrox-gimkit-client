@@ -6942,12 +6942,22 @@
       const behavior = MODULE_BEHAVIORS[moduleName];
       const moduleInstance = new Module(moduleName, {
         onEnable: () => {
-          console.log(`${moduleName} enabled`);
-          if (behavior?.onEnable) behavior.onEnable();
+          console.log(`[Zyrox] ${moduleName} enable requested`);
+          try {
+            if (behavior?.onEnable) behavior.onEnable();
+            console.log(`[Zyrox] ${moduleName} enabled`);
+          } catch (error) {
+            console.error(`[Zyrox] ${moduleName} failed to enable`, error);
+          }
         },
         onDisable: () => {
-          console.log(`${moduleName} disabled`);
-          if (behavior?.onDisable) behavior.onDisable();
+          console.log(`[Zyrox] ${moduleName} disable requested`);
+          try {
+            if (behavior?.onDisable) behavior.onDisable();
+            console.log(`[Zyrox] ${moduleName} disabled`);
+          } catch (error) {
+            console.error(`[Zyrox] ${moduleName} failed to disable`, error);
+          }
         },
       });
       state.modules.set(moduleName, moduleInstance);
