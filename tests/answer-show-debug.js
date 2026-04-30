@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox answer show debug
 // @namespace    https://github.com/zyrox
-// @version      0.1.0
+// @version      0.1.1
 // @description  Logs the current Classic question to the console from packet data.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
