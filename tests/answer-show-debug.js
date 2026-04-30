@@ -62,7 +62,6 @@ Prompt: ${String(prompt).slice(0, 90)}`;
         if ((k.startsWith("__reactContainer$") || k.startsWith("__reactFiber$")) && appRoot[k]) candidates.push(appRoot[k]);
       }
     }
-    return candidates;
   }
 
   function maybeUseBag(bag, source) {
