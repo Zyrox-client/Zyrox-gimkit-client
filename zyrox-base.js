@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.2.8
+// @version      2.2.9
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -591,7 +591,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.2.8";
+    const CLIENT_VERSION = "2.2.9";
     return CLIENT_VERSION;
   }
 
@@ -1227,6 +1227,14 @@
     enabled: false,
     container: null,
     balance: 0,
+    config: {
+      hudLocation: "topRight",
+      displayTitle: true,
+      hudSize: 100,
+      useCustomPosition: false,
+      customX: null,
+      customY: null,
+    },
   };
 
   function applyUpgradeLevelsFromStateUpdate(stateUpdateData, source = "unknown") {
@@ -3220,6 +3228,8 @@
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
   let getUpgradeHudModuleConfig = () => null;
   let persistUpgradeHudSettings = () => {};
+  let getLavaBuildingHudModuleConfig = () => null;
+  let persistLavaBuildingHudSettings = () => {};
 
   function upgradeHudLog(message, extra) {
     if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
@@ -3357,15 +3367,22 @@
       hudLocation: "topRight",
       displayTitle: true,
       hudSize: 100,
+      useCustomPosition: false,
+      customX: null,
+      customY: null,
     };
     const apply = (cfg) => {
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
-      return {
-        hudLocation: allowed.has(loc) ? loc : defaults.hudLocation,
-        displayTitle: cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
-        hudSize: Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
-      };
+      lavaBuildingHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      lavaBuildingHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      lavaBuildingHudState.config.hudSize = Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize;
+      lavaBuildingHudState.config.useCustomPosition = cfg?.useCustomPosition !== undefined ? Boolean(cfg.useCustomPosition) : defaults.useCustomPosition;
+      const parsedX = Number(cfg?.customX);
+      const parsedY = Number(cfg?.customY);
+      lavaBuildingHudState.config.customX = Number.isFinite(parsedX) ? parsedX : defaults.customX;
+      lavaBuildingHudState.config.customY = Number.isFinite(parsedY) ? parsedY : defaults.customY;
+      return { ...lavaBuildingHudState.config };
     };
     try {
       return apply(moduleCfg("Building HUD"));
@@ -3718,7 +3735,51 @@
     if (lavaBuildingHudState.container?.isConnected) return lavaBuildingHudState.container;
     const hud = document.createElement("div");
     hud.className = "zyrox-upgrade-hud";
-    hud.style.cssText = "position:fixed;top:39px;right:14px;min-width:220px;max-width:min(38vw,360px);padding:10px 12px;border-radius:10px;background:rgba(8,12,17,.88);border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 30px rgba(0,0,0,.42);z-index:2147483646;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;display:none;pointer-events:auto;";
+    hud.style.cssText = "position:fixed;top:39px;right:14px;min-width:220px;max-width:min(38vw,360px);padding:10px 12px;border-radius:10px;background:rgba(8,12,17,.88);border:1px solid rgba(255,255,255,.14);box-shadow:0 12px 30px rgba(0,0,0,.42);z-index:2147483646;color:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;display:none;pointer-events:auto;cursor:grab;user-select:none;";
+    let dragState = null;
+    const clampToViewport = (nextX, nextY) => {
+      const rect = hud.getBoundingClientRect();
+      const maxX = Math.max(0, window.innerWidth - rect.width);
+      const maxY = Math.max(0, window.innerHeight - rect.height);
+      return { x: Math.max(0, Math.min(maxX, Number(nextX) || 0)), y: Math.max(0, Math.min(maxY, Number(nextY) || 0)) };
+    };
+    const applyCustomPositionToConfig = (nextX, nextY) => {
+      const cfg = getLavaBuildingHudModuleConfig?.();
+      if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
+      const clamped = clampToViewport(nextX, nextY);
+      cfg.useCustomPosition = true;
+      cfg.customX = clamped.x;
+      cfg.customY = clamped.y;
+      lavaBuildingHudState.config.useCustomPosition = true;
+      lavaBuildingHudState.config.customX = clamped.x;
+      lavaBuildingHudState.config.customY = clamped.y;
+      return clamped;
+    };
+    const handleMouseMove = (event) => {
+      if (!dragState) return;
+      const clamped = applyCustomPositionToConfig(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${clamped.x}px`);
+      hud.style.setProperty("top", `${clamped.y}px`);
+    };
+    const handleMouseUp = () => {
+      if (!dragState) return;
+      dragState = null;
+      hud.style.cursor = "grab";
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      persistLavaBuildingHudSettings?.();
+    };
+    hud.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      const rect = hud.getBoundingClientRect();
+      dragState = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+      hud.style.cursor = "grabbing";
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+      event.preventDefault();
+    });
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
     return hud;
@@ -5391,6 +5452,8 @@
 
   getUpgradeHudModuleConfig = () => moduleCfg("Upgrade HUD");
   persistUpgradeHudSettings = () => saveSettings();
+  getLavaBuildingHudModuleConfig = () => moduleCfg("Building HUD");
+  persistLavaBuildingHudSettings = () => saveSettings();
 
   function setBindLabel(item, moduleName) {
     const label = item.querySelector(".zyrox-bind-label");
@@ -6414,6 +6477,13 @@
                 renderUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "hudLocation") {
+                lavaBuildingHudState.config.hudLocation = cfg[setting.id];
+                lavaBuildingHudState.config.useCustomPosition = false;
+                lavaBuildingHudState.config.customX = null;
+                lavaBuildingHudState.config.customY = null;
+                cfg.useCustomPosition = false;
+                cfg.customX = null;
+                cfg.customY = null;
                 renderLavaBuildingHud();
               }
               saveSettings();
