@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox Gimkit Question ID Extractor (Debug)
 // @namespace    https://github.com/zyrox
-// @version      0.2.2
+// @version      0.2.3
 // @description  Extract and display the current Gimkit question ID with low-overhead React/state inspection.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -92,18 +92,27 @@ Prompt: ${String(prompt).slice(0, 90)}`;
   function scanFiber() {
     const rootsRaw = getFiberRootCandidates();
     const roots = Array.isArray(rootsRaw) ? rootsRaw : [];
-    for (const root of roots) {
+    if (!roots.length) return false;
+
+    for (let i = 0; i < roots.length; i++) {
+      const root = roots[i];
+      if (!root) continue;
       const start = root.current || root;
+      if (!start || typeof start !== "object") continue;
+
       const stack = [start];
       const seen = new Set();
       let count = 0;
+
       while (stack.length && count < 1500) {
         count++;
         const f = stack.pop();
         if (!f || seen.has(f)) continue;
         seen.add(f);
+
         if (maybeUseBag(f.memoizedProps, "fiber-props")) return true;
         if (maybeUseBag(f.memoizedState, "fiber-state")) return true;
+
         if (f.child) stack.push(f.child);
         if (f.sibling) stack.push(f.sibling);
       }
