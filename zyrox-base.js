@@ -45,6 +45,37 @@
   window.__ZYROX_UI_MOUNTED__ = true;
 
   // ---------------------------------------------------------------------------
+  // GIMKIT QUESTION FLOW (reverse-engineering notes)
+  // ---------------------------------------------------------------------------
+  // Short answer to: "is Gimkit choosing questions randomly on the client?"
+  // -> Mostly no. The client *renders* and submits answers, but the server is the
+  //    authority that sends/updates question payloads and validates outcomes.
+  //
+  // What we currently observe in packet captures (Classic / Draw That / Tycoon-like
+  // modes) from this repo's test scripts and runtime hooks:
+  // 1) Game traffic is a WebSocket on *.gimkitconnect.com, transported either as
+  //    Blueboat-style msgpack events or Colyseus room messages.
+  // 2) Question content appears in inbound server messages (ex: STATE_UPDATE /
+  //    device state changes) as fields such as prompt/term/answers/correct index
+  //    depending on mode implementation.
+  // 3) The client sends player actions (selected answer, interaction, etc.) but
+  //    does not become source-of-truth for score/currency/progression.
+  // 4) "Random" ordering is usually server-side selection/shuffle from the active
+  //    Kit/question pool; each client receives the next question state from server.
+  //
+  // Practical implication for modules:
+  // - Auto-answer and "question reveal" logic should parse inbound socket state,
+  //   not attempt local RNG prediction.
+  // - Patching UI-only state can desync quickly because authoritative state is
+  //   continuously pushed from server.
+  //
+  // Useful references inside this repo:
+  // - tests/drawit-dump.js      (logs term-like answer candidates from STATE_UPDATE)
+  // - tests/classic-autoanswer.js (classic answer extraction + submit path)
+  // - tests/classic-logger.js     (general packet/event logging helpers)
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
   // AUTO-ANSWER PAGE-CONTEXT INJECTION
   // Injected as a real <script> tag so it runs in page scope and patches
   // window.WebSocket BEFORE Gimkit creates its connection.
