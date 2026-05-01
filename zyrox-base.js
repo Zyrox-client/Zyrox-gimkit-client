@@ -1388,11 +1388,25 @@
     enabled: false,
     canvas: null,
     ctx: null,
-    intervalId: null,
     stores: null,
     storesPromise: null,
     seenPlayers: new Map(),
     waitLogTick: 0,
+  };
+  const renderDiagnostics = {
+    frameCount: 0,
+    droppedFrames: 0,
+    lastFrameAt: 0,
+    moduleMs: {
+      esp: 0,
+      crosshair: 0,
+      autoAim: 0,
+      triggerAssist: 0,
+    },
+  };
+  const unifiedRenderState = {
+    rafId: null,
+    running: false,
   };
 
   function espLog(message, extra) {
@@ -1960,11 +1974,7 @@
     createEspCanvas();
     resizeEspCanvas();
     resolveEspStores().catch((error) => espLog("Failed to resolve stores", error));
-    if (espState.intervalId != null) {
-      clearInterval(espState.intervalId);
-      espState.intervalId = null;
-    }
-    espState.intervalId = setInterval(renderEspTick, 1000 / 30);
+    startUnifiedRenderLoop();
   }
 
   function stopEsp() {
@@ -1973,12 +1983,9 @@
       return;
     }
     espState.enabled = false;
-    if (espState.intervalId != null) {
-      clearInterval(espState.intervalId);
-      espState.intervalId = null;
-    }
     espState.seenPlayers.clear();
     destroyEspCanvas();
+    stopUnifiedRenderLoopIfIdle();
     espLog("ESP stopped and cleaned up");
   }
 
@@ -2081,7 +2088,6 @@
 
   function renderCrosshairFrame() {
     if (!crosshairState.enabled) return;
-    crosshairState.rafId = requestAnimationFrame(renderCrosshairFrame);
     const ctx = crosshairState.ctx;
     const canvas = crosshairState.canvas;
     if (!ctx || !canvas) return;
@@ -2233,7 +2239,7 @@
     crosshairState.enabled = true;
     createCrosshairCanvas();
     setNativeCursorHidden(true);
-    renderCrosshairFrame();
+    startUnifiedRenderLoop();
   }
 
   function stopCrosshair() {
@@ -2241,6 +2247,7 @@
     crosshairState.enabled = false;
     setNativeCursorHidden(false);
     destroyCrosshairCanvas();
+    stopUnifiedRenderLoopIfIdle();
   }
 
   document.addEventListener("mousemove", (e) => {
@@ -2749,7 +2756,6 @@
   function autoAimLoop() {
     if (!autoAimState.enabled) return;
     autoAimTick();
-    autoAimState.rafId = requestAnimationFrame(autoAimLoop);
   }
 
   function startAutoAim() {
@@ -2764,17 +2770,12 @@
     autoAimState.lastTickAt = 0;
     autoAimState.statusText = "Armed";
     createAutoAimCanvas();
-    if (autoAimState.rafId != null) cancelAnimationFrame(autoAimState.rafId);
-    autoAimState.rafId = requestAnimationFrame(autoAimLoop);
+    startUnifiedRenderLoop();
   }
 
   function stopAutoAim() {
     if (!autoAimState.enabled) return;
     autoAimState.enabled = false;
-    if (autoAimState.rafId != null) {
-      cancelAnimationFrame(autoAimState.rafId);
-      autoAimState.rafId = null;
-    }
     autoAimState.target = null;
     autoAimState.lastTargetId = null;
     autoAimState.targetLockUntil = 0;
@@ -2782,6 +2783,7 @@
     autoAimState.targetVelY = 0;
     autoAimState.statusText = "Idle";
     destroyAutoAimCanvas();
+    stopUnifiedRenderLoopIfIdle();
   }
 
   function renderTriggerAssistOverlay(cfg) {
@@ -2881,17 +2883,12 @@
     triggerAssistState.enabled = true;
     createTriggerAssistCanvas();
     triggerAssistState.statusText = "Armed";
-    if (triggerAssistState.loopId != null) clearInterval(triggerAssistState.loopId);
-    triggerAssistState.loopId = setInterval(triggerAssistTick, 1000 / 60);
+    startUnifiedRenderLoop();
   }
 
   function stopTriggerAssist() {
     if (!triggerAssistState.enabled) return;
     triggerAssistState.enabled = false;
-    if (triggerAssistState.loopId != null) {
-      clearInterval(triggerAssistState.loopId);
-      triggerAssistState.loopId = null;
-    }
     if (triggerAssistState.releaseTimeoutId != null) {
       clearTimeout(triggerAssistState.releaseTimeoutId);
       triggerAssistState.releaseTimeoutId = null;
@@ -2900,6 +2897,46 @@
     triggerAssistState.target = null;
     triggerAssistState.statusText = "Idle";
     destroyTriggerAssistCanvas();
+    stopUnifiedRenderLoopIfIdle();
+  }
+
+  function runTimedModule(key, fn) {
+    const start = performance.now();
+    fn();
+    const elapsed = performance.now() - start;
+    renderDiagnostics.moduleMs[key] = renderDiagnostics.moduleMs[key] * 0.85 + elapsed * 0.15;
+  }
+
+  function unifiedRenderTick(now) {
+    if (!unifiedRenderState.running) return;
+    if (renderDiagnostics.lastFrameAt > 0) {
+      const dt = now - renderDiagnostics.lastFrameAt;
+      if (dt > 25) renderDiagnostics.droppedFrames += 1;
+    }
+    renderDiagnostics.lastFrameAt = now;
+    renderDiagnostics.frameCount += 1;
+
+    if (espState.enabled) runTimedModule("esp", renderEspTick);
+    if (crosshairState.enabled) runTimedModule("crosshair", renderCrosshairFrame);
+    if (autoAimState.enabled) runTimedModule("autoAim", autoAimTick);
+    if (triggerAssistState.enabled) runTimedModule("triggerAssist", triggerAssistTick);
+
+    unifiedRenderState.rafId = requestAnimationFrame(unifiedRenderTick);
+  }
+
+  function startUnifiedRenderLoop() {
+    if (unifiedRenderState.running) return;
+    unifiedRenderState.running = true;
+    unifiedRenderState.rafId = requestAnimationFrame(unifiedRenderTick);
+  }
+
+  function stopUnifiedRenderLoopIfIdle() {
+    if (espState.enabled || crosshairState.enabled || autoAimState.enabled || triggerAssistState.enabled) return;
+    unifiedRenderState.running = false;
+    if (unifiedRenderState.rafId != null) {
+      cancelAnimationFrame(unifiedRenderState.rafId);
+      unifiedRenderState.rafId = null;
+    }
   }
 
   window.addEventListener("blur", () => {
