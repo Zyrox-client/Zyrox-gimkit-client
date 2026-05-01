@@ -583,7 +583,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.3.5";
+    const CLIENT_VERSION = "2.3.8";
     return CLIENT_VERSION;
   }
 
