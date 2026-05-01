@@ -2019,6 +2019,7 @@
       tracerLineSize: 1.5,
       hoverHighlight: true,
       hoverColor: "#ffff00",
+      showCrosshairGlyph: true,
     };
     const stored = window.__zyroxCrosshairConfig;
     return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
@@ -2150,6 +2151,7 @@
     }
 
     // Draw crosshair at cursor
+    if (!cfg.showCrosshairGlyph) return;
     ctx.save();
     ctx.strokeStyle = col;
     ctx.fillStyle = col;
@@ -2317,9 +2319,9 @@
     const defaults = {
       enabled: true,
       teamCheck: true,
-      fovPx: 85,
+      fovPx: 220,
       holdToFire: false,
-      fireRateMs: 45,
+      fireRateMs: 16,
       requireLOS: false,
       onlyWhenGameFocused: true,
       showTargetRing: true,
@@ -2333,11 +2335,11 @@
       enabled: true,
       teamCheck: true,
       fovDeg: 180,
-      smoothing: 0.2,
-      maxStepPx: 32,
-      minStepPx: 0.75,
-      deadzonePx: 1.8,
-      predictionMs: 70,
+      smoothing: 0,
+      maxStepPx: 120,
+      minStepPx: 0,
+      deadzonePx: 0,
+      predictionMs: 0,
       lockMs: 0,
       stickToTarget: false,
       onlyWhenGameFocused: true,
@@ -2699,7 +2701,8 @@
     }
 
     const canvas = getGameCanvas();
-    const smoothing = Math.max(0, Math.min(1, Number(cfg.smoothing) || 0.2));
+    const smoothingValue = Number(cfg.smoothing);
+    const smoothing = Math.max(0, Math.min(1, Number.isFinite(smoothingValue) ? smoothingValue : 0.2));
     const maxStep = Math.max(2, Number(cfg.maxStepPx) || 32);
     const minStep = Math.max(0.05, Number(cfg.minStepPx) || 0.75);
     const deadzone = Math.max(0, Number(cfg.deadzonePx) || 1.8);
@@ -4156,6 +4159,7 @@
                 { id: "tracerLineSize", label: "Tracer Thickness",  type: "slider",   default: 1.5, min: 0.5, max: 5, step: 0.5, unit: "px" },
                 { id: "hoverHighlight", label: "Player Hover",      type: "checkbox", default: true },
                 { id: "hoverColor",     label: "Hover Color",       type: "color",    default: "#ffff00" },
+                { id: "showCrosshairGlyph", label: "Show Actual Crosshair", type: "checkbox", default: true },
               ],
             },
             {
@@ -4164,9 +4168,9 @@
               settings: [
                 { id: "enabled",             label: "Enabled",                  type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",         type: "checkbox", default: true },
-                { id: "fovPx",               label: "FOV Radius",               type: "slider",   default: 85, min: 8, max: 220, step: 1, unit: "px" },
+                { id: "fovPx",               label: "FOV Radius",               type: "slider",   default: 220, min: 8, max: 220, step: 1, unit: "px" },
                 { id: "holdToFire",          label: "Hold Fire While Targeted", type: "checkbox", default: false },
-                { id: "fireRateMs",          label: "Fire Rate Limit",          type: "slider",   default: 45, min: 16, max: 500, step: 1, unit: "ms" },
+                { id: "fireRateMs",          label: "Fire Rate Limit",          type: "slider",   default: 16, min: 16, max: 500, step: 1, unit: "ms" },
                 { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
                 { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
@@ -4179,11 +4183,11 @@
                 { id: "enabled",             label: "Enabled",               type: "checkbox", default: true },
                 { id: "teamCheck",           label: "Ignore Teammates",      type: "checkbox", default: true },
                 { id: "fovDeg",              label: "Aim FOV",               type: "slider",   default: 180, min: 15, max: 180, step: 1, unit: "°" },
-                { id: "smoothing",           label: "Smoothing",             type: "slider",   default: 0.2, min: 0, max: 1, step: 0.01 },
-                { id: "maxStepPx",           label: "Max Step",              type: "slider",   default: 32, min: 2, max: 120, step: 1, unit: "px" },
-                { id: "minStepPx",           label: "Min Step",              type: "slider",   default: 0.75, min: 0, max: 8, step: 0.05, unit: "px" },
-                { id: "deadzonePx",          label: "Deadzone",              type: "slider",   default: 1.8, min: 0, max: 12, step: 0.1, unit: "px" },
-                { id: "predictionMs",        label: "Prediction",            type: "slider",   default: 70, min: 0, max: 220, step: 1, unit: "ms" },
+                { id: "smoothing",           label: "Smoothing",             type: "slider",   default: 0, min: 0, max: 1, step: 0.01 },
+                { id: "maxStepPx",           label: "Max Step",              type: "slider",   default: 120, min: 2, max: 120, step: 1, unit: "px" },
+                { id: "minStepPx",           label: "Min Step",              type: "slider",   default: 0, min: 0, max: 8, step: 0.05, unit: "px" },
+                { id: "deadzonePx",          label: "Deadzone",              type: "slider",   default: 0, min: 0, max: 12, step: 0.1, unit: "px" },
+                { id: "predictionMs",        label: "Prediction",            type: "slider",   default: 0, min: 0, max: 220, step: 1, unit: "ms" },
                 { id: "lockMs",              label: "Target Lock",           type: "slider",   default: 0, min: 0, max: 800, step: 5, unit: "ms" },
                 { id: "stickToTarget",       label: "Stick To Target",       type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
