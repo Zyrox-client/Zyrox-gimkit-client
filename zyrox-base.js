@@ -326,7 +326,7 @@
         const nextQuestionById = new Map();
         for (const question of state.questions) {
           const id = question?._id || question?.id;
-          if (id) nextQuestionById.set(id, question);
+          if (id) { nextQuestionById.set(id, question); nextQuestionById.set(String(id), question); }
         }
         state.questionById = nextQuestionById;
       }
@@ -338,13 +338,21 @@
 
       function parseQuestionAnswer(question) {
         if (!question) return null;
-        if (question.type === "text") return question.answers?.[0]?.text || null;
-        return question.answers?.find((a) => a?.correct)?.id || question.answers?.find((a) => a?.correct)?._id || null;
+        const answers = Array.isArray(question.answers) ? question.answers : [];
+        if (!answers.length) return null;
+        if (question.type === "text") return answers[0]?.text || null;
+        const correct = answers.find((a) => a?.correct) || answers[0];
+        return correct?.id || correct?._id || correct?.text || null;
       }
 
       function findQuestionById(id) {
         if (id == null) return null;
         return state.questionById.get(id) || state.questionById.get(String(id)) || null;
+      }
+
+      function normalizeQuestionId(questionId) {
+        if (questionId == null) return null;
+        return String(questionId);
       }
 
       function setCurrentQuestionIndex(nextIndex) {
@@ -364,18 +372,18 @@
         if (currentId) {
           const current = findQuestionById(currentId);
           const id = current?._id || current?.id;
-          if (current && id && !state.sentQuestionIds.has(id)) return current;
+          if (current && id && !state.sentQuestionIds.has(normalizeQuestionId(id))) return current;
         }
 
         for (const questionId of state.questionIdList) {
-          if (!questionId || state.sentQuestionIds.has(questionId)) continue;
+          if (!questionId || state.sentQuestionIds.has(normalizeQuestionId(questionId))) continue;
           const match = findQuestionById(questionId);
           if (match) return match;
         }
 
         return state.questions.find((q) => {
           const id = q?._id || q?.id;
-          return id && !state.sentQuestionIds.has(id);
+          return id && !state.sentQuestionIds.has(normalizeQuestionId(id));
         }) || null;
       }
 
@@ -434,19 +442,19 @@
           const question = findQuestionById(state.currentQuestionId);
           if (!question) return;
           const packet = { key: "answered", deviceId: state.answerDeviceId, data: {} };
-          if (question.type == "text") packet.data.answer = question.answers[0].text;
-          else packet.data.answer = question.answers.find((a) => a.correct)?._id;
+          packet.data.answer = parseQuestionAnswer(question);
           if (!packet.data.answer) return;
           socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
           console.log(LOG, "Answered colyseus", state.currentQuestionId);
         } else {
           const question = getNextUnansweredQuestion();
           if (!question) return;
-          const questionId = question?._id || question?.id;
-          if (!questionId || state.sentQuestionIds.has(questionId)) return;
+          const rawQuestionId = question?._id || question?.id;
+          const questionId = normalizeQuestionId(rawQuestionId);
+          if (!questionId || state.sentQuestionIds.has(normalizeQuestionId(questionId))) return;
           const answer = parseQuestionAnswer(question);
           if (!answer) return;
-          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId: rawQuestionId ?? questionId });
           state.sentQuestionIds.add(questionId);
           console.log(LOG, "Answered blueboat", questionId);
         }
@@ -456,7 +464,7 @@
         for (const { id, data } of event.detail || []) {
           for (const key in data || {}) {
             if (key === "GLOBAL_questions") {
-              setQuestions(JSON.parse(data[key]));
+              try { setQuestions(JSON.parse(data[key])); } catch (_) { setQuestions(data[key]); }
               state.answerDeviceId = id;
               console.log(LOG, "Got questions", state.questions.length);
             }
@@ -2444,7 +2452,32 @@
     }));
   }
 
+
+  function syncPhaserPointer(x, y) {
+    try {
+      const stores = espState.stores ?? window.stores;
+      const scene = stores?.phaser?.scene;
+      const input = scene?.input;
+      const pointer = input?.activePointer || input?.mousePointer;
+      if (!pointer) return;
+      const nx = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
+      const ny = Math.max(0, Math.min(window.innerHeight, Number(y) || 0));
+      pointer.x = nx;
+      pointer.y = ny;
+      pointer.position?.set?.(nx, ny);
+      pointer.prevPosition?.set?.(nx, ny);
+      if (typeof scene?.cameras?.main?.getWorldPoint === "function") {
+        const worldPoint = scene.cameras.main.getWorldPoint(nx, ny);
+        if (worldPoint) {
+          pointer.worldX = worldPoint.x;
+          pointer.worldY = worldPoint.y;
+        }
+      }
+    } catch (_) {}
+  }
+
   function syncAimPointer(canvas, x, y, buttons = 0) {
+    syncPhaserPointer(x, y);
     fireCanvasPointerEvent("pointermove", canvas, x, y);
     fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
     const clientX = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
@@ -2690,6 +2723,7 @@
       return;
     }
 
+    const prevTarget = autoAimState.target;
     const target = findAutoAimTarget(cfg);
     autoAimState.target = target;
     if (!target) {
@@ -2704,7 +2738,8 @@
     const smoothingValue = Number(cfg.smoothing);
     const smoothing = Math.max(0, Math.min(1, Number.isFinite(smoothingValue) ? smoothingValue : 0.2));
     const maxStep = Math.max(2, Number(cfg.maxStepPx) || 32);
-    const minStep = Math.max(0.05, Number(cfg.minStepPx) || 0.75);
+    const minStepRaw = Number(cfg.minStepPx);
+    const minStep = Math.max(0.05, Number.isFinite(minStepRaw) ? minStepRaw : 0.75);
     const deadzone = Math.max(0, Number(cfg.deadzonePx) || 1.8);
     const predictionMs = Math.max(0, Math.min(220, Number(cfg.predictionMs) || 70));
     const lockMs = Math.max(0, Number(cfg.lockMs) || 220);
@@ -2714,10 +2749,10 @@
         autoAimState.targetVelX = 0;
         autoAimState.targetVelY = 0;
       }
-      if (autoAimState.target) {
+      if (prevTarget && prevTarget.playerId === String(target.playerId)) {
         const sampleDelta = Math.max(1, now - (autoAimState.lastTargetSampleAt || now));
-        const rawVelX = (target.screenX - autoAimState.target.screenX) / sampleDelta;
-        const rawVelY = (target.screenY - autoAimState.target.screenY) / sampleDelta;
+        const rawVelX = (target.screenX - prevTarget.screenX) / sampleDelta;
+        const rawVelY = (target.screenY - prevTarget.screenY) / sampleDelta;
         const velBlend = 0.28;
         autoAimState.targetVelX = autoAimState.targetVelX * (1 - velBlend) + rawVelX * velBlend;
         autoAimState.targetVelY = autoAimState.targetVelY * (1 - velBlend) + rawVelY * velBlend;
