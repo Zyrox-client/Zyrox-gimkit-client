@@ -2452,7 +2452,32 @@
     }));
   }
 
+
+  function syncPhaserPointer(x, y) {
+    try {
+      const stores = espState.stores ?? window.stores;
+      const scene = stores?.phaser?.scene;
+      const input = scene?.input;
+      const pointer = input?.activePointer || input?.mousePointer;
+      if (!pointer) return;
+      const nx = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
+      const ny = Math.max(0, Math.min(window.innerHeight, Number(y) || 0));
+      pointer.x = nx;
+      pointer.y = ny;
+      pointer.position?.set?.(nx, ny);
+      pointer.prevPosition?.set?.(nx, ny);
+      if (typeof scene?.cameras?.main?.getWorldPoint === "function") {
+        const worldPoint = scene.cameras.main.getWorldPoint(nx, ny);
+        if (worldPoint) {
+          pointer.worldX = worldPoint.x;
+          pointer.worldY = worldPoint.y;
+        }
+      }
+    } catch (_) {}
+  }
+
   function syncAimPointer(canvas, x, y, buttons = 0) {
+    syncPhaserPointer(x, y);
     fireCanvasPointerEvent("pointermove", canvas, x, y);
     fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
     const clientX = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
