@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Zyrox Client for Gimkit",
-  "description": "Packages zyrox-base.js as a document_start content injection extension for Gimkit join pages.",
+  "description": "A modern hacked client / utility mod for gimkit.",
   "version": "2.3.5",
   "icons": {
     "16": "icons/icon-16.png",
