@@ -2077,6 +2077,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     stopCrosshair();
   }
 
+  function shouldIgnoreCrosshairEscapeDisable() {
+    if (state?.visible) return true;
+    if (state?.listeningForMenuBind || state?.listeningForBind) return true;
+    const modal = document.querySelector(".zyrox-config-backdrop");
+    if (modal && !modal.classList.contains("hidden")) return true;
+    return false;
+  }
+
   function resizeCrosshairCanvas() {
     if (!crosshairState.canvas) return;
     crosshairState.canvas.width = window.innerWidth;
@@ -2263,6 +2271,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     setTimeout(() => {
+      if (shouldIgnoreCrosshairEscapeDisable()) return;
       if (document.pointerLockElement) return;
       disableCrosshairModuleFromEscape();
     }, 0);
