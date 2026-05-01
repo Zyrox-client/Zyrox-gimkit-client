@@ -1450,7 +1450,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const gameScriptUrl = text.match(/FixSpinePlugin-[^.]+\.js/)?.[0];
       if (!gameScriptUrl) throw new Error("Failed to find game script URL");
 
-      const gameScript = await import(`/assets/${gameScriptUrl}`);
+      const gameAssetUrl = new URL(`/assets/${gameScriptUrl}`, moduleScript.src).href;
+      const gameScript = await import(/* webpackIgnore: true */ gameAssetUrl);
       const stores = Object.values(gameScript).find((value) => value && value.assignment);
       if (!stores) throw new Error("Failed to resolve stores export");
 
