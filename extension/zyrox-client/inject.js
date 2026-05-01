@@ -2716,7 +2716,9 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     const smoothingValue = Number(cfg.smoothing);
     const smoothing = Math.max(0, Math.min(1, Number.isFinite(smoothingValue) ? smoothingValue : 0.2));
     const maxStep = Math.max(2, Number(cfg.maxStepPx) || 32);
-    const minStep = Math.max(0.05, Number(cfg.minStepPx) || 0.75);
+    const minStepRaw = Number(cfg.minStepPx);
+    const minStepAbs = Math.max(0.05, Number.isFinite(minStepRaw) ? minStepRaw : 0.35);
+    const minMoveFactor = 0.01;
     const deadzone = Math.max(0, Number(cfg.deadzonePx) || 1.8);
     const predictionMs = Math.max(0, Math.min(220, Number(cfg.predictionMs) || 70));
     const lockMs = Math.max(0, Number(cfg.lockMs) || 220);
@@ -2746,8 +2748,9 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     const dist = Math.hypot(dx, dy);
     if (dist > deadzone) {
       const adaptiveSmoothing = Math.pow(smoothing, dtFactor);
-      const baseStep = dist * adaptiveSmoothing;
-      const step = Math.min(maxStep * dtFactor, Math.max(minStep, baseStep));
+      const moveFactor = Math.max(minMoveFactor, Math.min(1, 1 - adaptiveSmoothing));
+      const baseStep = dist * moveFactor;
+      const step = Math.min(maxStep * dtFactor, Math.max(minStepAbs, baseStep));
       const ratio = Math.min(1, step / dist);
       const nextX = crosshairState.mouseX + dx * ratio;
       const nextY = crosshairState.mouseY + dy * ratio;
