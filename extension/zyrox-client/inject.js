@@ -2008,6 +2008,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     mouseX: 0,
     mouseY: 0,
     rafId: null,
+    hidNativeCursor: false,
+    previousCursor: "",
   };
 
   function getCrosshairConfig() {
@@ -2043,6 +2045,44 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     crosshairState.canvas?.remove();
     crosshairState.canvas = null;
     crosshairState.ctx = null;
+  }
+
+  function setNativeCursorHidden(hidden) {
+    const target = document.body || document.documentElement;
+    if (!target) return;
+    if (hidden) {
+      if (crosshairState.hidNativeCursor) return;
+      crosshairState.previousCursor = target.style.cursor || "";
+      target.style.cursor = "none";
+      crosshairState.hidNativeCursor = true;
+      return;
+    }
+    if (!crosshairState.hidNativeCursor) return;
+    target.style.cursor = crosshairState.previousCursor || "";
+    crosshairState.previousCursor = "";
+    crosshairState.hidNativeCursor = false;
+  }
+
+  function disableCrosshairModuleFromEscape() {
+    if (!crosshairState.enabled) return;
+    const module = state?.modules?.get?.("Crosshair");
+    const item = state?.moduleItems?.get?.("Crosshair");
+    if (module?.enabled) {
+      module.disable();
+      item?.classList?.remove("active");
+      state?.enabledModules?.delete?.("Crosshair");
+      saveSettings();
+      return;
+    }
+    stopCrosshair();
+  }
+
+  function shouldIgnoreCrosshairEscapeDisable() {
+    if (state?.visible) return true;
+    if (state?.listeningForMenuBind || state?.listeningForBind) return true;
+    const modal = document.querySelector(".zyrox-config-backdrop");
+    if (modal && !modal.classList.contains("hidden")) return true;
+    return false;
   }
 
   function resizeCrosshairCanvas() {
@@ -2204,12 +2244,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     primeSharedPlayerData();
     crosshairState.enabled = true;
     createCrosshairCanvas();
+    setNativeCursorHidden(true);
     renderCrosshairFrame();
   }
 
   function stopCrosshair() {
     if (!crosshairState.enabled) return;
     crosshairState.enabled = false;
+    setNativeCursorHidden(false);
     destroyCrosshairCanvas();
   }
 
@@ -2226,6 +2268,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   }, { passive: true });
 
   window.addEventListener("resize", resizeCrosshairCanvas);
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    setTimeout(() => {
+      if (shouldIgnoreCrosshairEscapeDisable()) return;
+      if (document.pointerLockElement) return;
+      disableCrosshairModuleFromEscape();
+    }, 0);
+  }, false);
 
   // ---------------------------------------------------------------------------
   // TRIGGER ASSIST MODULE
