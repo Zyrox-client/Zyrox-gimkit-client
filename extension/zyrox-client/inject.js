@@ -1447,11 +1447,30 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
       const response = await fetch(moduleScript.src);
       const text = await response.text();
-      const gameScriptUrl = text.match(/FixSpinePlugin-[^.]+\.js/)?.[0];
-      if (!gameScriptUrl) throw new Error("Failed to find game script URL");
+      const gameScriptPath =
+        text.match(/["'](\/assets\/FixSpinePlugin-[^"']+\.js(?:\?[^"']*)?)["']/)?.[1] ||
+        text.match(/FixSpinePlugin-[^.]+\.js(?:\?\S+)?/)?.[0];
+      if (!gameScriptPath) throw new Error("Failed to find game script URL");
 
-      const gameAssetUrl = new URL(`/assets/${gameScriptUrl}`, moduleScript.src).href;
-      const gameScript = await import(/* webpackIgnore: true */ gameAssetUrl);
+      const gameAssetUrl = gameScriptPath.startsWith("http")
+        ? gameScriptPath
+        : new URL(gameScriptPath.startsWith("/") ? gameScriptPath : `/assets/${gameScriptPath}`, moduleScript.src).href;
+
+      let gameScript;
+      try {
+        gameScript = await import(/* webpackIgnore: true */ gameAssetUrl);
+      } catch (importError) {
+        espLog("Direct module import failed; retrying via blob fallback", importError);
+        const fallbackResponse = await fetch(gameAssetUrl);
+        const fallbackText = await fallbackResponse.text();
+        const blobUrl = URL.createObjectURL(new Blob([fallbackText], { type: "text/javascript" }));
+        try {
+          gameScript = await import(/* webpackIgnore: true */ blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      }
+
       const stores = Object.values(gameScript).find((value) => value && value.assignment);
       if (!stores) throw new Error("Failed to resolve stores export");
 
