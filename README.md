@@ -38,8 +38,8 @@ Or on the [GreasyFork feedback page](https://greasyfork.org/en/scripts/572408-zy
 
 ## Files
 - `zyrox-base.js`: The main userscript file.
-- `example.js`: Reference/example userscript hacked client.
-- `packetsniffer.js`: A packet sniffer debug utility tool, with decoding for both blueboat and colyseus modes, made for developing more utlities/modules.
+- `/tests/example.js`: Reference/example userscript hacked client (not written by me).
+- `/pecketsniffer/packetsniffer.js`: A packet sniffer debug utility tool, with decoding for both blueboat and colyseus modes, made for developing more utlities/modules.
 <br>
 
 ## Roadmap/todo
