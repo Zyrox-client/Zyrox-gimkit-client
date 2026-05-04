@@ -3,175 +3,223 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Zyrox for Gimkit | Userscript</title>
+    <title>Zyrox Client | Userscript</title>
     <style>
       :root {
-        --bg: #0b1020;
-        --bg-alt: #111831;
-        --card: #1a2345;
-        --text: #eaf0ff;
-        --muted: #9fb0de;
-        --accent: #5d8cff;
-        --accent-2: #7a5cff;
-        --border: #2c3a73;
+        --bg: #0b0b0d;
+        --bg-soft: #121215;
+        --panel: #17171b;
+        --text: #f4f4f5;
+        --muted: #b0b0b8;
+        --red: #d82424;
+        --red-soft: #a51616;
+        --line: #2a2a30;
       }
 
       * { box-sizing: border-box; }
 
+      html { scroll-behavior: smooth; }
+
       body {
         margin: 0;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-        background: linear-gradient(180deg, var(--bg), #0f1730 60%, var(--bg));
+        font-family: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         color: var(--text);
+        background:
+          radial-gradient(circle at 20% -10%, #3d0a0a66, transparent 35%),
+          radial-gradient(circle at 95% 0%, #5f121240, transparent 30%),
+          var(--bg);
         line-height: 1.6;
       }
 
       .container {
-        width: min(1000px, 92vw);
+        width: min(1020px, 92vw);
         margin: 0 auto;
       }
 
-      header {
-        min-height: 86vh;
-        display: grid;
-        place-items: center;
-        text-align: center;
-        padding: 3rem 0;
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: #0d0d10d9;
+        backdrop-filter: blur(8px);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .topbar-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.7rem 0;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        font-weight: 700;
+      }
+
+      .brand img {
+        width: 34px;
+        height: 34px;
+        object-fit: contain;
       }
 
       .hero {
-        background: radial-gradient(1200px 420px at 50% -10%, #2c4dad55, transparent), var(--bg-alt);
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        padding: 3rem 2rem;
-        box-shadow: 0 20px 50px #0008;
+        padding: 4.5rem 0 3rem;
+      }
+
+      .hero-card {
+        border: 1px solid var(--line);
+        background: linear-gradient(180deg, #18181d, #121216);
+        border-radius: 18px;
+        padding: clamp(1.5rem, 2.5vw, 2.5rem);
+        box-shadow: 0 22px 45px #00000066;
       }
 
       h1 {
-        margin: 0 0 0.75rem;
-        font-size: clamp(2rem, 3vw + 1rem, 3.5rem);
+        margin: 0 0 0.9rem;
+        font-size: clamp(2rem, 3vw + 1rem, 3.4rem);
+        letter-spacing: -0.02em;
       }
 
-      .subtitle {
-        margin: 0 auto 1.5rem;
-        max-width: 700px;
+      .lead {
+        margin: 0;
+        max-width: 760px;
         color: var(--muted);
       }
 
-      .button {
+      .cta-row {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 0.8rem;
+        flex-wrap: wrap;
+      }
+
+      .btn {
         display: inline-block;
         text-decoration: none;
-        color: white;
-        background: linear-gradient(90deg, var(--accent), var(--accent-2));
-        border: none;
-        border-radius: 999px;
-        padding: 0.85rem 1.35rem;
+        border-radius: 10px;
+        padding: 0.8rem 1.1rem;
         font-weight: 700;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        box-shadow: 0 10px 25px #253f9b55;
+        transition: 180ms ease;
+        border: 1px solid transparent;
       }
 
-      .button:hover { transform: translateY(-2px); }
-      .button:focus-visible { outline: 3px solid #cdd8ff; outline-offset: 2px; }
+      .btn-primary {
+        color: white;
+        background: linear-gradient(180deg, var(--red), var(--red-soft));
+        box-shadow: 0 8px 22px #7c101055;
+      }
+
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        filter: brightness(1.05);
+      }
+
+      .btn-ghost {
+        color: var(--text);
+        border-color: #373740;
+        background: #1b1b20;
+      }
 
       section {
-        margin: 2.5rem 0;
-        background: var(--bg-alt);
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        padding: 2rem;
-      }
-
-      h2 { margin-top: 0; font-size: 1.75rem; }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 1rem;
-      }
-
-      .card {
-        background: var(--card);
-        border: 1px solid #33468a;
+        margin: 1.2rem 0;
+        padding: 1.5rem;
+        border: 1px solid var(--line);
         border-radius: 14px;
-        padding: 1rem;
+        background: var(--bg-soft);
       }
+
+      h2 {
+        margin-top: 0;
+        margin-bottom: 0.6rem;
+      }
+
+      .muted { color: var(--muted); }
+
+      .feature-list {
+        margin: 0.8rem 0 0;
+        padding-left: 1.2rem;
+      }
+
+      .feature-list li { margin-bottom: 0.5rem; }
+
+      .steps {
+        margin: 0.8rem 0 0;
+        padding-left: 1.2rem;
+      }
+
+      .steps li { margin: 0.55rem 0; }
 
       code {
-        background: #0a1230;
-        border: 1px solid #2a3f80;
-        border-radius: 8px;
-        padding: 0.1rem 0.35rem;
+        background: #0f0f13;
+        border: 1px solid #2f2f38;
+        border-radius: 6px;
+        padding: 0.08rem 0.35rem;
       }
 
-      ol li + li { margin-top: 0.7rem; }
+      .install-card {
+        border-left: 4px solid var(--red);
+      }
 
       footer {
+        color: #8e8e98;
         text-align: center;
-        color: var(--muted);
-        padding: 2rem 0 3rem;
+        padding: 2rem 0 2.5rem;
       }
     </style>
   </head>
   <body>
-    <header class="container">
-      <div class="hero">
-        <h1>Zyrox for Gimkit</h1>
-        <p class="subtitle">
-          A polished userscript setup page with quick install instructions and an overview of what the script includes.
+    <div class="topbar">
+      <div class="container topbar-inner">
+        <div class="brand">
+          <img src="images/logo_transparent.png" alt="Zyrox logo" />
+          <span>Zyrox Client</span>
+        </div>
+        <a class="btn btn-ghost" href="#install">Jump to install</a>
+      </div>
+    </div>
+
+    <header class="hero container">
+      <div class="hero-card">
+        <h1>Zyrox Userscript</h1>
+        <p class="lead">
+          Everything you need to install and run the Zyrox userscript in one place.
+          No fluff—just the quick setup and the essentials.
         </p>
-        <a class="button" href="#install">Install / Download</a>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#install">Install / Download</a>
+          <a class="btn btn-ghost" href="#about">What is this?</a>
+        </div>
       </div>
     </header>
 
     <main class="container">
-      <section id="overview">
+      <section id="about">
         <h2>About</h2>
-        <p>
-          Zyrox is designed for players who want advanced controls, quality-of-life improvements, and streamlined gameplay helpers.
-          This page gives you everything you need to install the userscript quickly.
+        <p class="muted">
+          Zyrox is a userscript-based client enhancement for Gimkit. This page is kept intentionally simple so users can get started quickly.
         </p>
-        <div class="grid">
-          <article class="card">
-            <h3>Fast Setup</h3>
-            <p>Install a userscript manager, click install, and you're ready in minutes.</p>
-          </article>
-          <article class="card">
-            <h3>Modern UI</h3>
-            <p>Simple sections, strong readability, and clean layout on desktop and mobile.</p>
-          </article>
-          <article class="card">
-            <h3>Open & Editable</h3>
-            <p>You can review and tweak the script source as needed.</p>
-          </article>
-        </div>
+        <ul class="feature-list">
+          <li>Quick setup with Tampermonkey or Violentmonkey.</li>
+          <li>Uses the script in this repo: <code>zyrox-base.js</code>.</li>
+          <li>Clean, minimal layout focused on installation first.</li>
+        </ul>
       </section>
 
-      <section id="install">
+      <section id="install" class="install-card">
         <h2>Install</h2>
-        <p>Follow these steps to install the userscript:</p>
-        <ol>
-          <li>
-            Install a userscript manager browser extension, such as <strong>Tampermonkey</strong> or <strong>Violentmonkey</strong>.
-          </li>
-          <li>
-            Open the script file from this repository: <code>zyrox-base.js</code>.
-          </li>
-          <li>
-            Copy the script into your userscript manager and save it.
-          </li>
-          <li>
-            Reload Gimkit and verify the script is enabled in your extension dashboard.
-          </li>
+        <p class="muted">Follow these steps:</p>
+        <ol class="steps">
+          <li>Install a userscript manager extension (Tampermonkey or Violentmonkey).</li>
+          <li>Open <code>zyrox-base.js</code> from this repository.</li>
+          <li>Copy the script into your userscript manager and save it.</li>
+          <li>Refresh Gimkit and confirm the script is enabled.</li>
         </ol>
-        <p>
-          Optional: You can also add a direct install link here later once a hosted raw script URL is available.
-        </p>
       </section>
     </main>
 
-    <footer>
-      Built for the Zyrox userscript project.
-    </footer>
+    <footer>Made for the Zyrox client community.</footer>
   </body>
 </html>
