@@ -3,7 +3,7 @@
 // @namespace    https://github.com/zyrox
 // @version      2.3.8
 // @description  A modern userscript hacked client for gimkit
-// @author       Zyrox
+// @author       Zyrox client
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
 // @updateURL    https://raw.githubusercontent.com/Zyrox-client/Zyrox-gimkit-client/refs/heads/main/zyrox-base.js
