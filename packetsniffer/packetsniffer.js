@@ -6,6 +6,7 @@
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
+// @license      MIT
 // @grant        none
 // ==/UserScript==
 
