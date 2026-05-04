@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zyrox for Gimkit | Userscript</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --bg-alt: #111831;
+        --card: #1a2345;
+        --text: #eaf0ff;
+        --muted: #9fb0de;
+        --accent: #5d8cff;
+        --accent-2: #7a5cff;
+        --border: #2c3a73;
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, var(--bg), #0f1730 60%, var(--bg));
+        color: var(--text);
+        line-height: 1.6;
+      }
+
+      .container {
+        width: min(1000px, 92vw);
+        margin: 0 auto;
+      }
+
+      header {
+        min-height: 86vh;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 3rem 0;
+      }
+
+      .hero {
+        background: radial-gradient(1200px 420px at 50% -10%, #2c4dad55, transparent), var(--bg-alt);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 3rem 2rem;
+        box-shadow: 0 20px 50px #0008;
+      }
+
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: clamp(2rem, 3vw + 1rem, 3.5rem);
+      }
+
+      .subtitle {
+        margin: 0 auto 1.5rem;
+        max-width: 700px;
+        color: var(--muted);
+      }
+
+      .button {
+        display: inline-block;
+        text-decoration: none;
+        color: white;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+        border: none;
+        border-radius: 999px;
+        padding: 0.85rem 1.35rem;
+        font-weight: 700;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+        box-shadow: 0 10px 25px #253f9b55;
+      }
+
+      .button:hover { transform: translateY(-2px); }
+      .button:focus-visible { outline: 3px solid #cdd8ff; outline-offset: 2px; }
+
+      section {
+        margin: 2.5rem 0;
+        background: var(--bg-alt);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 2rem;
+      }
+
+      h2 { margin-top: 0; font-size: 1.75rem; }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid #33468a;
+        border-radius: 14px;
+        padding: 1rem;
+      }
+
+      code {
+        background: #0a1230;
+        border: 1px solid #2a3f80;
+        border-radius: 8px;
+        padding: 0.1rem 0.35rem;
+      }
+
+      ol li + li { margin-top: 0.7rem; }
+
+      footer {
+        text-align: center;
+        color: var(--muted);
+        padding: 2rem 0 3rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="container">
+      <div class="hero">
+        <h1>Zyrox for Gimkit</h1>
+        <p class="subtitle">
+          A polished userscript setup page with quick install instructions and an overview of what the script includes.
+        </p>
+        <a class="button" href="#install">Install / Download</a>
+      </div>
+    </header>
+
+    <main class="container">
+      <section id="overview">
+        <h2>About</h2>
+        <p>
+          Zyrox is designed for players who want advanced controls, quality-of-life improvements, and streamlined gameplay helpers.
+          This page gives you everything you need to install the userscript quickly.
+        </p>
+        <div class="grid">
+          <article class="card">
+            <h3>Fast Setup</h3>
+            <p>Install a userscript manager, click install, and you're ready in minutes.</p>
+          </article>
+          <article class="card">
+            <h3>Modern UI</h3>
+            <p>Simple sections, strong readability, and clean layout on desktop and mobile.</p>
+          </article>
+          <article class="card">
+            <h3>Open & Editable</h3>
+            <p>You can review and tweak the script source as needed.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="install">
+        <h2>Install</h2>
+        <p>Follow these steps to install the userscript:</p>
+        <ol>
+          <li>
+            Install a userscript manager browser extension, such as <strong>Tampermonkey</strong> or <strong>Violentmonkey</strong>.
+          </li>
+          <li>
+            Open the script file from this repository: <code>zyrox-base.js</code>.
+          </li>
+          <li>
+            Copy the script into your userscript manager and save it.
+          </li>
+          <li>
+            Reload Gimkit and verify the script is enabled in your extension dashboard.
+          </li>
+        </ol>
+        <p>
+          Optional: You can also add a direct install link here later once a hosted raw script URL is available.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      Built for the Zyrox userscript project.
+    </footer>
+  </body>
+</html>
