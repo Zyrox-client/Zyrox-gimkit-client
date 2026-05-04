@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/zyrox
-// @version      2.3.8
+// @version      2.3.9
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -5403,7 +5403,7 @@
               <div>Version: ${CONFIG.version}</div>
               <a
                 class="zyrox-btn zyrox-about-source-btn"
-                href="https://github.com/Bob-alt-828100/zyrox-gimkit-client"
+                href="https://github.com/Zyrox-client/Zyrox-gimkit-client"
                 target="_blank"
                 rel="noopener noreferrer"
               >View Source Code</a>
