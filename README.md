@@ -13,7 +13,7 @@
 
 Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.
 
-Browser extension version possibly coming soon (not for chrome sadly)
+Browser extension version possibly coming soon (not for chrome sadly, because publishing on the chrome web store isnt free).
 
 ## Download/Install
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
