@@ -6889,6 +6889,20 @@
     };
   }
 
+
+  function normalizeDisplayMode(value) {
+    return value === "merged" ? "merged" : "loose";
+  }
+
+  function normalizeLoosePoint(value, fallbackX, fallbackY) {
+    const x = Number(value?.x);
+    const y = Number(value?.y);
+    return {
+      x: Number.isFinite(x) ? x : fallbackX,
+      y: Number.isFinite(y) ? y : fallbackY,
+    };
+  }
+
   function getMergedPanelPositionsSnapshot() {
     const snapshot = {};
     shell.classList.remove("loose-mode");
@@ -6904,7 +6918,7 @@
   }
 
   function setDisplayMode(mode) {
-    const nextMode = mode === "loose" ? "loose" : "merged";
+    const nextMode = normalizeDisplayMode(mode);
     console.log(LOG, "setDisplayMode", { requested: mode, nextMode, previous: state.displayMode });
     const mergedSnapshot = nextMode === "loose" ? getMergedPanelPositionsSnapshot() : null;
 
@@ -6915,6 +6929,7 @@
     }
 
     state.displayMode = nextMode;
+    console.log(LOG, "current display mode", state.displayMode);
     shell.classList.toggle("loose-mode", state.displayMode === "loose");
 
     for (const btn of displayModeButtons) {
@@ -6933,6 +6948,7 @@
 
       const shellRect = shell.getBoundingClientRect();
       const scale = getShellScale();
+      state.loosePositions.topbar = normalizeLoosePoint(state.loosePositions?.topbar, 12, 12);
       const clampedTopbar = clampLoosePosition(state.loosePositions.topbar.x, state.loosePositions.topbar.y, topbar, scale, shellRect);
       state.loosePositions.topbar = clampedTopbar;
       topbar.style.left = `${clampedTopbar.x}px`;
@@ -7521,7 +7537,11 @@
 
   settingsResetAllBtn.addEventListener("click", () => {
     // Hard reset: remove persisted state and fully reload to rebuild UI from defaults.
-    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem("zyrox_client_settings_v2");
+      localStorage.removeItem("zyrox_client_settings");
+    } catch (_) {}
     try { closeConfig(); } catch (_) {}
     window.location.reload();
   });
@@ -7675,16 +7695,19 @@
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
         assign(hoverShiftInput, "hoverShift");
-        // Temporarily force loose mode on load because merged mode state has been unstable.
-        state.displayMode = "loose";
+        state.displayMode = normalizeDisplayMode(saved.displayMode);
         if (typeof saved.looseInitialized === "boolean") state.looseInitialized = saved.looseInitialized;
         if (saved.loosePositions && typeof saved.loosePositions === "object") {
           state.loosePositions = {
-            topbar: saved.loosePositions.topbar || state.loosePositions.topbar,
+            topbar: normalizeLoosePoint(saved.loosePositions.topbar, state.loosePositions.topbar.x, state.loosePositions.topbar.y),
           };
         }
         if (saved.loosePanelPositions && typeof saved.loosePanelPositions === "object") {
-          state.loosePanelPositions = saved.loosePanelPositions;
+          const normalizedPanelPositions = {};
+          for (const [panelName, panelPos] of Object.entries(saved.loosePanelPositions)) {
+            normalizedPanelPositions[panelName] = normalizeLoosePoint(panelPos, 16, 68);
+          }
+          state.loosePanelPositions = normalizedPanelPositions;
         }
         if (saved.collapsedPanels && typeof saved.collapsedPanels === "object") {
           state.collapsedPanels = saved.collapsedPanels;
@@ -7728,10 +7751,9 @@
   renderHiddenCategorySettings();
   syncCollapseButtons();
   applyAppearance();
-  state.displayMode = "loose";
-  setDisplayMode("loose");
+  setDisplayMode(state.displayMode);
+  console.log(LOG, "display mode after init", state.displayMode);
   applySearchFilter();
-  saveSettings();
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
     if (!moduleInstance || moduleInstance.enabled) continue;
