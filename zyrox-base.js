@@ -1317,7 +1317,7 @@
 
   const autoAnswerModule = new Module("Auto Answer", {
     onEnable: () => {
-      .log("Auto Answer enabled");
+      console.log("Auto Answer enabled");
       autoAnswerEnabled = true;
     },
     onDisable: () => {
