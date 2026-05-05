@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.4.4
+// @version      2.4.5
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.4.4";
+    const CLIENT_VERSION = "2.4.5";
     return CLIENT_VERSION;
   }
 
@@ -4450,11 +4450,12 @@
     ].join(";");
 
     card.innerHTML = `
-      <div style="margin:-18px -20px 14px -20px;padding:10px 14px;border-radius:14px 14px 0 0;border-bottom:1px solid rgba(255,255,255,.18);background:linear-gradient(125deg, rgba(255, 74, 74, 0.24), rgba(56, 16, 16, 0.9));display:flex;align-items:center;gap:10px;">
+      <div style="margin:-18px -20px 14px -20px;padding:10px 14px;border-radius:14px 14px 0 0;border-bottom:1px solid rgba(255,255,255,.18);background:linear-gradient(125deg, rgba(255, 74, 74, 0.24), rgba(56, 16, 16, 0.9));display:flex;align-items:center;justify-content:space-between;gap:10px;">
         <div style="display:flex;align-items:center;gap:10px;">
           <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">Zyrox client</div>
           <div style="font-size:12px;font-weight:700;opacity:.92;">v${CONFIG.version}</div>
         </div>
+        <button type="button" class="zyrox-welcome-action" id="zyrox-welcome-x" aria-label="Close" style="appearance:none;width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.08);color:#fff;font-size:14px;font-weight:800;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .15s ease,border-color .15s ease,transform .15s ease;">×</button>
       </div>
       <div style="font-size:24px;font-weight:800;margin-bottom:10px;"><b>Zyrox client</b></div>
       <div style="font-size:15px;opacity:.92;margin-bottom:14px;">Welcome to <b>zyrox client</b>: a modern hacked client / utility mod for gimkit.<br><br><b>Left-click</b> to enable/disable a module.<br><b>Right-click</b> to configure a modules settings.<br><b>'\\'</b> to hide/show the client.</div>
@@ -4479,6 +4480,7 @@
     };
 
     card.querySelector("#zyrox-welcome-close")?.addEventListener("click", close);
+    card.querySelector("#zyrox-welcome-x")?.addEventListener("click", close);
 
     for (const action of card.querySelectorAll(".zyrox-welcome-action")) {
       action.addEventListener("mouseenter", () => {
