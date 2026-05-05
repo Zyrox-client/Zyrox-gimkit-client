@@ -52,7 +52,14 @@ Or on the [GreasyFork feedback page](https://greasyfork.org/en/scripts/572408-zy
 ## Roadmap/todo
 - Improve default settings
 - Add descriptions
-- Add more modules (visual: freecam. classic/tycoon: autobuy, ability hud. core: instant-continue (if possible))
 - Add tutorial/introduction on first launch
 - Fix tab placement bug when adding new module (remove hide non working modules setting)
 - Improve appearance/preset (possibly)
+- More modules (
+    visual: freecam, zoomout. 
+    floor is lava: autobuild. 
+    classic/tycoon: ability hud. 
+    core: instant-continue (if possible)
+    external: game finder, bot join (if possible).
+  )
+      
