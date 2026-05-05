@@ -11,7 +11,7 @@
     <img alt="Good ratings" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.greasyfork.org%2Fen%2Fscripts%2F572408-zyrox-client-gimkit.json&query=good_ratings&style=flat&label=Good%20ratings&labelColor=%23333&color=%23993027"></a>
 </div>
 
-Install the usercript <a href="https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit">here</a>.
+Install the usercript <a href="https://zyrox-client.github.io/">here</a>.
 
 Browser extension version possibly coming soon (not for chrome sadly, because publishing on the chrome web store isnt free).
 
