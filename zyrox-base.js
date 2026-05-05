@@ -6937,8 +6937,11 @@
 
       for (const [name, panel] of panelByName.entries()) {
         const existingRect = panel.getBoundingClientRect();
+        const snapshotPos = mergedSnapshot?.[name];
+        const hasRenderableSize = existingRect.width > 0 && existingRect.height > 0;
+        const safeSnapshotPos = hasRenderableSize ? snapshotPos : null;
         const pos = state.loosePanelPositions[name]
-          || mergedSnapshot?.[name]
+          || safeSnapshotPos
           || {
           x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
           y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
@@ -7190,6 +7193,7 @@
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
+        hasPositionChanges = true;
       }
     }
   }
@@ -7240,6 +7244,7 @@
       event.stopPropagation();
       const nextCollapsed = !state.collapsedPanels[name];
       setPanelCollapsed(name, nextCollapsed);
+      saveSettings();
     };
     collapseButton.addEventListener("click", toggleCollapsed);
     collapseButton.addEventListener("keydown", (event) => {
@@ -7397,7 +7402,10 @@
   blurInput.addEventListener("input", applyAppearance);
   hoverShiftInput.addEventListener("input", applyAppearance);
   displayModeButtons.forEach((btn) => {
-    btn.addEventListener("click", () => setDisplayMode(btn.dataset.displayMode || "merged"));
+    btn.addEventListener("click", () => {
+      setDisplayMode(btn.dataset.displayMode || "merged");
+      saveSettings();
+    });
   });
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
@@ -7504,35 +7512,10 @@
   });
 
   settingsResetAllBtn.addEventListener("click", () => {
-    // Nuke localStorage
+    // Hard reset: remove persisted state and fully reload to rebuild UI from defaults.
     try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-
-    // Reset module enabled state
-    for (const moduleName of [...state.enabledModules]) {
-      toggleModule(moduleName); // toggles off
-    }
-    state.enabledModules.clear();
-    for (const [, item] of state.moduleItems) item.classList.remove("active");
-
-    // Reset all module configs (keybinds + settings)
-    state.moduleConfig = new Map();
-
-    // Reset keybind labels
-    for (const [moduleName, item] of state.moduleItems) {
-      setBindLabel(item, moduleName);
-    }
-
-    // Reset menu keybind
-    CONFIG.toggleKey = CONFIG.defaultToggleKey;
-    settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
-    setFooterText();
-
-    // Reset search autofocus
-    state.searchAutofocus = true;
-    searchAutofocusInput.checked = true;
-
-    // Trigger the full appearance reset too
-    settingsResetBtn.click();
+    try { closeConfig(); } catch (_) {}
+    window.location.reload();
   });
 
   function saveSettings(showFeedback = false) {
@@ -7813,6 +7796,8 @@
 
   let dragState = null;
   let resizeState = null;
+  let hasPositionChanges = false;
+  let hasSizeChanges = false;
 
   const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
 
@@ -7868,6 +7853,7 @@
       const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY, root);
       root.style.left = `${clamped.x}px`;
       root.style.top = `${clamped.y}px`;
+      hasPositionChanges = true;
     }
 
     if (dragState?.mode === "topbar") {
@@ -7881,6 +7867,7 @@
       state.loosePositions.topbar = clamped;
       topbar.style.left = `${clamped.x}px`;
       topbar.style.top = `${clamped.y}px`;
+      hasPositionChanges = true;
     }
 
     if (panelDragState.panelName) {
@@ -7896,17 +7883,22 @@
         state.loosePanelPositions[panelDragState.panelName] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
+        hasPositionChanges = true;
       }
     }
   });
 
   document.addEventListener("mouseup", () => {
+    const shouldSave = hasPositionChanges || hasSizeChanges;
     dragState = null;
     resizeState = null;
     panelDragState.panelName = null;
     panelDragState.shellLeft = 0;
     panelDragState.shellTop = 0;
     panelDragState.scale = 1;
+    hasPositionChanges = false;
+    hasSizeChanges = false;
+    if (shouldSave) saveSettings();
   });
 
   resizeHandle.addEventListener("mousedown", (event) => {
@@ -7930,6 +7922,7 @@
     state.shellHeight = height;
     shell.style.width = `${width}px`;
     shell.style.height = `${height}px`;
+    hasSizeChanges = true;
   });
 
   // Theme category switching functionality
