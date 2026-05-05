@@ -13,8 +13,7 @@
 
 Install the usercript <a href="https://zyrox-client.github.io/">here</a>.
 
-More browser extension versions (probablyy) coming soon (not for chrome sadly, because publishing on the chrome web store isnt free).
-
+More browser extension versions are (probably) coming soon (not for chrome sadly, because publishing on the chrome web store isnt free).
 
 
 ## Download/Install
