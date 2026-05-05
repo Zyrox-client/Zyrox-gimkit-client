@@ -5308,8 +5308,8 @@
           </div>
           <div class="zyrox-subheading">Display Mode</div>
           <div class="zyrox-settings-actions-group" style="margin-bottom: 14px; margin-top: 8px;">
-            <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
-            <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
+            <button class="zyrox-btn set-display-mode" data-display-mode="merged" type="button">Merged</button>
+            <button class="zyrox-btn set-display-mode active" data-display-mode="loose" type="button">Loose</button>
           </div>
         </div>
       </div>
@@ -6905,6 +6905,7 @@
 
   function setDisplayMode(mode) {
     const nextMode = mode === "loose" ? "loose" : "merged";
+    console.log(LOG, "setDisplayMode", { requested: mode, nextMode, previous: state.displayMode });
     const mergedSnapshot = nextMode === "loose" ? getMergedPanelPositionsSnapshot() : null;
 
     if (nextMode === "loose" && !state.looseInitialized) {
@@ -7525,14 +7526,17 @@
 
   function saveSettings(showFeedback = false) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(collectSettings()));
+      const payload = collectSettings();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      console.log(LOG, "saveSettings success", { displayMode: payload.displayMode });
       if (showFeedback) {
         settingsSaveBtn.textContent = "Saved";
         setTimeout(() => {
           settingsSaveBtn.textContent = "Save";
         }, 850);
       }
-    } catch (_) {
+    } catch (error) {
+      console.error(LOG, "saveSettings failed", error);
       if (showFeedback) {
         settingsSaveBtn.textContent = "Save failed";
         setTimeout(() => {
@@ -7621,6 +7625,7 @@
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && typeof saved === "object") {
+        console.log(LOG, "loaded saved settings", { displayMode: saved.displayMode });
         if (saved.toggleKey) CONFIG.toggleKey = saved.toggleKey;
         if (typeof saved.globalPreset === "string") state.globalPreset = normalizePopupPresetName(saved.globalPreset);
         if (typeof saved.searchAutofocus === "boolean") {
