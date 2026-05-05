@@ -6947,6 +6947,7 @@
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
+        hasPositionChanges = true;
       }
     } else {
       root.style.left = `${state.mergedRootPosition.left}px`;
@@ -7190,6 +7191,7 @@
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
+        hasPositionChanges = true;
       }
     }
   }
@@ -7240,6 +7242,7 @@
       event.stopPropagation();
       const nextCollapsed = !state.collapsedPanels[name];
       setPanelCollapsed(name, nextCollapsed);
+      saveSettings();
     };
     collapseButton.addEventListener("click", toggleCollapsed);
     collapseButton.addEventListener("keydown", (event) => {
@@ -7813,6 +7816,8 @@
 
   let dragState = null;
   let resizeState = null;
+  let hasPositionChanges = false;
+  let hasSizeChanges = false;
 
   const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
 
@@ -7868,6 +7873,7 @@
       const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY, root);
       root.style.left = `${clamped.x}px`;
       root.style.top = `${clamped.y}px`;
+      hasPositionChanges = true;
     }
 
     if (dragState?.mode === "topbar") {
@@ -7881,6 +7887,7 @@
       state.loosePositions.topbar = clamped;
       topbar.style.left = `${clamped.x}px`;
       topbar.style.top = `${clamped.y}px`;
+      hasPositionChanges = true;
     }
 
     if (panelDragState.panelName) {
@@ -7896,17 +7903,22 @@
         state.loosePanelPositions[panelDragState.panelName] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
+        hasPositionChanges = true;
       }
     }
   });
 
   document.addEventListener("mouseup", () => {
+    const shouldSave = hasPositionChanges || hasSizeChanges;
     dragState = null;
     resizeState = null;
     panelDragState.panelName = null;
     panelDragState.shellLeft = 0;
     panelDragState.shellTop = 0;
     panelDragState.scale = 1;
+    hasPositionChanges = false;
+    hasSizeChanges = false;
+    if (shouldSave) saveSettings();
   });
 
   resizeHandle.addEventListener("mousedown", (event) => {
@@ -7930,6 +7942,7 @@
     state.shellHeight = height;
     shell.style.width = `${width}px`;
     shell.style.height = `${height}px`;
+    hasSizeChanges = true;
   });
 
   // Theme category switching functionality
