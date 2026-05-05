@@ -7675,8 +7675,7 @@
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
         assign(hoverShiftInput, "hoverShift");
-        // Temporarily force loose mode on load because merged mode state has been unstable.
-        state.displayMode = "loose";
+        if (saved.displayMode) state.displayMode = saved.displayMode === "loose" ? "loose" : "merged";
         if (typeof saved.looseInitialized === "boolean") state.looseInitialized = saved.looseInitialized;
         if (saved.loosePositions && typeof saved.loosePositions === "object") {
           state.loosePositions = {
@@ -7728,10 +7727,8 @@
   renderHiddenCategorySettings();
   syncCollapseButtons();
   applyAppearance();
-  state.displayMode = "loose";
-  setDisplayMode("loose");
+  setDisplayMode(state.displayMode);
   applySearchFilter();
-  saveSettings();
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
     if (!moduleInstance || moduleInstance.enabled) continue;
