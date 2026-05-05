@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.5.1
+// @version      2.5.2
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.5.1";
+    const CLIENT_VERSION = "2.5.2";
     return CLIENT_VERSION;
   }
 
@@ -6935,22 +6935,26 @@
       topbar.style.left = `${clampedTopbar.x}px`;
       topbar.style.top = `${clampedTopbar.y}px`;
 
+      let panelIndex = 0;
       for (const [name, panel] of panelByName.entries()) {
         const existingRect = panel.getBoundingClientRect();
         const snapshotPos = mergedSnapshot?.[name];
         const hasRenderableSize = existingRect.width > 0 && existingRect.height > 0;
         const safeSnapshotPos = hasRenderableSize ? snapshotPos : null;
+        const safeFallbackPos = hasRenderableSize
+          ? {
+            x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
+            y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
+          }
+          : { x: 16 + panelIndex * 22, y: 68 + panelIndex * 18 };
         const pos = state.loosePanelPositions[name]
           || safeSnapshotPos
-          || {
-          x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
-          y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
-        };
+          || safeFallbackPos;
         const clamped = clampLoosePosition(pos.x, pos.y, panel, scale, shellRect);
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
-        hasPositionChanges = true;
+        panelIndex += 1;
       }
     } else {
       root.style.left = `${state.mergedRootPosition.left}px`;
@@ -7718,6 +7722,7 @@
   applyAppearance();
   setDisplayMode(state.displayMode);
   applySearchFilter();
+  saveSettings();
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
     if (!moduleInstance || moduleInstance.enabled) continue;
