@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.5.8
+// @version      2.5.9
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.5.8";
+    const CLIENT_VERSION = "2.5.9";
     return CLIENT_VERSION;
   }
 
@@ -6933,7 +6933,6 @@
     }
 
     state.displayMode = nextMode;
-    console.log(LOG, "current display mode", state.displayMode);
     shell.classList.toggle("loose-mode", state.displayMode === "loose");
 
     for (const btn of displayModeButtons) {
