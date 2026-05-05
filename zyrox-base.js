@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.5.0
+// @version      2.5.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.5.0";
+    const CLIENT_VERSION = "2.5.1";
     return CLIENT_VERSION;
   }
 
@@ -7513,41 +7513,10 @@
   });
 
   settingsResetAllBtn.addEventListener("click", () => {
-    // Nuke localStorage
+    // Hard reset: remove persisted state and fully reload to rebuild UI from defaults.
     try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
-
-    // Reset module enabled state
-    for (const moduleName of [...state.enabledModules]) {
-      toggleModule(moduleName); // toggles off
-    }
-    state.enabledModules.clear();
-    for (const [, item] of state.moduleItems) item.classList.remove("active");
-
-    // Reset all module configs (keybinds + settings)
-    state.moduleConfig = new Map();
-
-    // Reset keybind labels
-    for (const [moduleName, item] of state.moduleItems) {
-      setBindLabel(item, moduleName);
-    }
-
-    // Reset menu keybind
-    CONFIG.toggleKey = CONFIG.defaultToggleKey;
-    settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
-    setFooterText();
-
-    hasPositionChanges = false;
-    hasSizeChanges = false;
-    dragState = null;
-    resizeState = null;
-    panelDragState.panelName = null;
-
-    // Reset search autofocus
-    state.searchAutofocus = true;
-    searchAutofocusInput.checked = true;
-
-    // Trigger the full appearance reset too
-    settingsResetBtn.click();
+    try { closeConfig(); } catch (_) {}
+    window.location.reload();
   });
 
   function saveSettings(showFeedback = false) {
