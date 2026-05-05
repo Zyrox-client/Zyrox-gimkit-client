@@ -6889,6 +6889,13 @@
     };
   }
 
+  const LOG = "[Zyrox]";
+  let dragState = null;
+  let resizeState = null;
+  let hasPositionChanges = false;
+  let hasSizeChanges = false;
+
+  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
 
   function normalizeDisplayMode(value) {
     return value === "merged" ? "merged" : "loose";
@@ -7830,13 +7837,6 @@
   });
 
   // Intentionally no backdrop click-to-close; menus close only via explicit close buttons.
-
-  let dragState = null;
-  let resizeState = null;
-  let hasPositionChanges = false;
-  let hasSizeChanges = false;
-
-  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
 
   topbar.addEventListener("mousedown", (event) => {
     const interactiveTarget = event.target instanceof Element
