@@ -20,7 +20,7 @@ More browser extension versions (probablyy) coming soon (not for chrome sadly, b
 ## Download/Install
 **Install as extension:**
 
-<a href="https://addons.mozilla.org/addon/zyrox-client-for-gimkit"><img src="https://blog.mozilla.org/opendesign/files/2018/07/firefox-logo.png" alt="Firefox logo" width="75"/></a>
+<a href="https://addons.mozilla.org/addon/zyrox-client-for-gimkit"><img src="https://blog.mozilla.org/opendesign/files/2018/07/firefox-logo.png" alt="Firefox logo" width="60"/></a>
 
 **Install as userscript:**
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
