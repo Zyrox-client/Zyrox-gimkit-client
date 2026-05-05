@@ -55,6 +55,7 @@ Or on the [GreasyFork feedback page](https://greasyfork.org/en/scripts/572408-zy
 - Add tutorial/introduction on first launch
 - Fix tab placement bug when adding new module (remove hide non working modules setting)
 - Improve appearance/preset (possibly)
+- Improve modules (ESP distance setting)
 - More modules (
     visual: freecam, zoomout. 
     floor is lava: autobuild. 
