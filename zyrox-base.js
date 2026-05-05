@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
-// @namespace    https://github.com/zyrox
-// @version      2.4.0
+// @namespace    https://github.com/Zyrox-client
+// @version      2.4.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.3.8";
+    const CLIENT_VERSION = "2.4.1";
     return CLIENT_VERSION;
   }
 
@@ -4450,8 +4450,12 @@
     ].join(";");
 
     card.innerHTML = `
-      <div style="font-size:24px;font-weight:800;margin-bottom:10px;">Zyrox client</div>
-      <div style="font-size:15px;opacity:.92;margin-bottom:14px;">Welcome to zyrox client: a modern hacked client / utility mod for gimkit.<br>Left-click to enable/disable a module.<br>Right-click to configure a modules settings.<br>'\' to hide/show the client.</div>
+      <div style="margin:-18px -20px 14px -20px;padding:10px 14px;border-radius:14px 14px 0 0;border-bottom:1px solid rgba(255,255,255,.18);background:linear-gradient(125deg, rgba(255, 74, 74, 0.24), rgba(56, 16, 16, 0.9));display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">Zyrox client</div>
+        <div style="font-size:12px;font-weight:700;opacity:.92;">v${CONFIG.version}</div>
+      </div>
+      <div style="font-size:24px;font-weight:800;margin-bottom:10px;"><b>Zyrox client</b></div>
+      <div style="font-size:15px;opacity:.92;margin-bottom:14px;">Welcome to zyrox client: a modern hacked client / utility mod for gimkit.<br><b>Left-click</b> to enable/disable a module.<br><b>Right-click</b> to configure a modules settings.<br><b>'\\'</b> to hide/show the client.</div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
         <a href="https://github.com/Zyrox-client/Zyrox-gimkit-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-weight:700;">github</a>
         <a href="https://coindrop.to/zyrox-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,70,70,.24);color:#fff;font-weight:700;">support us</a>
