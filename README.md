@@ -13,9 +13,16 @@
 
 Install the usercript <a href="https://zyrox-client.github.io/">here</a>.
 
-Browser extension version possibly coming soon (not for chrome sadly, because publishing on the chrome web store isnt free).
+More browser extension versions (probablyy) coming soon (not for chrome sadly, because publishing on the chrome web store isnt free).
+
+
 
 ## Download/Install
+**Install as extension:**
+
+<a href="https://addons.mozilla.org/addon/zyrox-client-for-gimkit"><img src="https://blog.mozilla.org/opendesign/files/2018/07/firefox-logo.png" alt="Firefox logo" width="75"/></a>
+
+**Install as userscript:**
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
 2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit).
 3. Open [gimkit.com/join](https://www.gimkit.com/join).
