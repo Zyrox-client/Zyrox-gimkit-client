@@ -4414,7 +4414,79 @@
   }
 
   // Defer all DOM work — WebSocket is already patched above at document-start.
+
+  const WELCOME_POPUP_STORAGE_KEY = "zyroxWelcomePopupSeenV1";
+
+  function showFirstLaunchWelcomePopup() {
+    try {
+      if (localStorage.getItem(WELCOME_POPUP_STORAGE_KEY) === "1") return;
+    } catch (_) {
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.style.cssText = [
+      "position:fixed",
+      "inset:0",
+      "background:rgba(0,0,0,.52)",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "z-index:2147483647",
+      "padding:18px",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
+    ].join(";");
+
+    const card = document.createElement("div");
+    card.style.cssText = [
+      "width:min(560px,100%)",
+      "border-radius:14px",
+      "border:1px solid rgba(255,255,255,.16)",
+      "background:linear-gradient(165deg,rgba(31,31,36,.98),rgba(10,10,14,.98))",
+      "box-shadow:0 20px 55px rgba(0,0,0,.5)",
+      "padding:18px 20px",
+      "color:#fff",
+      "line-height:1.45",
+    ].join(";");
+
+    card.innerHTML = `
+      <div style="margin:-18px -20px 14px -20px;padding:10px 14px;border-radius:14px 14px 0 0;border-bottom:1px solid rgba(255,255,255,.18);background:linear-gradient(125deg, rgba(255, 74, 74, 0.24), rgba(56, 16, 16, 0.9));display:flex;align-items:center;justify-content:space-between;gap:10px;">
+        <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">Zyrox client</div>
+        <div style="font-size:12px;font-weight:700;opacity:.92;">v${CONFIG.version}</div>
+      </div>
+      <div style="font-size:24px;font-weight:800;margin-bottom:10px;"><b>Zyrox client</b></div>
+      <div style="font-size:15px;opacity:.92;margin-bottom:14px;">Welcome to zyrox client: a modern hacked client / utility mod for gimkit.<br><b>Left-click</b> to enable/disable a module.<br><b>Right-click</b> to configure a modules settings.<br><b>'\\'</b> to hide/show the client.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+        <a href="https://github.com/Zyrox-client/Zyrox-gimkit-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:8px;">
+          <img src="https://github.githubassets.com/assets/pinned-octocat-093da3e6fa40.svg" alt="GitHub" style="width:16px;height:16px;display:block;">
+          <span>github</span>
+        </a>
+        <a href="https://coindrop.to/zyrox-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,70,70,.24);color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:8px;">
+          <img src="https://coindrop.to/favicon/favicon-32x32.png" alt="Coindrop" style="width:16px;height:16px;display:block;border-radius:4px;">
+          <span>support us</span>
+        </a>
+        <button type="button" id="zyrox-welcome-close" style="margin-left:auto;appearance:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer;">close</button>
+      </div>
+    `;
+
+    const close = () => {
+      try {
+        localStorage.setItem(WELCOME_POPUP_STORAGE_KEY, "1");
+      } catch (_) {}
+      overlay.remove();
+    };
+
+    card.querySelector("#zyrox-welcome-close")?.addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close();
+    });
+
+    overlay.appendChild(card);
+    document.documentElement.appendChild(overlay);
+  }
+
   function initUi() {
+    showFirstLaunchWelcomePopup();
 
   const style = document.createElement("style");
   style.textContent = `
