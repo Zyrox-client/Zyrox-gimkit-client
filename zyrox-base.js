@@ -5490,12 +5490,20 @@
               <div><b>Zyrox Client</b> is a custom opensource userscript hacked client for Gimkit with module toggles, keybinds, and theming controls.</div>
               <div>We are not responsible for any bans, account issues, data loss, or damages that may result from using this client. Use it at your own risk.</div>
               <div>Version: ${CONFIG.version}</div>
-              <a
-                class="zyrox-btn zyrox-about-source-btn"
-                href="https://github.com/Zyrox-client/Zyrox-gimkit-client"
-                target="_blank"
-                rel="noopener noreferrer"
-              >View Source Code</a>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <a
+                  class="zyrox-btn zyrox-about-source-btn"
+                  href="https://github.com/Zyrox-client/Zyrox-gimkit-client"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >View Source Code</a>
+                <a
+                  class="zyrox-btn zyrox-about-source-btn"
+                  href="https://coindrop.to/zyrox-client"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >Support Us</a>
+              </div>
             </div>
           </div>
         </div>
