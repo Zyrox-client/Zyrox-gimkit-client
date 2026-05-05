@@ -6937,8 +6937,11 @@
 
       for (const [name, panel] of panelByName.entries()) {
         const existingRect = panel.getBoundingClientRect();
+        const snapshotPos = mergedSnapshot?.[name];
+        const hasRenderableSize = existingRect.width > 0 && existingRect.height > 0;
+        const safeSnapshotPos = hasRenderableSize ? snapshotPos : null;
         const pos = state.loosePanelPositions[name]
-          || mergedSnapshot?.[name]
+          || safeSnapshotPos
           || {
           x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
           y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
@@ -7532,6 +7535,12 @@
     CONFIG.toggleKey = CONFIG.defaultToggleKey;
     settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
     setFooterText();
+
+    hasPositionChanges = false;
+    hasSizeChanges = false;
+    dragState = null;
+    resizeState = null;
+    panelDragState.panelName = null;
 
     // Reset search autofocus
     state.searchAutofocus = true;
