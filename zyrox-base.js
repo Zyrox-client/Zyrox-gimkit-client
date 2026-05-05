@@ -6922,6 +6922,8 @@
     }
 
     if (state.displayMode === "loose") {
+      shell.style.width = "";
+      shell.style.height = "";
       state.mergedRootPosition = {
         left: parseInt(root.style.left || "20", 10),
         top: parseInt(root.style.top || "28", 10),
@@ -7673,7 +7675,8 @@
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
         assign(hoverShiftInput, "hoverShift");
-        if (saved.displayMode) state.displayMode = saved.displayMode === "loose" ? "loose" : "merged";
+        // Temporarily force loose mode on load because merged mode state has been unstable.
+        state.displayMode = "loose";
         if (typeof saved.looseInitialized === "boolean") state.looseInitialized = saved.looseInitialized;
         if (saved.loosePositions && typeof saved.loosePositions === "object") {
           state.loosePositions = {
@@ -7725,7 +7728,8 @@
   renderHiddenCategorySettings();
   syncCollapseButtons();
   applyAppearance();
-  setDisplayMode(state.displayMode);
+  state.displayMode = "loose";
+  setDisplayMode("loose");
   applySearchFilter();
   saveSettings();
   for (const moduleName of pendingEnabledModules) {
