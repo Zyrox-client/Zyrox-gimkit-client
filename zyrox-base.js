@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Zyrox cheat client (gimkit)
+// @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
 // @version      2.4.7
 // @description  A modern userscript hacked client for gimkit
