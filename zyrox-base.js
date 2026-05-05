@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.5.7
+// @version      2.5.8
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.5.7";
+    const CLIENT_VERSION = "2.5.8";
     return CLIENT_VERSION;
   }
 
@@ -1223,7 +1223,6 @@
         if (typeof fieldValue !== "string") continue;
         const answer = fieldValue.trim();
         if (!answer) continue;
-        console.log(answer);
         applyDrawItAnswerReveal(answer);
         if (answerPopupState.enabled) showAnswerPopup(answer);
       }
@@ -6889,7 +6888,6 @@
     };
   }
 
-  const LOG = "[Zyrox]";
   let dragState = null;
   let resizeState = null;
   let hasPositionChanges = false;
@@ -6926,7 +6924,6 @@
 
   function setDisplayMode(mode) {
     const nextMode = normalizeDisplayMode(mode);
-    console.log(LOG, "setDisplayMode", { requested: mode, nextMode, previous: state.displayMode });
     const mergedSnapshot = nextMode === "loose" ? getMergedPanelPositionsSnapshot() : null;
 
     if (nextMode === "loose" && !state.looseInitialized) {
@@ -7557,7 +7554,6 @@
     try {
       const payload = collectSettings();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      console.log(LOG, "saveSettings success", { displayMode: payload.displayMode });
       if (showFeedback) {
         settingsSaveBtn.textContent = "Saved";
         setTimeout(() => {
@@ -7565,7 +7561,7 @@
         }, 850);
       }
     } catch (error) {
-      console.error(LOG, "saveSettings failed", error);
+      console.error(error);
       if (showFeedback) {
         settingsSaveBtn.textContent = "Save failed";
         setTimeout(() => {
@@ -7654,7 +7650,6 @@
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && typeof saved === "object") {
-        console.log(LOG, "loaded saved settings", { displayMode: saved.displayMode });
         if (saved.toggleKey) CONFIG.toggleKey = saved.toggleKey;
         if (typeof saved.globalPreset === "string") state.globalPreset = normalizePopupPresetName(saved.globalPreset);
         if (typeof saved.searchAutofocus === "boolean") {
@@ -7759,7 +7754,6 @@
   syncCollapseButtons();
   applyAppearance();
   setDisplayMode(state.displayMode);
-  console.log(LOG, "display mode after init", state.displayMode);
   applySearchFilter();
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
