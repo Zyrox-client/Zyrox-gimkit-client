@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.5.4
+// @version      2.5.8
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.5.4";
+    const CLIENT_VERSION = "2.5.8";
     return CLIENT_VERSION;
   }
 
@@ -1223,7 +1223,6 @@
         if (typeof fieldValue !== "string") continue;
         const answer = fieldValue.trim();
         if (!answer) continue;
-        console.log(answer);
         applyDrawItAnswerReveal(answer);
         if (answerPopupState.enabled) showAnswerPopup(answer);
       }
@@ -1318,7 +1317,7 @@
 
   const autoAnswerModule = new Module("Auto Answer", {
     onEnable: () => {
-      console.log("Auto Answer enabled");
+      .log("Auto Answer enabled");
       autoAnswerEnabled = true;
     },
     onDisable: () => {
@@ -6934,6 +6933,7 @@
     }
 
     state.displayMode = nextMode;
+    console.log(LOG, "current display mode", state.displayMode);
     shell.classList.toggle("loose-mode", state.displayMode === "loose");
 
     for (const btn of displayModeButtons) {
