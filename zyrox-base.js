@@ -7400,7 +7400,10 @@
   blurInput.addEventListener("input", applyAppearance);
   hoverShiftInput.addEventListener("input", applyAppearance);
   displayModeButtons.forEach((btn) => {
-    btn.addEventListener("click", () => setDisplayMode(btn.dataset.displayMode || "merged"));
+    btn.addEventListener("click", () => {
+      setDisplayMode(btn.dataset.displayMode || "merged");
+      saveSettings();
+    });
   });
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
