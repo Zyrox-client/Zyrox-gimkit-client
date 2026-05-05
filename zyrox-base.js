@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.4.1
+// @version      2.4.2
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.4.1";
+    const CLIENT_VERSION = "2.4.2";
     return CLIENT_VERSION;
   }
 
@@ -4457,8 +4457,14 @@
       <div style="font-size:24px;font-weight:800;margin-bottom:10px;"><b>Zyrox client</b></div>
       <div style="font-size:15px;opacity:.92;margin-bottom:14px;">Welcome to zyrox client: a modern hacked client / utility mod for gimkit.<br><b>Left-click</b> to enable/disable a module.<br><b>Right-click</b> to configure a modules settings.<br><b>'\\'</b> to hide/show the client.</div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
-        <a href="https://github.com/Zyrox-client/Zyrox-gimkit-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-weight:700;">github</a>
-        <a href="https://coindrop.to/zyrox-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,70,70,.24);color:#fff;font-weight:700;">support us</a>
+        <a href="https://github.com/Zyrox-client/Zyrox-gimkit-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:8px;">
+          <img src="https://github.githubassets.com/assets/pinned-octocat-093da3e6fa40.svg" alt="GitHub" style="width:16px;height:16px;display:block;">
+          <span>github</span>
+        </a>
+        <a href="https://coindrop.to/zyrox-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,70,70,.24);color:#fff;font-weight:700;display:inline-flex;align-items:center;gap:8px;">
+          <img src="https://coindrop.to/favicon/favicon-32x32.png" alt="Coindrop" style="width:16px;height:16px;display:block;border-radius:4px;">
+          <span>support us</span>
+        </a>
         <button type="button" id="zyrox-welcome-close" style="margin-left:auto;appearance:none;padding:9px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#fff;font-weight:700;cursor:pointer;">close</button>
       </div>
     `;
