@@ -5215,6 +5215,16 @@
       line-height: 1.1;
       white-space: nowrap;
     }
+    .zyrox-config-header-actions {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: inline-flex;
+      gap: 6px;
+    }
+    .zyrox-config-header-actions .zyrox-close-btn {
+      position: static;
+    }
     .zyrox-close-btn {
       position: absolute;
       top: 10px;
@@ -5364,7 +5374,10 @@
       <div class="zyrox-config-title">Module Config</div>
       <div class="zyrox-config-sub">Configure this module.</div>
     </div>
-    <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
+    <div class="zyrox-config-header-actions">
+      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">↺</button>
+      <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
+    </div>
     <div class="zyrox-config-body">
       <div class="zyrox-config-row">
         <span>Keybind</span>
@@ -5712,6 +5725,7 @@
   const settingsResetAllBtn = settingsMenu.querySelector(".settings-reset-all");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   const panelByName = new Map();
+  const configResetBtn = configMenu.querySelector(".config-reset-btn");
   const panelCollapseButtons = new Map();
   let openConfigModule = null;
   let currentSetBindBtn = null;
@@ -5931,6 +5945,26 @@
       }
     }
     return answers;
+  }
+
+
+  function resetModuleConfig(moduleName) {
+    if (!moduleName) return;
+    const store = ensureModuleConfigStore();
+    store.delete(moduleName);
+    const freshCfg = moduleCfg(moduleName);
+    const module = state.modules.get(moduleName);
+    const behavior = MODULE_BEHAVIORS[moduleName];
+    if (module?.enabled) {
+      try { behavior?.onDisable?.(); } catch (error) { console.error(`[Zyrox] ${moduleName} failed to disable during config reset`, error); }
+      try { behavior?.onEnable?.(); } catch (error) { console.error(`[Zyrox] ${moduleName} failed to re-enable during config reset`, error); }
+    }
+    const item = state.moduleItems.get(moduleName);
+    if (item) setBindLabel(item, moduleName);
+    setCurrentBindText(freshCfg.keybind || null);
+    state.listeningForBind = null;
+    setBindButtonText("Set keybind");
+    saveSettings();
   }
 
   function closeConfig() {
@@ -7700,6 +7734,12 @@
 
   settingsCloseBtn.addEventListener("click", () => {
     closeConfig();
+  });
+  configResetBtn?.addEventListener("click", () => {
+    if (!openConfigModule) return;
+    const moduleName = openConfigModule;
+    resetModuleConfig(moduleName);
+    openConfig(moduleName);
   });
   configCloseBtn.addEventListener("click", () => closeConfig());
   settingsTopCloseBtn.addEventListener("click", () => closeConfig());
