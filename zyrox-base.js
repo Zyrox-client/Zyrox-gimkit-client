@@ -1545,13 +1545,21 @@
     startUnifiedRenderLoop();
   }
 
-  function stopCameraZoom() {
-    if (!cameraZoomState.enabled) return;
-    cameraZoomState.enabled = false;
+  function hideCameraZoomToast() {
     if (cameraZoomState.toastTimeoutId) {
       clearTimeout(cameraZoomState.toastTimeoutId);
       cameraZoomState.toastTimeoutId = null;
     }
+    if (cameraZoomState.toastEl?.isConnected) {
+      cameraZoomState.toastEl.style.opacity = "0";
+      cameraZoomState.toastEl.style.transform = "translate(-50%,8px)";
+    }
+  }
+
+  function stopCameraZoom() {
+    if (!cameraZoomState.enabled) return;
+    cameraZoomState.enabled = false;
+    hideCameraZoomToast();
     const camera = resolvePrimaryCamera();
     const restoreZoom = Number(
       camera && cameraZoomState.baselineByCamera.has(camera)
@@ -4812,7 +4820,7 @@
     }
 
     .zyrox-brand .title { font-size: 13px; font-weight: 700; line-height: 1; }
-    .zyrox-brand .subtitle { font-size: 11px; font-weight: 500; color: rgba(255,255,255,.7); }
+    .zyrox-brand .subtitle { font-size: 10px; font-weight: 500; color: rgba(255,255,255,.7); }
 
     .zyrox-chip {
       font-size: 10px;
@@ -4825,7 +4833,7 @@
     }
 
     .zyrox-keybind-btn {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--zyx-icon-color);
       background: rgba(0, 0, 0, 0.35);
       border: 1px solid var(--zyx-outline-color);
@@ -4870,7 +4878,7 @@
 
     .zyrox-section { display: flex; flex-direction: column; gap: 7px; }
     .zyrox-section-label {
-      font-size: 11px;
+      font-size: 10px;
       letter-spacing: 0.25px;
       color: var(--zyx-accent-soft);
       padding-left: 2px;
@@ -5013,7 +5021,7 @@
       align-items: center;
       gap: 10px;
       color: var(--zyx-muted);
-      font-size: 11px;
+      font-size: 10px;
       padding: 0 3px;
     }
 
@@ -5176,14 +5184,14 @@
       color: var(--zyx-select-text);
     }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
-    .zyrox-preset-header { font-size: 11px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
+    .zyrox-preset-header { font-size: 10px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
     .zyrox-preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
-    .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+    .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 10px; cursor: pointer; }
     .zyrox-preset-btn .preset-swatch { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; border:1px solid rgba(255,255,255,.3); vertical-align:-1px; }
     .zyrox-preset-btn:hover { background: var(--zyx-btn-hover-bg); }
     .zyrox-subheading {
       grid-column: 1 / -1;
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.25px;
       color: var(--zyx-accent-soft);
@@ -5214,6 +5222,23 @@
       min-height: 31px;
       line-height: 1.1;
       white-space: nowrap;
+    }
+    .zyrox-config-header-actions {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: inline-flex;
+      gap: 6px;
+    }
+    .zyrox-config-header-actions .zyrox-close-btn {
+      position: static;
+    }
+    .config-reset-btn {
+      width: auto;
+      min-width: 56px;
+      padding: 0 6px;
+      font-size: 10px;
+      text-transform: lowercase;
     }
     .zyrox-close-btn {
       position: absolute;
@@ -5276,7 +5301,7 @@
       border: 1px solid rgba(255,255,255,.12);
       border-radius: 8px;
       padding: 8px 10px;
-      font-size: 11px;
+      font-size: 10px;
       color: var(--zyx-settings-text);
       background: rgba(0,0,0,.2);
       text-align: left;
@@ -5364,7 +5389,10 @@
       <div class="zyrox-config-title">Module Config</div>
       <div class="zyrox-config-sub">Configure this module.</div>
     </div>
-    <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
+    <div class="zyrox-config-header-actions">
+      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">reset</button>
+      <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
+    </div>
     <div class="zyrox-config-body">
       <div class="zyrox-config-row">
         <span>Keybind</span>
@@ -5712,6 +5740,7 @@
   const settingsResetAllBtn = settingsMenu.querySelector(".settings-reset-all");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   const panelByName = new Map();
+  const configResetBtn = configMenu.querySelector(".config-reset-btn");
   const panelCollapseButtons = new Map();
   let openConfigModule = null;
   let currentSetBindBtn = null;
@@ -5931,6 +5960,26 @@
       }
     }
     return answers;
+  }
+
+
+  function resetModuleConfig(moduleName) {
+    if (!moduleName) return;
+    const store = ensureModuleConfigStore();
+    store.delete(moduleName);
+    const freshCfg = moduleCfg(moduleName);
+    const module = state.modules.get(moduleName);
+    const behavior = MODULE_BEHAVIORS[moduleName];
+    if (module?.enabled) {
+      try { behavior?.onDisable?.(); } catch (error) { console.error(`[Zyrox] ${moduleName} failed to disable during config reset`, error); }
+      try { behavior?.onEnable?.(); } catch (error) { console.error(`[Zyrox] ${moduleName} failed to re-enable during config reset`, error); }
+    }
+    const item = state.moduleItems.get(moduleName);
+    if (item) setBindLabel(item, moduleName);
+    setCurrentBindText(freshCfg.keybind || null);
+    state.listeningForBind = null;
+    setBindButtonText("Set keybind");
+    saveSettings();
   }
 
   function closeConfig() {
@@ -7700,6 +7749,12 @@
 
   settingsCloseBtn.addEventListener("click", () => {
     closeConfig();
+  });
+  configResetBtn?.addEventListener("click", () => {
+    if (!openConfigModule) return;
+    const moduleName = openConfigModule;
+    resetModuleConfig(moduleName);
+    openConfig(moduleName);
   });
   configCloseBtn.addEventListener("click", () => closeConfig());
   settingsTopCloseBtn.addEventListener("click", () => closeConfig());
