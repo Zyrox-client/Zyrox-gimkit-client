@@ -1545,13 +1545,21 @@
     startUnifiedRenderLoop();
   }
 
-  function stopCameraZoom() {
-    if (!cameraZoomState.enabled) return;
-    cameraZoomState.enabled = false;
+  function hideCameraZoomToast() {
     if (cameraZoomState.toastTimeoutId) {
       clearTimeout(cameraZoomState.toastTimeoutId);
       cameraZoomState.toastTimeoutId = null;
     }
+    if (cameraZoomState.toastEl?.isConnected) {
+      cameraZoomState.toastEl.style.opacity = "0";
+      cameraZoomState.toastEl.style.transform = "translate(-50%,8px)";
+    }
+  }
+
+  function stopCameraZoom() {
+    if (!cameraZoomState.enabled) return;
+    cameraZoomState.enabled = false;
+    hideCameraZoomToast();
     const camera = resolvePrimaryCamera();
     const restoreZoom = Number(
       camera && cameraZoomState.baselineByCamera.has(camera)
