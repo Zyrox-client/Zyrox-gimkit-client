@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.6.0
+// @version      2.6.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.6.0";
+    const CLIENT_VERSION = "2.6.1";
     return CLIENT_VERSION;
   }
 
@@ -1419,6 +1419,7 @@
     enabled: false,
     originalZoom: null,
     cameraRef: null,
+    baselineByCamera: new WeakMap(),
     toastTimeoutId: null,
     toastEl: null,
     lastToastValue: null,
@@ -1517,9 +1518,19 @@
     if (!camera) return;
     if (camera !== cameraZoomState.cameraRef) {
       cameraZoomState.cameraRef = camera;
-      cameraZoomState.originalZoom = Number(camera?.zoom ?? 1) || 1;
+      const baselineZoom = Number(camera?.zoom ?? 1);
+      if (Number.isFinite(baselineZoom) && baselineZoom > 0) {
+        cameraZoomState.originalZoom = baselineZoom;
+        cameraZoomState.baselineByCamera.set(camera, baselineZoom);
+      } else {
+        cameraZoomState.originalZoom = 1;
+      }
     }
-    if (Math.abs((Number(camera?.zoom ?? 1) || 1) - desiredZoom) > 1e-4) camera.zoom = desiredZoom;
+    const currentZoom = Number(camera?.zoom ?? 1) || 1;
+    if (Math.abs(currentZoom - desiredZoom) > 1e-4) {
+      if (typeof camera?.setZoom === "function") camera.setZoom(desiredZoom);
+      else camera.zoom = desiredZoom;
+    }
   }
 
   function startCameraZoom() {
@@ -1539,9 +1550,17 @@
       cameraZoomState.toastTimeoutId = null;
     }
     const camera = resolvePrimaryCamera();
-    const restoreZoom = Number(cameraZoomState.originalZoom);
-    if (camera && Number.isFinite(restoreZoom) && Math.abs((Number(camera.zoom ?? 1) || 1) - restoreZoom) > 1e-4) {
-      camera.zoom = restoreZoom;
+    const restoreZoom = Number(
+      camera && cameraZoomState.baselineByCamera.has(camera)
+        ? cameraZoomState.baselineByCamera.get(camera)
+        : cameraZoomState.originalZoom,
+    );
+    if (camera === cameraZoomState.cameraRef && Number.isFinite(restoreZoom) && restoreZoom > 0.2 && restoreZoom < 5) {
+      const currentZoom = Number(camera.zoom ?? 1) || 1;
+      if (Math.abs(currentZoom - restoreZoom) > 1e-4) {
+        if (typeof camera?.setZoom === "function") camera.setZoom(restoreZoom);
+        else camera.zoom = restoreZoom;
+      }
     }
     cameraZoomState.originalZoom = null;
     cameraZoomState.cameraRef = null;
