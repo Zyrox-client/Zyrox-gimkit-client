@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.6.5
+// @version      2.6.6
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.6.5";
+    const CLIENT_VERSION = "2.6.6";
     return CLIENT_VERSION;
   }
 
@@ -4820,7 +4820,7 @@
     }
 
     .zyrox-brand .title { font-size: 13px; font-weight: 700; line-height: 1; }
-    .zyrox-brand .subtitle { font-size: 11px; font-weight: 500; color: rgba(255,255,255,.7); }
+    .zyrox-brand .subtitle { font-size: 10px; font-weight: 500; color: rgba(255,255,255,.7); }
 
     .zyrox-chip {
       font-size: 10px;
@@ -4833,7 +4833,7 @@
     }
 
     .zyrox-keybind-btn {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--zyx-icon-color);
       background: rgba(0, 0, 0, 0.35);
       border: 1px solid var(--zyx-outline-color);
@@ -4878,7 +4878,7 @@
 
     .zyrox-section { display: flex; flex-direction: column; gap: 7px; }
     .zyrox-section-label {
-      font-size: 11px;
+      font-size: 10px;
       letter-spacing: 0.25px;
       color: var(--zyx-accent-soft);
       padding-left: 2px;
@@ -5021,7 +5021,7 @@
       align-items: center;
       gap: 10px;
       color: var(--zyx-muted);
-      font-size: 11px;
+      font-size: 10px;
       padding: 0 3px;
     }
 
@@ -5184,14 +5184,14 @@
       color: var(--zyx-select-text);
     }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
-    .zyrox-preset-header { font-size: 11px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
+    .zyrox-preset-header { font-size: 10px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
     .zyrox-preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
-    .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
+    .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 10px; cursor: pointer; }
     .zyrox-preset-btn .preset-swatch { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; border:1px solid rgba(255,255,255,.3); vertical-align:-1px; }
     .zyrox-preset-btn:hover { background: var(--zyx-btn-hover-bg); }
     .zyrox-subheading {
       grid-column: 1 / -1;
-      font-size: 11px;
+      font-size: 10px;
       text-transform: uppercase;
       letter-spacing: 0.25px;
       color: var(--zyx-accent-soft);
@@ -5235,9 +5235,9 @@
     }
     .config-reset-btn {
       width: auto;
-      min-width: 88px;
-      padding: 0 8px;
-      font-size: 11px;
+      min-width: 56px;
+      padding: 0 6px;
+      font-size: 10px;
       text-transform: lowercase;
     }
     .zyrox-close-btn {
@@ -5301,7 +5301,7 @@
       border: 1px solid rgba(255,255,255,.12);
       border-radius: 8px;
       padding: 8px 10px;
-      font-size: 11px;
+      font-size: 10px;
       color: var(--zyx-settings-text);
       background: rgba(0,0,0,.2);
       text-align: left;
@@ -5390,7 +5390,7 @@
       <div class="zyrox-config-sub">Configure this module.</div>
     </div>
     <div class="zyrox-config-header-actions">
-      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">reset config</button>
+      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">reset</button>
       <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
     </div>
     <div class="zyrox-config-body">
