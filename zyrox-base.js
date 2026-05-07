@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.6.2
+// @version      2.6.3
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.6.2";
+    const CLIENT_VERSION = "2.6.3";
     return CLIENT_VERSION;
   }
 
@@ -1424,11 +1424,11 @@
     toastEl: null,
     lastToastValue: null,
   };
-  const CAMERA_ZOOM_MODULE_NAME = "Camera Zoom";
-  const CAMERA_ZOOM_MIN = 0.35;
+  const CAMERA_ZOOM_MODULE_NAME = "Zoom (FOV)";
+  const CAMERA_ZOOM_MIN = 0.4;
   const CAMERA_ZOOM_MAX = 2.0;
   const CAMERA_ZOOM_STEP = 0.05;
-  const CAMERA_ZOOM_DEFAULT = 1.0;
+  const CAMERA_ZOOM_DEFAULT = 0.9;
 
   function espLog(message, extra) {
     if (extra !== undefined) console.log(`${ESP_LOG} ${message}`, extra);
@@ -4191,7 +4191,7 @@
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
     "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
     "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
-    [CAMERA_ZOOM_MODULE_NAME]: "Adjusts the 2D in-game camera zoom safely without changing camera position.",
+    [CAMERA_ZOOM_MODULE_NAME]: "Adjust how much you can see on the screen",
   };
 
   // --- End of Core Utilities ---
