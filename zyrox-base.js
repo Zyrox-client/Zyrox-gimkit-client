@@ -1415,6 +1415,20 @@
     rafId: null,
     running: false,
   };
+  const cameraZoomState = {
+    enabled: false,
+    originalZoom: null,
+    cameraRef: null,
+    baselineByCamera: new WeakMap(),
+    toastTimeoutId: null,
+    toastEl: null,
+    lastToastValue: null,
+  };
+  const CAMERA_ZOOM_MODULE_NAME = "Camera Zoom";
+  const CAMERA_ZOOM_MIN = 0.35;
+  const CAMERA_ZOOM_MAX = 2.0;
+  const CAMERA_ZOOM_STEP = 0.05;
+  const CAMERA_ZOOM_DEFAULT = 1.0;
 
   function espLog(message, extra) {
     if (extra !== undefined) console.log(`${ESP_LOG} ${message}`, extra);
@@ -1462,6 +1476,95 @@
     espState.canvas.width = window.innerWidth;
     espState.canvas.height = window.innerHeight;
     espLog(`Canvas resized to ${espState.canvas.width}x${espState.canvas.height}`);
+  }
+
+  function clampCameraZoom(value) {
+    return Math.min(CAMERA_ZOOM_MAX, Math.max(CAMERA_ZOOM_MIN, Number(value) || CAMERA_ZOOM_DEFAULT));
+  }
+
+  function resolvePrimaryCamera() {
+    return window?.stores?.phaser?.scene?.cameras?.cameras?.[0] || null;
+  }
+
+  function ensureCameraZoomToast() {
+    if (cameraZoomState.toastEl?.isConnected) return cameraZoomState.toastEl;
+    const toast = document.createElement("div");
+    toast.style.cssText = "position:fixed;left:50%;bottom:36px;transform:translate(-50%,8px);background:rgba(8,12,20,.82);border:1px solid rgba(255,255,255,.22);color:#fff;padding:6px 10px;border-radius:8px;font:600 12px Inter,system-ui,sans-serif;z-index:2147483647;opacity:0;pointer-events:none;transition:opacity .15s ease,transform .15s ease;";
+    document.documentElement.appendChild(toast);
+    cameraZoomState.toastEl = toast;
+    return toast;
+  }
+
+  function showCameraZoomToast(zoomValue) {
+    const rounded = Math.round(clampCameraZoom(zoomValue) * 100) / 100;
+    if (cameraZoomState.lastToastValue === rounded) return;
+    cameraZoomState.lastToastValue = rounded;
+    const toast = ensureCameraZoomToast();
+    toast.textContent = `Zoom: ${rounded.toFixed(2)}x`;
+    toast.style.opacity = "1";
+    toast.style.transform = "translate(-50%,0)";
+    if (cameraZoomState.toastTimeoutId) clearTimeout(cameraZoomState.toastTimeoutId);
+    cameraZoomState.toastTimeoutId = setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translate(-50%,8px)";
+    }, 900);
+  }
+
+  function applyCameraZoomTick() {
+    const cfg = moduleCfg(CAMERA_ZOOM_MODULE_NAME);
+    const desiredZoom = clampCameraZoom(cfg.zoom ?? CAMERA_ZOOM_DEFAULT);
+    if (Number(cfg.zoom) !== desiredZoom) cfg.zoom = desiredZoom;
+    const camera = resolvePrimaryCamera();
+    if (!camera) return;
+    if (camera !== cameraZoomState.cameraRef) {
+      cameraZoomState.cameraRef = camera;
+      const baselineZoom = Number(camera?.zoom ?? 1);
+      if (Number.isFinite(baselineZoom) && baselineZoom > 0) {
+        cameraZoomState.originalZoom = baselineZoom;
+        cameraZoomState.baselineByCamera.set(camera, baselineZoom);
+      } else {
+        cameraZoomState.originalZoom = 1;
+      }
+    }
+    const currentZoom = Number(camera?.zoom ?? 1) || 1;
+    if (Math.abs(currentZoom - desiredZoom) > 1e-4) {
+      if (typeof camera?.setZoom === "function") camera.setZoom(desiredZoom);
+      else camera.zoom = desiredZoom;
+    }
+  }
+
+  function startCameraZoom() {
+    if (cameraZoomState.enabled) return;
+    cameraZoomState.enabled = true;
+    cameraZoomState.cameraRef = null;
+    cameraZoomState.originalZoom = null;
+    cameraZoomState.lastToastValue = null;
+    startUnifiedRenderLoop();
+  }
+
+  function stopCameraZoom() {
+    if (!cameraZoomState.enabled) return;
+    cameraZoomState.enabled = false;
+    if (cameraZoomState.toastTimeoutId) {
+      clearTimeout(cameraZoomState.toastTimeoutId);
+      cameraZoomState.toastTimeoutId = null;
+    }
+    const camera = resolvePrimaryCamera();
+    const restoreZoom = Number(
+      camera && cameraZoomState.baselineByCamera.has(camera)
+        ? cameraZoomState.baselineByCamera.get(camera)
+        : cameraZoomState.originalZoom,
+    );
+    if (camera === cameraZoomState.cameraRef && Number.isFinite(restoreZoom) && restoreZoom > 0.2 && restoreZoom < 5) {
+      const currentZoom = Number(camera.zoom ?? 1) || 1;
+      if (Math.abs(currentZoom - restoreZoom) > 1e-4) {
+        if (typeof camera?.setZoom === "function") camera.setZoom(restoreZoom);
+        else camera.zoom = restoreZoom;
+      }
+    }
+    cameraZoomState.originalZoom = null;
+    cameraZoomState.cameraRef = null;
+    stopUnifiedRenderLoopIfIdle();
   }
 
   async function resolveEspStores() {
@@ -2959,6 +3062,7 @@
     if (crosshairState.enabled) runTimedModule("crosshair", renderCrosshairFrame);
     if (autoAimState.enabled) runTimedModule("autoAim", autoAimTick);
     if (triggerAssistState.enabled) runTimedModule("triggerAssist", triggerAssistTick);
+    if (cameraZoomState.enabled) runTimedModule("cameraZoom", applyCameraZoomTick);
 
     unifiedRenderState.rafId = requestAnimationFrame(unifiedRenderTick);
   }
@@ -2970,7 +3074,7 @@
   }
 
   function stopUnifiedRenderLoopIfIdle() {
-    if (espState.enabled || crosshairState.enabled || autoAimState.enabled || triggerAssistState.enabled) return;
+    if (espState.enabled || crosshairState.enabled || autoAimState.enabled || triggerAssistState.enabled || cameraZoomState.enabled) return;
     unifiedRenderState.running = false;
     if (unifiedRenderState.rafId != null) {
       cancelAnimationFrame(unifiedRenderState.rafId);
@@ -4067,6 +4171,10 @@
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
     },
+    [CAMERA_ZOOM_MODULE_NAME]: {
+      onEnable: startCameraZoom,
+      onDisable: stopCameraZoom,
+    },
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
@@ -4080,6 +4188,7 @@
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
     "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
     "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
+    [CAMERA_ZOOM_MODULE_NAME]: "Adjusts the 2D in-game camera zoom safely without changing camera position.",
   };
 
   // --- End of Core Utilities ---
@@ -4153,6 +4262,13 @@
                     { value: "modern", label: "Modern Arrow" },
                   ],
                 },
+              ],
+            },
+            {
+              name: CAMERA_ZOOM_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[CAMERA_ZOOM_MODULE_NAME],
+              settings: [
+                { id: "zoom", label: "Zoom", type: "slider", min: CAMERA_ZOOM_MIN, max: CAMERA_ZOOM_MAX, step: CAMERA_ZOOM_STEP, default: CAMERA_ZOOM_DEFAULT, unit: "x" },
               ],
             },
           ],
@@ -6635,6 +6751,11 @@
                 lavaBuildingHudState.config.hudSize = newVal;
                 renderLavaBuildingHud();
               }
+              if (moduleName === CAMERA_ZOOM_MODULE_NAME && setting.id === "zoom") {
+                cfg.zoom = clampCameraZoom(newVal);
+                if (valueLabel) valueLabel.textContent = `${cfg.zoom}${valueUnit}`;
+                if (state.enabledModules.has(CAMERA_ZOOM_MODULE_NAME)) showCameraZoomToast(cfg.zoom);
+              }
               saveSettings();
             });
           }
@@ -7821,6 +7942,26 @@
     }
 
     if (isTypingTarget(event.target)) return;
+
+    if (state.enabledModules.has(CAMERA_ZOOM_MODULE_NAME)) {
+      const cfg = moduleCfg(CAMERA_ZOOM_MODULE_NAME);
+      let nextZoom = Number(cfg.zoom ?? CAMERA_ZOOM_DEFAULT) || CAMERA_ZOOM_DEFAULT;
+      if (event.key === "[") {
+        event.preventDefault();
+        nextZoom = clampCameraZoom(nextZoom - CAMERA_ZOOM_STEP);
+      } else if (event.key === "]") {
+        event.preventDefault();
+        nextZoom = clampCameraZoom(nextZoom + CAMERA_ZOOM_STEP);
+      } else if (event.key === "\\") {
+        event.preventDefault();
+        nextZoom = CAMERA_ZOOM_DEFAULT;
+      }
+      if (nextZoom !== Number(cfg.zoom ?? CAMERA_ZOOM_DEFAULT)) {
+        cfg.zoom = nextZoom;
+        showCameraZoomToast(nextZoom);
+        saveSettings();
+      }
+    }
 
     for (const [moduleName, cfg] of ensureModuleConfigStore()) {
       if (cfg.keybind && cfg.keybind === event.key) {
