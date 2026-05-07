@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.6.4
+// @version      2.6.5
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.6.4";
+    const CLIENT_VERSION = "2.6.5";
     return CLIENT_VERSION;
   }
 
@@ -5225,6 +5225,13 @@
     .zyrox-config-header-actions .zyrox-close-btn {
       position: static;
     }
+    .config-reset-btn {
+      width: auto;
+      min-width: 88px;
+      padding: 0 8px;
+      font-size: 11px;
+      text-transform: lowercase;
+    }
     .zyrox-close-btn {
       position: absolute;
       top: 10px;
@@ -5375,7 +5382,7 @@
       <div class="zyrox-config-sub">Configure this module.</div>
     </div>
     <div class="zyrox-config-header-actions">
-      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">↺</button>
+      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">reset config</button>
       <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
     </div>
     <div class="zyrox-config-body">
