@@ -5255,6 +5255,11 @@
       background: rgba(0, 0, 0, 0.25);
       color: var(--zyx-icon-color);
       cursor: pointer;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
       line-height: 1;
       font-size: 12px;
     }
