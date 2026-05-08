@@ -31,6 +31,8 @@
     pollId: 0,
     roomPollId: 0,
     domReady: false,
+    frameIntervalMs: 33,
+    lastFrameTs: 0,
   };
 
   const waitForBody = () => new Promise((resolve) => {
@@ -421,8 +423,13 @@
     return { x, y };
   };
 
-  const draw = () => {
+  const draw = (ts = 0) => {
     if (!state.ctx) return;
+    if (ts - state.lastFrameTs < state.frameIntervalMs) {
+      state.rafId = requestAnimationFrame(draw);
+      return;
+    }
+    state.lastFrameTs = ts;
 
     state.ctx.clearRect(0, 0, SIZE, SIZE);
     const meX = state.stores?.phaser?.mainCharacter?.body?.x;
@@ -435,7 +442,10 @@
     state.lastCenterY = centerY;
 
     if (Array.isArray(state.terrainRects) && state.terrainRects.length) {
-      for (const r of state.terrainRects) {
+      const maxRectsPerFrame = 900;
+      const step = Math.max(1, Math.ceil(state.terrainRects.length / maxRectsPerFrame));
+      for (let idx = 0; idx < state.terrainRects.length; idx += step) {
+        const r = state.terrainRects[idx];
         const p = worldToMapCentered(r.x, r.y, centerX, centerY, state.viewSpan);
         const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
@@ -474,7 +484,8 @@
       }
 
       // Fallback player draw path in case Colyseus room is not discoverable.
-      for (const char of getCharacters()) {
+      const frameChars = getCharacters();
+      for (const char of frameChars) {
         const pos = getCharPos(char);
         if (!pos) continue;
         const p = worldToMapCentered(pos.x, pos.y, centerX, centerY, state.viewSpan);
@@ -492,7 +503,7 @@
 
     state.ctx.fillStyle = 'rgba(255,255,255,.9)';
     state.ctx.font = '10px monospace';
-    state.ctx.fillText(`p:${state.players.size} chars:${getCharacters().length} span:${Math.round(state.viewSpan)}`, 6, SIZE - 8);
+    state.ctx.fillText(`p:${state.players.size} chars:${frameChars.length} span:${Math.round(state.viewSpan)}`, 6, SIZE - 8);
 
     state.rafId = requestAnimationFrame(draw);
   };
