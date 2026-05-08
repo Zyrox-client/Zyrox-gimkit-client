@@ -36,6 +36,17 @@
   const findStoresFromWindow = () => Object.values(window).find((v) => v && typeof v === 'object' && v.phaser && v.me) || null;
   const findRoom = () => Object.values(window).find((v) => v?.state?.players && typeof v.state.players.onAdd === 'function') || null;
 
+
+  const isPlayableSceneReady = (stores) => {
+    const scene = stores?.phaser?.scene;
+    if (!scene) return false;
+    const hasCamera = !!scene?.cameras?.main;
+    const displayCount = Array.isArray(scene?.children?.list) ? scene.children.list.length : 0;
+    const hasMainCharacterBody = !!stores?.phaser?.mainCharacter?.body;
+    // Require a meaningful scene to avoid booting on join/lobby placeholders.
+    return hasCamera && (displayCount > 0 || hasMainCharacterBody);
+  };
+
   const tryExposeStoresFromBundle = async () => {
     const moduleScript = document.querySelector('script[src][type="module"]');
     if (!moduleScript?.src) return null;
@@ -190,6 +201,19 @@
     } else {
       state.ctx.fillStyle = 'rgba(8,12,18,.9)';
       state.ctx.fillRect(0, 0, SIZE, SIZE);
+      state.ctx.strokeStyle = 'rgba(255,255,255,.08)';
+      state.ctx.lineWidth = 1;
+      for (let i = 0; i <= 10; i += 1) {
+        const p = (SIZE / 10) * i;
+        state.ctx.beginPath();
+        state.ctx.moveTo(p, 0);
+        state.ctx.lineTo(p, SIZE);
+        state.ctx.stroke();
+        state.ctx.beginPath();
+        state.ctx.moveTo(0, p);
+        state.ctx.lineTo(SIZE, p);
+        state.ctx.stroke();
+      }
     }
 
       for (const pData of state.players.values()) {
@@ -283,20 +307,34 @@
     await createDom();
 
     state.pollId = window.setInterval(async () => {
-      if (!state.stores) {
-        state.stores = findStoresFromWindow();
-        if (!state.stores) {
-          try { state.stores = await tryExposeStoresFromBundle(); } catch (_) {}
+      // Always re-check stores until we have a real playable scene.
+      const candidateStores = findStoresFromWindow() || (() => { try { return null; } catch (_) { return null; } })();
+      if (!state.stores && candidateStores && !isPlayableSceneReady(candidateStores)) {
+        console.log('[minimap-test] ignoring early stores (scene not ready yet)');
+      }
+
+      if (!state.stores || !isPlayableSceneReady(state.stores)) {
+        state.stores = candidateStores || state.stores;
+        if ((!state.stores || !isPlayableSceneReady(state.stores))) {
+          try {
+            const imported = await tryExposeStoresFromBundle();
+            if (imported) state.stores = imported;
+          } catch (_) {}
         }
-        if (state.stores) {
+
+        if (state.stores && isPlayableSceneReady(state.stores)) {
           state.worldBounds = getWorldBounds(state.stores);
-          console.log('[minimap-test] stores found', { worldBounds: state.worldBounds });
+          console.log('[minimap-test] stores found (playable scene)', { worldBounds: state.worldBounds });
           logMapDiscovery();
           buildTerrainCache();
         }
       }
 
-      if (state.stores && !state.room) {
+      if (state.stores && isPlayableSceneReady(state.stores) && !state.terrainCanvas) {
+        buildTerrainCache();
+      }
+
+      if (state.stores && isPlayableSceneReady(state.stores) && !state.room) {
         state.room = findRoom();
         if (state.room) {
           attachRoomTracking(state.room);
