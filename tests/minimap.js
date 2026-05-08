@@ -33,6 +33,7 @@
     domReady: false,
     frameIntervalMs: 33,
     lastFrameTs: 0,
+    maxCenterStep: 220,
   };
 
   const waitForBody = () => new Promise((resolve) => {
@@ -436,8 +437,16 @@
     const meY = state.stores?.phaser?.mainCharacter?.body?.y;
     const fallbackCenterX = Number.isFinite(state.lastCenterX) ? state.lastCenterX : (state.worldBounds.x + state.worldBounds.width / 2);
     const fallbackCenterY = Number.isFinite(state.lastCenterY) ? state.lastCenterY : (state.worldBounds.y + state.worldBounds.height / 2);
-    const centerX = Number.isFinite(meX) ? meX : fallbackCenterX;
-    const centerY = Number.isFinite(meY) ? meY : fallbackCenterY;
+    let centerX = Number.isFinite(meX) ? meX : fallbackCenterX;
+    let centerY = Number.isFinite(meY) ? meY : fallbackCenterY;
+    const dxStep = centerX - fallbackCenterX;
+    const dyStep = centerY - fallbackCenterY;
+    const maxStep = state.maxCenterStep;
+    // Ignore sudden coordinate jumps that can happen during mode transitions/loading.
+    if (Math.abs(dxStep) > maxStep || Math.abs(dyStep) > maxStep) {
+      centerX = fallbackCenterX;
+      centerY = fallbackCenterY;
+    }
     state.lastCenterX = centerX;
     state.lastCenterY = centerY;
 
@@ -503,7 +512,7 @@
 
     state.ctx.fillStyle = 'rgba(255,255,255,.9)';
     state.ctx.font = '10px monospace';
-    state.ctx.fillText(`p:${state.players.size} chars:${frameChars.length} span:${Math.round(state.viewSpan)}`, 6, SIZE - 8);
+    state.ctx.fillText(`p:${state.players.size} chars:${frameChars.length} span:${Math.round(state.viewSpan)} step:${state.maxCenterStep}`, 6, SIZE - 8);
 
     state.rafId = requestAnimationFrame(draw);
   };
