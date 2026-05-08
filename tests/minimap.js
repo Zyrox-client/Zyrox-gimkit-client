@@ -21,6 +21,7 @@
     ctx: null,
     terrainCanvas: null,
     terrainRects: [],
+    terrainIndex: new Set(),
     viewSpan: 2800,
     lastCenterX: 0,
     lastCenterY: 0,
@@ -254,6 +255,22 @@
     return { x: minX - pad, y: minY - pad, width, height };
   };
 
+
+  const rectKey = (r) => `${Math.round(r.x / 4)}:${Math.round(r.y / 4)}:${Math.round((r.w || 0) / 4)}:${Math.round((r.h || 0) / 4)}`;
+
+  const mergeTerrainRects = (nextRects) => {
+    let added = 0;
+    for (const rect of nextRects) {
+      if (!Number.isFinite(rect?.x) || !Number.isFinite(rect?.y)) continue;
+      const key = rectKey(rect);
+      if (state.terrainIndex.has(key)) continue;
+      state.terrainIndex.add(key);
+      state.terrainRects.push(rect);
+      added += 1;
+    }
+    return added;
+  };
+
   const buildTerrainCache = () => {
     const cache = document.createElement('canvas');
     cache.width = SIZE;
@@ -381,11 +398,12 @@
     const totalDrawn = drawnCustomObjectPoints + drawnTiles + drawnTerrainPoints + drawnDisplayBounds;
     if (totalDrawn > 120) {
       state.terrainCanvas = cache;
-      state.terrainRects = terrainRects;
+      const addedRects = mergeTerrainRects(terrainRects);
+      console.log('[minimap-test] merged terrain rects', { addedRects, storedRects: state.terrainRects.length });
     } else {
       console.log('[minimap-test] keeping previous terrain cache (new cache too sparse)', { totalDrawn });
     }
-    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDisplayBounds, drawnDevices, terrainRects: terrainRects.length, accepted: totalDrawn > 120 });
+    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDisplayBounds, drawnDevices, terrainRects: terrainRects.length, storedRects: state.terrainRects.length, accepted: totalDrawn > 120 });
   };
 
   const getCharacters = () => {
