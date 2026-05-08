@@ -310,7 +310,7 @@
     for (const obj of customTileObjects) {
       const baseX = safeNumber(obj, 'x') || 0;
       const baseY = safeNumber(obj, 'y') || 0;
-      const pts = collectPointsFromAny(obj, 1200);
+      const pts = collectPointsFromAny(obj, 220);
       for (const point of pts) {
         const wx = Number.isFinite(point.x) ? point.x : baseX;
         const wy = Number.isFinite(point.y) ? point.y : baseY;
@@ -358,9 +358,14 @@
       drawnDevices += 1;
     }
 
-    state.terrainCanvas = cache;
-    state.terrainRects = terrainRects;
-    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDevices });
+    const totalDrawn = drawnCustomObjectPoints + drawnTiles + drawnTerrainPoints;
+    if (totalDrawn > 120) {
+      state.terrainCanvas = cache;
+      state.terrainRects = terrainRects;
+    } else {
+      console.log('[minimap-test] keeping previous terrain cache (new cache too sparse)', { totalDrawn });
+    }
+    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDevices, terrainRects: terrainRects.length, accepted: totalDrawn > 120 });
   };
 
   const getCharacters = () => {
@@ -388,7 +393,9 @@
     const centerY = Number.isFinite(meY) ? meY : (state.worldBounds.y + state.worldBounds.height / 2);
 
     if (Array.isArray(state.terrainRects) && state.terrainRects.length) {
+      const halfSpan = state.viewSpan / 2;
       for (const r of state.terrainRects) {
+        if (Math.abs(r.x - centerX) > halfSpan * 1.3 || Math.abs(r.y - centerY) > halfSpan * 1.3) continue;
         const p = worldToMapCentered(r.x, r.y, centerX, centerY, state.viewSpan);
         const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
