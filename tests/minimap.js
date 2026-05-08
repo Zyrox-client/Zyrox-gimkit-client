@@ -272,6 +272,12 @@
       if (obj?.layer?.data && Number.isFinite(obj?.tilemap?.tileWidth) && Number.isFinite(obj?.tilemap?.tileHeight)) maybeLayers.push(obj);
     }
 
+    // Probe custom Gimkit tilemap objects that do not expose layer.data.
+    const customTileObjects = displayList.filter((obj) => {
+      const t = String(obj?.type || '');
+      return t.includes('CustomWallsTilemapGameObject') || t.includes('CustomTilemapGameObject');
+    });
+
     for (const layerObj of maybeLayers) {
       const layer = layerObj.layer;
       const tileW = Number(layerObj.tilemap?.tileWidth) || 32;
@@ -296,6 +302,33 @@
           terrainRects.push({ x: tx, y: ty, w: tileW, h: tileH, c: tile.collides ? 'rgba(225,235,255,.48)' : 'rgba(120,150,185,.35)' });
           drawnTiles += 1;
         }
+      }
+    }
+
+    // Draw approximated geometry from custom tilemap objects.
+    let drawnCustomObjectPoints = 0;
+    for (const obj of customTileObjects) {
+      const baseX = safeNumber(obj, 'x') || 0;
+      const baseY = safeNumber(obj, 'y') || 0;
+      const pts = collectPointsFromAny(obj, 1200);
+      for (const point of pts) {
+        const wx = Number.isFinite(point.x) ? point.x : baseX;
+        const wy = Number.isFinite(point.y) ? point.y : baseY;
+        const ww = Number.isFinite(point.w) && point.w > 0 ? Math.min(point.w, 48) : 6;
+        const hh = Number.isFinite(point.h) && point.h > 0 ? Math.min(point.h, 48) : 6;
+        const p = worldToMap(wx, wy);
+        const w = Math.max(1, ww / Math.max(1, state.worldBounds.width) * SIZE);
+        const h = Math.max(1, hh / Math.max(1, state.worldBounds.height) * SIZE);
+        ctx.fillStyle = 'rgba(175,205,255,.45)';
+        ctx.fillRect(p.x, p.y, w, h);
+        terrainRects.push({ x: wx, y: wy, w: ww, h: hh, c: 'rgba(175,205,255,.65)' });
+        drawnCustomObjectPoints += 1;
+      }
+
+      const dw = safeNumber(obj, 'displayWidth');
+      const dh = safeNumber(obj, 'displayHeight');
+      if (dw && dh && dw > 8 && dh > 8) {
+        terrainRects.push({ x: baseX, y: baseY, w: Math.min(dw, 256), h: Math.min(dh, 256), c: 'rgba(210,230,255,.3)' });
       }
     }
 
@@ -327,7 +360,7 @@
 
     state.terrainCanvas = cache;
     state.terrainRects = terrainRects;
-    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, drawnTiles, drawnTerrainPoints, drawnDevices });
+    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDevices });
   };
 
   const getCharacters = () => {
