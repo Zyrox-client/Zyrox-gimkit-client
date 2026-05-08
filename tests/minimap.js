@@ -21,6 +21,7 @@
     ctx: null,
     terrainCanvas: null,
     terrainRects: [],
+    viewSpan: 2800,
     worldBounds: { x: 0, y: 0, width: 1, height: 1 },
     players: new Map(),
     rafId: 0,
@@ -131,6 +132,8 @@
       });
     }
     console.log('[minimap-test] tile-like display objects', tileLike);
+    const textureKeys = Object.keys(scene?.textures?.list || {}).slice(0, 60);
+    console.log('[minimap-test] texture keys sample', textureKeys);
   };
 
 
@@ -192,7 +195,11 @@
       maxY = Math.max(maxY, p.y);
     }
     const pad = 120;
-    return { x: minX - pad, y: minY - pad, width: Math.max(500, maxX - minX + pad * 2), height: Math.max(500, maxY - minY + pad * 2) };
+    const width = Math.max(500, maxX - minX + pad * 2);
+    const height = Math.max(500, maxY - minY + pad * 2);
+    const maxDim = Math.max(width, height);
+    state.viewSpan = Math.max(1400, Math.min(5200, maxDim * 0.42));
+    return { x: minX - pad, y: minY - pad, width, height };
   };
 
   const buildTerrainCache = () => {
@@ -250,7 +257,7 @@
       const h = Math.max(1, (point.h || 32) / Math.max(1, state.worldBounds.height) * SIZE);
       ctx.fillStyle = 'rgba(150,170,210,.32)';
       ctx.fillRect(p.x, p.y, w, h);
-      terrainRects.push({ x: point.x, y: point.y, w: point.w || 32, h: point.h || 32, c: 'rgba(110,150,220,.82)' });
+      terrainRects.push({ x: point.x, y: point.y, w: (Number.isFinite(point.w) && point.w > 0 ? Math.min(point.w, 20) : 4), h: (Number.isFinite(point.h) && point.h > 0 ? Math.min(point.h, 20) : 4), c: 'rgba(110,150,220,.55)' });
       drawnTerrainPoints += 1;
     }
 
@@ -299,8 +306,8 @@
 
     if (Array.isArray(state.terrainRects) && state.terrainRects.length) {
       for (const r of state.terrainRects) {
-        const p = worldToMapCentered(r.x, r.y, centerX, centerY, 1800);
-        const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, 1800);
+        const p = worldToMapCentered(r.x, r.y, centerX, centerY, state.viewSpan);
+        const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
         state.ctx.fillRect(p.x, p.y, Math.max(2, p2.x - p.x), Math.max(2, p2.y - p.y));
       }
@@ -328,7 +335,7 @@
 
       for (const pData of state.players.values()) {
         if (!Number.isFinite(pData.x) || !Number.isFinite(pData.y)) continue;
-        const p = worldToMapCentered(pData.x, pData.y, centerX, centerY, 1800);
+        const p = worldToMapCentered(pData.x, pData.y, centerX, centerY, state.viewSpan);
         const sameTeam = pData.teamId != null && state.stores?.me?.teamId != null && pData.teamId === state.stores.me.teamId;
         state.ctx.fillStyle = sameTeam ? '#57a6ff' : '#ff5566';
         state.ctx.beginPath();
@@ -340,13 +347,13 @@
       for (const char of getCharacters()) {
         const pos = getCharPos(char);
         if (!pos) continue;
-        const p = worldToMapCentered(pos.x, pos.y, centerX, centerY, 1800);
+        const p = worldToMapCentered(pos.x, pos.y, centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = '#ff3b3b';
         state.ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
       }
 
       if (Number.isFinite(meX) && Number.isFinite(meY)) {
-        const me = worldToMapCentered(meX, meY, centerX, centerY, 1800);
+        const me = worldToMapCentered(meX, meY, centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = '#71ff68';
         state.ctx.beginPath();
         state.ctx.arc(me.x, me.y, 4, 0, Math.PI * 2);
@@ -355,7 +362,7 @@
 
     state.ctx.fillStyle = 'rgba(255,255,255,.9)';
     state.ctx.font = '10px monospace';
-    state.ctx.fillText(`p:${state.players.size} chars:${getCharacters().length}`, 6, SIZE - 8);
+    state.ctx.fillText(`p:${state.players.size} chars:${getCharacters().length} span:${Math.round(state.viewSpan)}`, 6, SIZE - 8);
 
     state.rafId = requestAnimationFrame(draw);
   };
