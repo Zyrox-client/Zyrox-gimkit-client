@@ -22,6 +22,8 @@
     terrainCanvas: null,
     terrainRects: [],
     viewSpan: 2800,
+    lastCenterX: 0,
+    lastCenterY: 0,
     worldBounds: { x: 0, y: 0, width: 1, height: 1 },
     players: new Map(),
     rafId: 0,
@@ -407,13 +409,15 @@
     state.ctx.clearRect(0, 0, SIZE, SIZE);
     const meX = state.stores?.phaser?.mainCharacter?.body?.x;
     const meY = state.stores?.phaser?.mainCharacter?.body?.y;
-    const centerX = Number.isFinite(meX) ? meX : (state.worldBounds.x + state.worldBounds.width / 2);
-    const centerY = Number.isFinite(meY) ? meY : (state.worldBounds.y + state.worldBounds.height / 2);
+    const fallbackCenterX = Number.isFinite(state.lastCenterX) ? state.lastCenterX : (state.worldBounds.x + state.worldBounds.width / 2);
+    const fallbackCenterY = Number.isFinite(state.lastCenterY) ? state.lastCenterY : (state.worldBounds.y + state.worldBounds.height / 2);
+    const centerX = Number.isFinite(meX) ? meX : fallbackCenterX;
+    const centerY = Number.isFinite(meY) ? meY : fallbackCenterY;
+    state.lastCenterX = centerX;
+    state.lastCenterY = centerY;
 
     if (Array.isArray(state.terrainRects) && state.terrainRects.length) {
-      const halfSpan = state.viewSpan / 2;
       for (const r of state.terrainRects) {
-        if (Math.abs(r.x - centerX) > halfSpan * 3 || Math.abs(r.y - centerY) > halfSpan * 3) continue;
         const p = worldToMapCentered(r.x, r.y, centerX, centerY, state.viewSpan);
         const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
