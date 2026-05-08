@@ -69,6 +69,41 @@
     y: ((y - state.worldBounds.y) / Math.max(1, state.worldBounds.height)) * SIZE,
   });
 
+
+  const logMapDiscovery = () => {
+    const scene = state.stores?.phaser?.scene;
+    const wm = scene?.worldManager;
+    const candidates = {
+      sceneTilemap: !!scene?.tilemap,
+      sceneMap: !!scene?.map,
+      worldManagerMap: !!wm?.map,
+      worldManagerTilemap: !!wm?.tilemap,
+      worldManagerTerrain: !!wm?.terrain,
+      worldManagerDevices: !!wm?.devices,
+      displayListCount: Array.isArray(scene?.children?.list) ? scene.children.list.length : 0,
+    };
+    console.log('[minimap-test] map candidates', candidates);
+
+    const display = scene?.children?.list || [];
+    const tileLike = [];
+    for (const obj of display) {
+      const isTileLayer = !!obj?.layer?.data;
+      const hasTilemap = !!obj?.tilemap;
+      if (!isTileLayer && !hasTilemap) continue;
+      tileLike.push({
+        type: obj?.type,
+        name: obj?.name,
+        hasLayerData: !!obj?.layer?.data,
+        layerRows: Array.isArray(obj?.layer?.data) ? obj.layer.data.length : 0,
+        tileW: obj?.tilemap?.tileWidth,
+        tileH: obj?.tilemap?.tileHeight,
+        widthPx: obj?.tilemap?.widthInPixels,
+        heightPx: obj?.tilemap?.heightInPixels,
+      });
+    }
+    console.log('[minimap-test] tile-like display objects', tileLike);
+  };
+
   const buildTerrainCache = () => {
     const cache = document.createElement('canvas');
     cache.width = SIZE;
@@ -81,6 +116,7 @@
 
     // Draw tilemap layers if present (best minimap approximation of map geometry).
     const maybeLayers = [];
+    let drawnTiles = 0;
     const displayList = scene?.children?.list || [];
     for (const obj of displayList) {
       if (obj?.layer?.data && Number.isFinite(obj?.tilemap?.tileWidth) && Number.isFinite(obj?.tilemap?.tileHeight)) maybeLayers.push(obj);
@@ -107,6 +143,7 @@
           const h = Math.max(1, p2.y - p.y);
           ctx.fillStyle = tile.collides ? 'rgba(225,235,255,.48)' : 'rgba(120,150,185,.35)';
           ctx.fillRect(p.x, p.y, w, h);
+          drawnTiles += 1;
         }
       }
     }
@@ -115,15 +152,18 @@
     const devices = scene?.worldManager?.devices?.allDevices;
     const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
     ctx.fillStyle = 'rgba(255,210,92,.88)';
+    let drawnDevices = 0;
     for (const device of list) {
       const dx = Number(device?.x);
       const dy = Number(device?.y);
       if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
       const p = worldToMap(dx, dy);
       ctx.fillRect(p.x - 1, p.y - 1, 3, 3);
+      drawnDevices += 1;
     }
 
     state.terrainCanvas = cache;
+    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, drawnTiles, drawnDevices });
   };
 
   const getCharacters = () => {
@@ -180,6 +220,10 @@
         state.ctx.arc(me.x, me.y, 4, 0, Math.PI * 2);
         state.ctx.fill();
       }
+
+    state.ctx.fillStyle = 'rgba(255,255,255,.9)';
+    state.ctx.font = '10px monospace';
+    state.ctx.fillText(`p:${state.players.size} chars:${getCharacters().length}`, 6, SIZE - 8);
 
     state.rafId = requestAnimationFrame(draw);
   };
@@ -246,8 +290,9 @@
         }
         if (state.stores) {
           state.worldBounds = getWorldBounds(state.stores);
+          console.log('[minimap-test] stores found', { worldBounds: state.worldBounds });
+          logMapDiscovery();
           buildTerrainCache();
-          console.log('[minimap-test] stores found');
         }
       }
 
