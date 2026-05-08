@@ -25,7 +25,6 @@
     rafId: 0,
     pollId: 0,
     roomPollId: 0,
-    visible: true,
     domReady: false,
   };
 
@@ -78,10 +77,44 @@
     ctx.fillStyle = 'rgba(8,12,18,.9)';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
-    const devices = state.stores?.phaser?.scene?.worldManager?.devices?.allDevices;
-    const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
+    const scene = state.stores?.phaser?.scene;
 
-    ctx.fillStyle = 'rgba(120,170,255,.45)';
+    // Draw tilemap layers if present (best minimap approximation of map geometry).
+    const maybeLayers = [];
+    const displayList = scene?.children?.list || [];
+    for (const obj of displayList) {
+      if (obj?.layer?.data && Number.isFinite(obj?.tilemap?.tileWidth) && Number.isFinite(obj?.tilemap?.tileHeight)) maybeLayers.push(obj);
+    }
+
+    for (const layerObj of maybeLayers) {
+      const layer = layerObj.layer;
+      const tileW = Number(layerObj.tilemap?.tileWidth) || 32;
+      const tileH = Number(layerObj.tilemap?.tileHeight) || 32;
+      const rows = Array.isArray(layer?.data) ? layer.data : [];
+
+      for (const row of rows) {
+        if (!Array.isArray(row)) continue;
+        for (const tile of row) {
+          if (!tile) continue;
+          const hasTile = tile.index !== -1 || tile.visible || tile.collides;
+          if (!hasTile) continue;
+          const tx = Number(tile.pixelX ?? tile.x * tileW);
+          const ty = Number(tile.pixelY ?? tile.y * tileH);
+          if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+          const p = worldToMap(tx, ty);
+          const p2 = worldToMap(tx + tileW, ty + tileH);
+          const w = Math.max(1, p2.x - p.x);
+          const h = Math.max(1, p2.y - p.y);
+          ctx.fillStyle = tile.collides ? 'rgba(225,235,255,.48)' : 'rgba(120,150,185,.35)';
+          ctx.fillRect(p.x, p.y, w, h);
+        }
+      }
+    }
+
+    // Draw device landmarks over terrain.
+    const devices = scene?.worldManager?.devices?.allDevices;
+    const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
+    ctx.fillStyle = 'rgba(255,210,92,.88)';
     for (const device of list) {
       const dx = Number(device?.x);
       const dy = Number(device?.y);
@@ -119,7 +152,6 @@
       state.ctx.fillRect(0, 0, SIZE, SIZE);
     }
 
-    if (state.visible) {
       for (const pData of state.players.values()) {
         if (!Number.isFinite(pData.x) || !Number.isFinite(pData.y)) continue;
         const p = worldToMap(pData.x, pData.y);
@@ -148,7 +180,6 @@
         state.ctx.arc(me.x, me.y, 4, 0, Math.PI * 2);
         state.ctx.fill();
       }
-    }
 
     state.rafId = requestAnimationFrame(draw);
   };
@@ -169,18 +200,6 @@
     state.canvas = canvas;
     state.ctx = canvas.getContext('2d');
 
-    const toggle = document.createElement('button');
-    toggle.textContent = 'Minimap';
-    Object.assign(toggle.style, { position: 'fixed', top: '220px', right: '12px', zIndex: String(Z_INDEX + 1) });
-    toggle.addEventListener('click', () => {
-      state.visible = !state.visible;
-      canvas.style.opacity = state.visible ? '1' : '0.35';
-    });
-    document.body.appendChild(toggle);
-
-    window.addEventListener('keydown', (e) => {
-      if (e.key?.toLowerCase() === 'm') toggle.click();
-    }, true);
 
     let drag = null;
     canvas.addEventListener('pointerdown', (e) => {
