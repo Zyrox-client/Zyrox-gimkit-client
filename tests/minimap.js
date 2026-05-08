@@ -250,7 +250,7 @@
       const h = Math.max(1, (point.h || 32) / Math.max(1, state.worldBounds.height) * SIZE);
       ctx.fillStyle = 'rgba(150,170,210,.32)';
       ctx.fillRect(p.x, p.y, w, h);
-      terrainRects.push({ x: point.x, y: point.y, w: point.w || 32, h: point.h || 32, c: 'rgba(150,170,210,.32)' });
+      terrainRects.push({ x: point.x, y: point.y, w: point.w || 32, h: point.h || 32, c: 'rgba(110,150,220,.82)' });
       drawnTerrainPoints += 1;
     }
 
@@ -302,10 +302,12 @@
         const p = worldToMapCentered(r.x, r.y, centerX, centerY, 1800);
         const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, 1800);
         state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
-        state.ctx.fillRect(p.x, p.y, Math.max(1, p2.x - p.x), Math.max(1, p2.y - p.y));
+        state.ctx.fillRect(p.x, p.y, Math.max(2, p2.x - p.x), Math.max(2, p2.y - p.y));
       }
     } else if (state.terrainCanvas) {
+      state.ctx.globalAlpha = 0.75;
       state.ctx.drawImage(state.terrainCanvas, 0, 0);
+      state.ctx.globalAlpha = 1;
     } else {
       state.ctx.fillStyle = 'rgba(8,12,18,.9)';
       state.ctx.fillRect(0, 0, SIZE, SIZE);
@@ -339,7 +341,7 @@
         const pos = getCharPos(char);
         if (!pos) continue;
         const p = worldToMapCentered(pos.x, pos.y, centerX, centerY, 1800);
-        state.ctx.fillStyle = '#f6c04f';
+        state.ctx.fillStyle = '#ff3b3b';
         state.ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
       }
 
