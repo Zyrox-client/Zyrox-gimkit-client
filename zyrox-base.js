@@ -1425,10 +1425,10 @@
     lastToastValue: null,
   };
   const CAMERA_ZOOM_MODULE_NAME = "Zoom (FOV)";
-  const CAMERA_ZOOM_MIN = 0.4;
+  const CAMERA_ZOOM_MIN = 0.5;
   const CAMERA_ZOOM_MAX = 2.0;
   const CAMERA_ZOOM_STEP = 0.05;
-  const CAMERA_ZOOM_DEFAULT = 0.9;
+  const CAMERA_ZOOM_DEFAULT = 1.0;
 
   function espLog(message, extra) {
     if (extra !== undefined) console.log(`${ESP_LOG} ${message}`, extra);
@@ -1529,10 +1529,13 @@
         cameraZoomState.originalZoom = 1;
       }
     }
+    const baselineZoomRaw = cameraZoomState.baselineByCamera.get(camera);
+    const baselineZoom = Number.isFinite(baselineZoomRaw) && baselineZoomRaw > 0 ? baselineZoomRaw : Number(camera?.zoom ?? 1) || 1;
+    const targetZoom = baselineZoom * desiredZoom;
     const currentZoom = Number(camera?.zoom ?? 1) || 1;
-    if (Math.abs(currentZoom - desiredZoom) > 1e-4) {
-      if (typeof camera?.setZoom === "function") camera.setZoom(desiredZoom);
-      else camera.zoom = desiredZoom;
+    if (Math.abs(currentZoom - targetZoom) > 1e-4) {
+      if (typeof camera?.setZoom === "function") camera.setZoom(targetZoom);
+      else camera.zoom = targetZoom;
     }
   }
 
