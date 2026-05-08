@@ -83,6 +83,7 @@
 
   const logMapDiscovery = () => {
     const scene = state.stores?.phaser?.scene;
+    const terrain = scene?.worldManager?.terrain;
     const wm = scene?.worldManager;
     const candidates = {
       sceneTilemap: !!scene?.tilemap,
@@ -115,6 +116,64 @@
     console.log('[minimap-test] tile-like display objects', tileLike);
   };
 
+
+  const collectPointsFromAny = (root, limit = 15000) => {
+    const out = [];
+    const seen = new Set();
+    const stack = [root];
+    while (stack.length && out.length < limit) {
+      const cur = stack.pop();
+      if (!cur || typeof cur !== 'object' || seen.has(cur)) continue;
+      seen.add(cur);
+
+      if (Number.isFinite(cur.x) && Number.isFinite(cur.y)) {
+        out.push({ x: Number(cur.x), y: Number(cur.y), w: Number(cur.width || cur.w || 0), h: Number(cur.height || cur.h || 0) });
+      }
+      if (Number.isFinite(cur.pixelX) && Number.isFinite(cur.pixelY)) {
+        out.push({ x: Number(cur.pixelX), y: Number(cur.pixelY), w: Number(cur.width || cur.w || 0), h: Number(cur.height || cur.h || 0) });
+      }
+
+      if (Array.isArray(cur)) {
+        for (const v of cur) stack.push(v);
+      } else {
+        for (const v of Object.values(cur)) stack.push(v);
+      }
+    }
+    return out;
+  };
+
+  const deriveDynamicBounds = () => {
+    const points = [];
+    const meX = state.stores?.phaser?.mainCharacter?.body?.x;
+    const meY = state.stores?.phaser?.mainCharacter?.body?.y;
+    if (Number.isFinite(meX) && Number.isFinite(meY)) points.push({ x: meX, y: meY });
+
+    for (const c of getCharacters()) {
+      const pos = getCharPos(c);
+      if (pos) points.push(pos);
+    }
+
+    const devices = state.stores?.phaser?.scene?.worldManager?.devices?.allDevices;
+    const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
+    for (const d of list) {
+      if (Number.isFinite(d?.x) && Number.isFinite(d?.y)) points.push({ x: Number(d.x), y: Number(d.y) });
+    }
+
+    const terrain = state.stores?.phaser?.scene?.worldManager?.terrain;
+    for (const p of collectPointsFromAny(terrain, 5000)) points.push({ x: p.x, y: p.y });
+
+    if (points.length < 2) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+    const pad = 120;
+    return { x: minX - pad, y: minY - pad, width: Math.max(500, maxX - minX + pad * 2), height: Math.max(500, maxY - minY + pad * 2) };
+  };
+
   const buildTerrainCache = () => {
     const cache = document.createElement('canvas');
     cache.width = SIZE;
@@ -124,6 +183,7 @@
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     const scene = state.stores?.phaser?.scene;
+    const terrain = scene?.worldManager?.terrain;
 
     // Draw tilemap layers if present (best minimap approximation of map geometry).
     const maybeLayers = [];
@@ -159,6 +219,17 @@
       }
     }
 
+    // Fallback terrain draw for custom map containers (e.g. CustomWallsTilemapGameObject + worldManager.terrain).
+    let drawnTerrainPoints = 0;
+    for (const point of collectPointsFromAny(terrain)) {
+      const p = worldToMap(point.x, point.y);
+      const w = Math.max(1, (point.w || 32) / Math.max(1, state.worldBounds.width) * SIZE);
+      const h = Math.max(1, (point.h || 32) / Math.max(1, state.worldBounds.height) * SIZE);
+      ctx.fillStyle = 'rgba(150,170,210,.32)';
+      ctx.fillRect(p.x, p.y, w, h);
+      drawnTerrainPoints += 1;
+    }
+
     // Draw device landmarks over terrain.
     const devices = scene?.worldManager?.devices?.allDevices;
     const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
@@ -174,7 +245,7 @@
     }
 
     state.terrainCanvas = cache;
-    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, drawnTiles, drawnDevices });
+    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, drawnTiles, drawnTerrainPoints, drawnDevices });
   };
 
   const getCharacters = () => {
@@ -323,7 +394,7 @@
         }
 
         if (state.stores && isPlayableSceneReady(state.stores)) {
-          state.worldBounds = getWorldBounds(state.stores);
+          state.worldBounds = deriveDynamicBounds() || getWorldBounds(state.stores);
           console.log('[minimap-test] stores found (playable scene)', { worldBounds: state.worldBounds });
           logMapDiscovery();
           buildTerrainCache();
@@ -331,6 +402,7 @@
       }
 
       if (state.stores && isPlayableSceneReady(state.stores) && !state.terrainCanvas) {
+        state.worldBounds = deriveDynamicBounds() || state.worldBounds;
         buildTerrainCache();
       }
 
