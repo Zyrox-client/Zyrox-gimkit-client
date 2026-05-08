@@ -98,6 +98,56 @@
     y: ((y - (cy - span / 2)) / span) * SIZE,
   });
 
+
+  const safePreview = (value, depth = 2, seen = new WeakSet()) => {
+    if (value == null) return value;
+    if (depth <= 0) return typeof value;
+    if (typeof value !== 'object') return value;
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+    if (Array.isArray(value)) return value.slice(0, 12).map((v) => safePreview(v, depth - 1, seen));
+    const out = {};
+    for (const key of Object.keys(value).slice(0, 30)) {
+      try {
+        out[key] = safePreview(value[key], depth - 1, seen);
+      } catch (err) {
+        out[key] = `[getter-err:${err?.message || 'unknown'}]`;
+      }
+    }
+    return out;
+  };
+
+  const logMapContentDeep = () => {
+    const scene = state.stores?.phaser?.scene;
+    const wm = scene?.worldManager;
+    const terrain = wm?.terrain;
+    const devices = wm?.devices?.allDevices;
+    const deviceList = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
+
+    const display = scene?.children?.list || [];
+    const displaySummary = display.slice(0, 80).map((obj, idx) => ({
+      i: idx,
+      type: obj?.type,
+      name: obj?.name,
+      hasTilemap: !!obj?.tilemap,
+      hasLayerData: !!obj?.layer?.data,
+      keys: Object.keys(obj || {}).slice(0, 12),
+    }));
+
+    const terrainPoints = collectPointsFromAny(terrain, 3000);
+
+    console.groupCollapsed('[minimap-test] MAP DATA DUMP');
+    console.log('worldManager keys', Object.keys(wm || {}));
+    console.log('terrain keys', Object.keys(terrain || {}));
+    console.log('terrain preview', safePreview(terrain, 3));
+    console.log('devices count', deviceList.length);
+    console.log('devices sample', safePreview(deviceList.slice(0, 20), 2));
+    console.log('terrain points sample', terrainPoints.slice(0, 60));
+    console.table(displaySummary);
+    console.log('scene texture keys', Object.keys(scene?.textures?.list || {}));
+    console.groupEnd();
+  };
+
   const logMapDiscovery = () => {
     const scene = state.stores?.phaser?.scene;
     const terrain = scene?.worldManager?.terrain;
@@ -420,6 +470,15 @@
 
   const start = async () => {
     await createDom();
+    window.__minimapDump = () => {
+      try {
+        logMapDiscovery();
+        logMapContentDeep();
+      } catch (err) {
+        console.error('[minimap-test] __minimapDump error', err);
+      }
+    };
+    console.log('[minimap-test] debug helper available: window.__minimapDump()');
 
     state.pollId = window.setInterval(async () => {
       // Always re-check stores until we have a real playable scene.
@@ -441,6 +500,7 @@
           state.worldBounds = deriveDynamicBounds() || getWorldBounds(state.stores);
           console.log('[minimap-test] stores found (playable scene)', { worldBounds: state.worldBounds });
           logMapDiscovery();
+          logMapContentDeep();
           buildTerrainCache();
         }
       }
