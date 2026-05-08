@@ -20,7 +20,7 @@ More browser extension versions are (probably) coming soon (not for chrome sadly
 **Install as extension:**
 
 <a href="https://addons.mozilla.org/addon/zyrox-client-for-gimkit"><img src="https://blog.mozilla.org/opendesign/files/2018/07/firefox-logo.png" alt="Firefox logo" width="60"/></a>
-
+<a href="https://microsoftedge.microsoft.com/addons/detail/zyrox-client-for-gimkit/nbhkgcilohejipnefdamgefihedalffm"><img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Microsoft_Edge_logo_%282019%29.png" alt="Edge logo" width="60"/><a/>
 **Install as userscript:**
 1. Install a userscript manager ([Tampermonkey](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=nl)/[Violentmonkey](https://violentmonkey.github.io/)). 
 2. Install the userscript [here](https://greasyfork.org/en/scripts/572408-zyrox-client-gimkit).
