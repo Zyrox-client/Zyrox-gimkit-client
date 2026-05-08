@@ -344,6 +344,24 @@
       drawnTerrainPoints += 1;
     }
 
+
+    // Add static display-object bounds (props/tiles/images) as a stable fallback layer.
+    let drawnDisplayBounds = 0;
+    for (const obj of displayList) {
+      const type = String(obj?.type || '');
+      if (!['Sprite', 'Image', 'CustomTilemapGameObject', 'CustomWallsTilemapGameObject'].some((t) => type.includes(t))) continue;
+      const ox = safeNumber(obj, 'x');
+      const oy = safeNumber(obj, 'y');
+      const ow = safeNumber(obj, 'displayWidth') || safeNumber(obj, 'width');
+      const oh = safeNumber(obj, 'displayHeight') || safeNumber(obj, 'height');
+      if (ox == null || oy == null || !ow || !oh) continue;
+      if (ow < 2 || oh < 2) continue;
+      const w = Math.min(Math.max(ow, 4), 512);
+      const h = Math.min(Math.max(oh, 4), 512);
+      terrainRects.push({ x: ox - w / 2, y: oy - h / 2, w, h, c: type.includes('Custom') ? 'rgba(140,170,220,.38)' : 'rgba(180,180,180,.24)' });
+      drawnDisplayBounds += 1;
+    }
+
     // Draw device landmarks over terrain.
     const devices = scene?.worldManager?.devices?.allDevices;
     const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
@@ -358,14 +376,14 @@
       drawnDevices += 1;
     }
 
-    const totalDrawn = drawnCustomObjectPoints + drawnTiles + drawnTerrainPoints;
+    const totalDrawn = drawnCustomObjectPoints + drawnTiles + drawnTerrainPoints + drawnDisplayBounds;
     if (totalDrawn > 120) {
       state.terrainCanvas = cache;
       state.terrainRects = terrainRects;
     } else {
       console.log('[minimap-test] keeping previous terrain cache (new cache too sparse)', { totalDrawn });
     }
-    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDevices, terrainRects: terrainRects.length, accepted: totalDrawn > 120 });
+    console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, customTileObjects: customTileObjects.length, drawnCustomObjectPoints, drawnTiles, drawnTerrainPoints, drawnDisplayBounds, drawnDevices, terrainRects: terrainRects.length, accepted: totalDrawn > 120 });
   };
 
   const getCharacters = () => {
@@ -395,7 +413,7 @@
     if (Array.isArray(state.terrainRects) && state.terrainRects.length) {
       const halfSpan = state.viewSpan / 2;
       for (const r of state.terrainRects) {
-        if (Math.abs(r.x - centerX) > halfSpan * 1.3 || Math.abs(r.y - centerY) > halfSpan * 1.3) continue;
+        if (Math.abs(r.x - centerX) > halfSpan * 3 || Math.abs(r.y - centerY) > halfSpan * 3) continue;
         const p = worldToMapCentered(r.x, r.y, centerX, centerY, state.viewSpan);
         const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, state.viewSpan);
         state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
