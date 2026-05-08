@@ -20,6 +20,7 @@
     canvas: null,
     ctx: null,
     terrainCanvas: null,
+    terrainRects: [],
     worldBounds: { x: 0, y: 0, width: 1, height: 1 },
     players: new Map(),
     rafId: 0,
@@ -81,9 +82,25 @@
   });
 
 
+
+  const safeNumber = (obj, key) => {
+    try {
+      const v = obj?.[key];
+      return Number.isFinite(v) ? Number(v) : null;
+    } catch (_) {
+      return null;
+    }
+  };
+
+  const worldToMapCentered = (x, y, cx, cy, span = 1800) => ({
+    x: ((x - (cx - span / 2)) / span) * SIZE,
+    y: ((y - (cy - span / 2)) / span) * SIZE,
+  });
+
   const logMapDiscovery = () => {
     const scene = state.stores?.phaser?.scene;
     const terrain = scene?.worldManager?.terrain;
+    const terrainRects = [];
     const wm = scene?.worldManager;
     const candidates = {
       sceneTilemap: !!scene?.tilemap,
@@ -126,11 +143,15 @@
       if (!cur || typeof cur !== 'object' || seen.has(cur)) continue;
       seen.add(cur);
 
-      if (Number.isFinite(cur.x) && Number.isFinite(cur.y)) {
-        out.push({ x: Number(cur.x), y: Number(cur.y), w: Number(cur.width || cur.w || 0), h: Number(cur.height || cur.h || 0) });
+      const x = safeNumber(cur, 'x');
+      const y = safeNumber(cur, 'y');
+      if (x != null && y != null) {
+        out.push({ x, y, w: Number(cur.width || cur.w || 0), h: Number(cur.height || cur.h || 0) });
       }
-      if (Number.isFinite(cur.pixelX) && Number.isFinite(cur.pixelY)) {
-        out.push({ x: Number(cur.pixelX), y: Number(cur.pixelY), w: Number(cur.width || cur.w || 0), h: Number(cur.height || cur.h || 0) });
+      const px = safeNumber(cur, 'pixelX');
+      const py = safeNumber(cur, 'pixelY');
+      if (px != null && py != null) {
+        out.push({ x: px, y: py, w: Number(cur.width || cur.w || 0), h: Number(cur.height || cur.h || 0) });
       }
 
       if (Array.isArray(cur)) {
@@ -184,6 +205,7 @@
 
     const scene = state.stores?.phaser?.scene;
     const terrain = scene?.worldManager?.terrain;
+    const terrainRects = [];
 
     // Draw tilemap layers if present (best minimap approximation of map geometry).
     const maybeLayers = [];
@@ -214,6 +236,7 @@
           const h = Math.max(1, p2.y - p.y);
           ctx.fillStyle = tile.collides ? 'rgba(225,235,255,.48)' : 'rgba(120,150,185,.35)';
           ctx.fillRect(p.x, p.y, w, h);
+          terrainRects.push({ x: tx, y: ty, w: tileW, h: tileH, c: tile.collides ? 'rgba(225,235,255,.48)' : 'rgba(120,150,185,.35)' });
           drawnTiles += 1;
         }
       }
@@ -227,6 +250,7 @@
       const h = Math.max(1, (point.h || 32) / Math.max(1, state.worldBounds.height) * SIZE);
       ctx.fillStyle = 'rgba(150,170,210,.32)';
       ctx.fillRect(p.x, p.y, w, h);
+      terrainRects.push({ x: point.x, y: point.y, w: point.w || 32, h: point.h || 32, c: 'rgba(150,170,210,.32)' });
       drawnTerrainPoints += 1;
     }
 
@@ -245,6 +269,7 @@
     }
 
     state.terrainCanvas = cache;
+    state.terrainRects = terrainRects;
     console.log('[minimap-test] terrain cache built', { layerCandidates: maybeLayers.length, drawnTiles, drawnTerrainPoints, drawnDevices });
   };
 
@@ -267,7 +292,19 @@
     if (!state.ctx) return;
 
     state.ctx.clearRect(0, 0, SIZE, SIZE);
-    if (state.terrainCanvas) {
+    const meX = state.stores?.phaser?.mainCharacter?.body?.x;
+    const meY = state.stores?.phaser?.mainCharacter?.body?.y;
+    const centerX = Number.isFinite(meX) ? meX : (state.worldBounds.x + state.worldBounds.width / 2);
+    const centerY = Number.isFinite(meY) ? meY : (state.worldBounds.y + state.worldBounds.height / 2);
+
+    if (Array.isArray(state.terrainRects) && state.terrainRects.length) {
+      for (const r of state.terrainRects) {
+        const p = worldToMapCentered(r.x, r.y, centerX, centerY, 1800);
+        const p2 = worldToMapCentered(r.x + (r.w || 32), r.y + (r.h || 32), centerX, centerY, 1800);
+        state.ctx.fillStyle = r.c || 'rgba(120,150,185,.35)';
+        state.ctx.fillRect(p.x, p.y, Math.max(1, p2.x - p.x), Math.max(1, p2.y - p.y));
+      }
+    } else if (state.terrainCanvas) {
       state.ctx.drawImage(state.terrainCanvas, 0, 0);
     } else {
       state.ctx.fillStyle = 'rgba(8,12,18,.9)';
@@ -289,7 +326,7 @@
 
       for (const pData of state.players.values()) {
         if (!Number.isFinite(pData.x) || !Number.isFinite(pData.y)) continue;
-        const p = worldToMap(pData.x, pData.y);
+        const p = worldToMapCentered(pData.x, pData.y, centerX, centerY, 1800);
         const sameTeam = pData.teamId != null && state.stores?.me?.teamId != null && pData.teamId === state.stores.me.teamId;
         state.ctx.fillStyle = sameTeam ? '#57a6ff' : '#ff5566';
         state.ctx.beginPath();
@@ -301,15 +338,13 @@
       for (const char of getCharacters()) {
         const pos = getCharPos(char);
         if (!pos) continue;
-        const p = worldToMap(pos.x, pos.y);
+        const p = worldToMapCentered(pos.x, pos.y, centerX, centerY, 1800);
         state.ctx.fillStyle = '#f6c04f';
         state.ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
       }
 
-      const meX = state.stores?.phaser?.mainCharacter?.body?.x;
-      const meY = state.stores?.phaser?.mainCharacter?.body?.y;
       if (Number.isFinite(meX) && Number.isFinite(meY)) {
-        const me = worldToMap(meX, meY);
+        const me = worldToMapCentered(meX, meY, centerX, centerY, 1800);
         state.ctx.fillStyle = '#71ff68';
         state.ctx.beginPath();
         state.ctx.arc(me.x, me.y, 4, 0, Math.PI * 2);
