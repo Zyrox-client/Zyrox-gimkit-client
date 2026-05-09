@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.6.9
+// @version      2.7.0
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.6.9";
+    const CLIENT_VERSION = "2.7.0";
     return CLIENT_VERSION;
   }
 
