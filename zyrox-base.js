@@ -4070,174 +4070,153 @@
     if (lavaBuildingHudState.container) lavaBuildingHudState.container.style.display = "none";
   }
 
-  const MINIMAP_MODULE_NAME = "Minimap";
+  const HIDE_POPUPS_MODULE_NAME = "Hide pop-ups";
+  const HIDE_POPUPS_LOG_PREFIX = "[ZyroxHidePopups]";
+  const HIDE_POPUPS_TOAST_SELECTOR = ".Toastify__toast";
+  const HIDE_POPUPS_TOAST_CLOSE_SELECTOR = ".Toastify__close-button";
+  const HIDE_POPUPS_ENERGY_POPUP_SELECTOR = ".maxAll.flex.hc";
+  const HIDE_POPUPS_ENERGY_RESOURCE_PATH = "/assets/map/inventory/resources/";
+  const HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR = `img[src*='${HIDE_POPUPS_ENERGY_RESOURCE_PATH}']`;
 
-  const minimapState = {
-    pollTimer: null,
-    rafId: 0,
-    stores: null,
-    room: null,
-    worldBounds: null,
-    canvas: null,
-    ctx: null,
-    terrainCanvas: null,
-    players: new Map(),
-    keyHandler: null,
-    button: null,
-    drag: null,
-    visible: true,
-    initialized: false,
+  const hidePopupsState = {
+    enabled: false,
+    observer: null,
+    hiddenBuildingPopups: 0,
+    hiddenEnergyPopups: 0,
   };
 
-  const cleanupMinimapPlayers = () => {
-    minimapState.players.clear();
-  };
+  function hidePopupsLog(...args) {
+    console.log(HIDE_POPUPS_LOG_PREFIX, ...args);
+  }
 
-  const findStores = () => Object.values(window).find((v) => v && typeof v === "object" && v.phaser && v.me) || null;
-
-  const findColyseusRoom = () => Object.values(window).find((v) => v?.state?.players && typeof v.state.players.onAdd === "function") || null;
-
-  const getWorldBounds = (stores) => {
-    const scene = stores?.phaser?.scene;
-    const wm = scene?.worldManager;
-    const tilemap = wm?.map || wm?.tilemap || scene?.tilemap || scene?.map;
-    if (tilemap?.widthInPixels && tilemap?.heightInPixels) return { x: 0, y: 0, width: tilemap.widthInPixels, height: tilemap.heightInPixels };
-    const bounds = scene?.cameras?.main?.getBounds?.();
-    if (bounds?.width && bounds?.height) return { x: bounds.x || 0, y: bounds.y || 0, width: bounds.width, height: bounds.height };
-    const worldView = scene?.cameras?.main?.worldView;
-    if (worldView?.width && worldView?.height) return { x: worldView.x || 0, y: worldView.y || 0, width: worldView.width, height: worldView.height };
-    return { x: 0, y: 0, width: 5000, height: 5000 };
-  };
-
-  const worldToMinimap = (x, y, size) => {
-    const b = minimapState.worldBounds || { x: 0, y: 0, width: 1, height: 1 };
+  function getHidePopupsConfig() {
+    const cfg = typeof moduleCfg === "function" ? moduleCfg(HIDE_POPUPS_MODULE_NAME) : {};
     return {
-      x: ((x - b.x) / Math.max(1, b.width)) * size,
-      y: ((y - b.y) / Math.max(1, b.height)) * size,
+      hideEnergyPopups: cfg?.hideEnergyPopups !== false,
+      hideBuildingPopups: cfg?.hideBuildingPopups !== false,
     };
-  };
+  }
 
-  const drawTerrainCache = () => {
-    if (!minimapState.ctx || !minimapState.stores) return;
-    const size = minimapState.canvas.width;
-    const terrain = document.createElement("canvas");
-    terrain.width = size;
-    terrain.height = size;
-    const tctx = terrain.getContext("2d");
-    tctx.fillStyle = "rgba(10, 14, 22, 0.86)";
-    tctx.fillRect(0, 0, size, size);
+  function isHidePopupsElement(node) {
+    return node instanceof Element;
+  }
 
-    const devices = minimapState.stores?.phaser?.scene?.worldManager?.devices?.allDevices;
-    const list = Array.isArray(devices) ? devices : (devices ? Object.values(devices) : []);
-    tctx.fillStyle = "rgba(120, 170, 255, 0.45)";
-    for (const device of list) {
-      const dx = Number(device?.x);
-      const dy = Number(device?.y);
-      if (!Number.isFinite(dx) || !Number.isFinite(dy)) continue;
-      const p = worldToMinimap(dx, dy, size);
-      tctx.fillRect(p.x - 1, p.y - 1, 3, 3);
-    }
+  function isHidePopupsEnergyResourceImage(node) {
+    if (!isHidePopupsElement(node) || node.tagName !== "IMG") return false;
 
-    minimapState.terrainCanvas = terrain;
-  };
+    const src = node.getAttribute("src") || node.src || node.currentSrc || "";
+    return src.includes(HIDE_POPUPS_ENERGY_RESOURCE_PATH);
+  }
 
-  const renderMinimap = () => {
-    if (!minimapState.initialized || !minimapState.ctx || !minimapState.visible) return;
-    const { ctx, canvas, stores } = minimapState;
-    const size = canvas.width;
-    ctx.clearRect(0, 0, size, size);
-    if (minimapState.terrainCanvas) ctx.drawImage(minimapState.terrainCanvas, 0, 0);
+  function isHidePopupsEnergyPopup(node) {
+    return isHidePopupsElement(node)
+      && node.matches(HIDE_POPUPS_ENERGY_POPUP_SELECTOR)
+      && Boolean(node.querySelector(HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR));
+  }
 
-    for (const player of minimapState.players.values()) {
-      if (!Number.isFinite(player.x) || !Number.isFinite(player.y)) continue;
-      const p = worldToMinimap(player.x, player.y, size);
-      ctx.fillStyle = player.teamId != null && stores?.me?.teamId != null && player.teamId === stores.me.teamId ? "#57a6ff" : "#ff4b5c";
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
+  function findHidePopupsEnergyPopup(node) {
+    if (!isHidePopupsElement(node)) return null;
+    if (isHidePopupsEnergyPopup(node)) return node;
 
-    const lx = stores?.phaser?.mainCharacter?.body?.x;
-    const ly = stores?.phaser?.mainCharacter?.body?.y;
-    if (Number.isFinite(lx) && Number.isFinite(ly)) {
-      const me = worldToMinimap(lx, ly, size);
-      ctx.fillStyle = "#7dff6b";
-      ctx.beginPath();
-      ctx.arc(me.x, me.y, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const popup = isHidePopupsEnergyResourceImage(node)
+      ? node.closest(HIDE_POPUPS_ENERGY_POPUP_SELECTOR)
+      : node.querySelector(HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR)?.closest(HIDE_POPUPS_ENERGY_POPUP_SELECTOR);
+    return isHidePopupsEnergyPopup(popup) ? popup : null;
+  }
 
-    minimapState.rafId = requestAnimationFrame(renderMinimap);
-  };
+  function hideBuildingPopup(toast) {
+    const cfg = getHidePopupsConfig();
+    if (!hidePopupsState.enabled
+      || !cfg.hideBuildingPopups
+      || !isHidePopupsElement(toast)
+      || toast.dataset.zyroxPopupHidden === "building") return false;
 
-  const startMinimapLoop = () => {
-    if (minimapState.rafId) cancelAnimationFrame(minimapState.rafId);
-    minimapState.rafId = requestAnimationFrame(renderMinimap);
-  };
+    toast.dataset.zyroxPopupHidden = "building";
+    toast.style.display = "none";
+    toast.querySelector(HIDE_POPUPS_TOAST_CLOSE_SELECTOR)?.click();
+    hidePopupsState.hiddenBuildingPopups += 1;
+    hidePopupsLog("Hid building popup", toast);
+    return true;
+  }
 
-  const stopMinimapLoop = () => {
-    if (minimapState.rafId) cancelAnimationFrame(minimapState.rafId);
-    minimapState.rafId = 0;
-  };
+  function hideEnergyPopup(popup) {
+    const cfg = getHidePopupsConfig();
+    if (!hidePopupsState.enabled
+      || !cfg.hideEnergyPopups
+      || !isHidePopupsEnergyPopup(popup)
+      || popup.dataset.zyroxPopupHidden === "energy") return false;
 
-  const initMinimapDom = () => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 200;
-    canvas.height = 200;
-    Object.assign(canvas.style, { position: "fixed", right: "12px", top: "12px", width: "200px", height: "200px", zIndex: "9999", background: "rgba(8,10,16,.62)", border: "1px solid rgba(255,255,255,.24)", borderRadius: "8px", cursor: "move" });
-    document.body.appendChild(canvas);
-    minimapState.canvas = canvas;
-    minimapState.ctx = canvas.getContext("2d");
+    popup.dataset.zyroxPopupHidden = "energy";
+    popup.style.display = "none";
+    hidePopupsState.hiddenEnergyPopups += 1;
+    hidePopupsLog("Hid energy/resource popup", popup);
+    return true;
+  }
 
-    const button = document.createElement("button");
-    button.textContent = "Minimap";
-    Object.assign(button.style, { position: "fixed", right: "12px", top: "220px", zIndex: "10000" });
-    button.addEventListener("click", () => { minimapState.visible = !minimapState.visible; canvas.style.display = minimapState.visible ? "block" : "none"; });
-    document.body.appendChild(button);
-    minimapState.button = button;
+  function scanHidePopupNode(node) {
+    if (!isHidePopupsElement(node)) return;
 
-    minimapState.keyHandler = (e) => { if (e.key?.toLowerCase() === "m") button.click(); };
-    window.addEventListener("keydown", minimapState.keyHandler, true);
+    if (node.matches(HIDE_POPUPS_TOAST_SELECTOR)) hideBuildingPopup(node);
+    const energyPopup = findHidePopupsEnergyPopup(node);
+    if (energyPopup) hideEnergyPopup(energyPopup);
 
-    let drag = null;
-    canvas.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, left: canvas.offsetLeft, top: canvas.offsetTop }; canvas.setPointerCapture(e.pointerId); canvas.style.right = "auto"; });
-    canvas.addEventListener("pointermove", (e) => { if (!drag) return; canvas.style.left = `${drag.left + (e.clientX - drag.x)}px`; canvas.style.top = `${drag.top + (e.clientY - drag.y)}px`; });
-    canvas.addEventListener("pointerup", () => { drag = null; });
-  };
+    node.querySelectorAll?.(HIDE_POPUPS_TOAST_SELECTOR).forEach(hideBuildingPopup);
+    node.querySelectorAll?.(HIDE_POPUPS_ENERGY_POPUP_SELECTOR).forEach((candidate) => {
+      if (isHidePopupsEnergyPopup(candidate)) hideEnergyPopup(candidate);
+    });
+    node.querySelectorAll?.(HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR).forEach((image) => {
+      const popup = findHidePopupsEnergyPopup(image);
+      if (popup) hideEnergyPopup(popup);
+    });
+  }
 
-  const startMinimap = () => {
-    if (minimapState.pollTimer || minimapState.initialized) return;
-    minimapState.pollTimer = setInterval(() => {
-      const stores = findStores();
-      const room = findColyseusRoom();
-      if (!stores || !room?.state?.players || !document.body) return;
-      clearInterval(minimapState.pollTimer);
-      minimapState.pollTimer = null;
-      minimapState.stores = stores;
-      minimapState.room = room;
-      minimapState.worldBounds = getWorldBounds(stores);
-      initMinimapDom();
-      drawTerrainCache();
-      room.state.players.onAdd((player, key) => {
-        const entry = { key, x: Number(player?.x) || 0, y: Number(player?.y) || 0, teamId: player?.teamId ?? null };
-        minimapState.players.set(key, entry);
-        player.listen?.("x", (x) => { const p = minimapState.players.get(key); if (p) p.x = Number(x) || 0; });
-        player.listen?.("y", (y) => { const p = minimapState.players.get(key); if (p) p.y = Number(y) || 0; });
-      });
-      room.state.players.onRemove((_, key) => { minimapState.players.delete(key); });
-      minimapState.initialized = true;
-      startMinimapLoop();
-    }, 250);
-  };
+  function scanHidePopupsDocument() {
+    scanHidePopupNode(document.documentElement);
+  }
 
-  const stopMinimap = () => {
-    if (minimapState.pollTimer) { clearInterval(minimapState.pollTimer); minimapState.pollTimer = null; }
-    stopMinimapLoop();
-    if (minimapState.keyHandler) window.removeEventListener("keydown", minimapState.keyHandler, true);
-    if (minimapState.canvas) minimapState.canvas.remove();
-    if (minimapState.button) minimapState.button.remove();
-    cleanupMinimapPlayers();
-    minimapState.canvas = null; minimapState.ctx = null; minimapState.button = null; minimapState.keyHandler = null; minimapState.terrainCanvas = null; minimapState.stores = null; minimapState.room = null; minimapState.worldBounds = null; minimapState.initialized = false;
+  function observeHidePopups() {
+    if (hidePopupsState.observer || !document.documentElement) return;
+
+    hidePopupsState.observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "attributes") scanHidePopupNode(mutation.target);
+        for (const node of mutation.addedNodes) scanHidePopupNode(node);
+      }
+    });
+
+    hidePopupsState.observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "src"], childList: true, subtree: true });
+  }
+
+  function syncHidePopups() {
+    if (hidePopupsState.enabled) scanHidePopupsDocument();
+  }
+
+  function startHidePopups() {
+    hidePopupsState.enabled = true;
+    observeHidePopups();
+    scanHidePopupsDocument();
+    hidePopupsLog("Enabled");
+  }
+
+  function stopHidePopups() {
+    hidePopupsState.enabled = false;
+    hidePopupsLog("Disabled");
+  }
+
+  window.__zyroxHidePopups = {
+    enable: startHidePopups,
+    disable: stopHidePopups,
+    rescan: scanHidePopupsDocument,
+    sync: syncHidePopups,
+    status() {
+      return {
+        enabled: hidePopupsState.enabled,
+        observer: Boolean(hidePopupsState.observer),
+        ...getHidePopupsConfig(),
+        hiddenBuildingPopups: hidePopupsState.hiddenBuildingPopups,
+        hiddenEnergyPopups: hidePopupsState.hiddenEnergyPopups,
+      };
+    },
   };
 
   const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
@@ -4360,9 +4339,9 @@
       onEnable: startCameraZoom,
       onDisable: stopCameraZoom,
     },
-    [MINIMAP_MODULE_NAME]: {
-      onEnable: startMinimap,
-      onDisable: stopMinimap,
+    [HIDE_POPUPS_MODULE_NAME]: {
+      onEnable: startHidePopups,
+      onDisable: stopHidePopups,
     },
   };
   const MODULE_DESCRIPTIONS = {
@@ -4378,7 +4357,7 @@
     "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
     "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
     [CAMERA_ZOOM_MODULE_NAME]: "Adjust how much you can see on the screen",
-    [MINIMAP_MODULE_NAME]: "Shows a draggable 2D minimap with terrain landmarks and live player dots.",
+    [HIDE_POPUPS_MODULE_NAME]: "Hides Floor is Lava building purchase toasts and energy/resource popups.",
   };
 
   // --- End of Core Utilities ---
@@ -4472,9 +4451,12 @@
               settings: [],
             },
             {
-              name: MINIMAP_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[MINIMAP_MODULE_NAME],
-              settings: [],
+              name: HIDE_POPUPS_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[HIDE_POPUPS_MODULE_NAME],
+              settings: [
+                { id: "hideEnergyPopups", label: "Hide Energy Popup", type: "checkbox", default: true },
+                { id: "hideBuildingPopups", label: "Hide Building Popup", type: "checkbox", default: true },
+              ],
             },
           ],
         },
@@ -7027,6 +7009,9 @@
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
+              }
+              if (moduleName === HIDE_POPUPS_MODULE_NAME) {
+                syncHidePopups();
               }
               saveSettings();
             });
