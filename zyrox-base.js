@@ -1425,10 +1425,10 @@
     lastToastValue: null,
   };
   const CAMERA_ZOOM_MODULE_NAME = "Zoom (FOV)";
-  const CAMERA_ZOOM_MIN = 0.5;
+  const CAMERA_ZOOM_MIN = 0.3;
   const CAMERA_ZOOM_MAX = 2.0;
   const CAMERA_ZOOM_STEP = 0.05;
-  const CAMERA_ZOOM_DEFAULT = 1.0;
+  const CAMERA_ZOOM_DEFAULT = 0.8;
 
   function espLog(message, extra) {
     if (extra !== undefined) console.log(`${ESP_LOG} ${message}`, extra);
