@@ -17,7 +17,8 @@
   const TOAST_SELECTOR = ".Toastify__toast";
   const TOAST_CLOSE_SELECTOR = ".Toastify__close-button";
   const ENERGY_POPUP_SELECTOR = ".maxAll.flex.hc";
-  const ENERGY_RESOURCE_IMAGE_SELECTOR = "img[src^='/assets/map/inventory/resources/']";
+  const ENERGY_RESOURCE_PATH = "/assets/map/inventory/resources/";
+  const ENERGY_RESOURCE_IMAGE_SELECTOR = `img[src*='${ENERGY_RESOURCE_PATH}']`;
 
   const state = {
     enabled: true,
@@ -36,8 +37,23 @@
     return node instanceof Element;
   }
 
+  function isEnergyResourceImage(node) {
+    if (!isElement(node) || node.tagName !== "IMG") return false;
+
+    const src = node.getAttribute("src") || node.src || node.currentSrc || "";
+    return src.includes(ENERGY_RESOURCE_PATH);
+  }
+
   function isEnergyPopup(node) {
     return isElement(node) && node.matches(ENERGY_POPUP_SELECTOR) && Boolean(node.querySelector(ENERGY_RESOURCE_IMAGE_SELECTOR));
+  }
+
+  function findEnergyPopup(node) {
+    if (!isElement(node)) return null;
+    if (isEnergyPopup(node)) return node;
+
+    const popup = isEnergyResourceImage(node) ? node.closest(ENERGY_POPUP_SELECTOR) : node.querySelector(ENERGY_RESOURCE_IMAGE_SELECTOR)?.closest(ENERGY_POPUP_SELECTOR);
+    return isEnergyPopup(popup) ? popup : null;
   }
 
   function hidePurchaseToast(toast) {
@@ -65,11 +81,16 @@
     if (!isElement(node)) return;
 
     if (node.matches(TOAST_SELECTOR)) hidePurchaseToast(node);
-    if (isEnergyPopup(node)) hideEnergyPopup(node);
+    const energyPopup = findEnergyPopup(node);
+    if (energyPopup) hideEnergyPopup(energyPopup);
 
     node.querySelectorAll?.(TOAST_SELECTOR).forEach(hidePurchaseToast);
     node.querySelectorAll?.(ENERGY_POPUP_SELECTOR).forEach((candidate) => {
       if (isEnergyPopup(candidate)) hideEnergyPopup(candidate);
+    });
+    node.querySelectorAll?.(ENERGY_RESOURCE_IMAGE_SELECTOR).forEach((image) => {
+      const popup = findEnergyPopup(image);
+      if (popup) hideEnergyPopup(popup);
     });
   }
 
@@ -82,11 +103,12 @@
 
     state.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
+        if (mutation.type === "attributes") scanNode(mutation.target);
         for (const node of mutation.addedNodes) scanNode(node);
       }
     });
 
-    state.observer.observe(document.documentElement, { childList: true, subtree: true });
+    state.observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "src"], childList: true, subtree: true });
     scanDocument();
     log("Enabled. Use window.__zyroxHidePopups to inspect or change settings.");
   }
