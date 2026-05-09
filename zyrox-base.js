@@ -1910,7 +1910,8 @@
       const stableId = String(characterId ?? `${Math.round(pos.x)}:${Math.round(pos.y)}`);
       activeIds.add(stableId);
       const angle = Math.atan2(pos.y - camY, pos.x - camX);
-      const distance = Math.hypot(pos.x - camX, pos.y - camY) * zoom;
+      const worldDistance = Math.hypot(pos.x - camX, pos.y - camY);
+      const screenDistance = worldDistance * zoom;
       const rawX = (pos.x - camX) * zoom + canvas.width / 2;
       const rawY = (pos.y - camY) * zoom + canvas.height / 2;
       const prev = espState.seenPlayers.get(stableId);
@@ -1967,7 +1968,7 @@
       const arrowSize = Math.max(6, Number(isTeammate ? espCfg.teammateArrowSize : espCfg.arrowSize) || 14);
 
       if (onScreen && showHitbox) {
-        const boxSize = Math.max(24, hitboxSize / zoom);
+        const boxSize = Math.max(24, hitboxSize * zoom);
         ctx.beginPath();
         ctx.lineWidth = hitboxWidth;
         ctx.strokeStyle = hitboxColor;
@@ -1977,8 +1978,8 @@
       const shouldDrawOffscreen = !onScreen && offscreenStyle !== "none";
       const shouldDrawTracer = offscreenStyle === "tracers" && (alwaysTracer || !onScreen);
 
-      let labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
-      let labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, distance) + canvas.height / 2;
+      let labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, screenDistance) + canvas.width / 2;
+      let labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, screenDistance) + canvas.height / 2;
 
       if (shouldDrawOffscreen || shouldDrawTracer) {
         const margin = 20;
@@ -2052,7 +2053,7 @@
       ctx.font = `${nameSize}px ${espCfg.font || "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const labelText = formatEspLabel(getCharacterName(character, characterId), distance, nameDistanceVisibility, distanceStyle);
+      const labelText = formatEspLabel(getCharacterName(character, characterId), worldDistance, nameDistanceVisibility, distanceStyle);
       const textWidth = Math.max(1, ctx.measureText(labelText).width);
       const pad = Math.max(8, nameSize * 0.35);
       const halfText = textWidth / 2;
@@ -2241,7 +2242,7 @@
           const camX = Number(camera?.midPoint?.x);
           const camY = Number(camera?.midPoint?.y);
           const zoom = Number(camera?.zoom ?? 1) || 1;
-          const hitRadius = (Math.max(20, 120 / zoom) / 2) * 3;
+          const hitRadius = (Math.max(20, 120 * zoom) / 2) * 3;
           if (Number.isFinite(camX) && Number.isFinite(camY)) {
             for (const { character } of getCharacterEntries(stores)) {
               if (!character || character === me) continue;
@@ -2683,7 +2684,7 @@
       const screen = projectWorldToScreen(player, snapshot.camera, width, height);
       if (!screen) continue;
       if (screen.x < -margin || screen.x > width + margin || screen.y < -margin || screen.y > height + margin) continue;
-      const boxSize = Math.max(24, baseHitbox / Math.max(0.01, Number(screen.zoom) || 1));
+      const boxSize = Math.max(24, baseHitbox * Math.max(0.01, Number(screen.zoom) || 1));
       const half = boxSize * 0.5;
       if (mx < screen.x - half || mx > screen.x + half || my < screen.y - half || my > screen.y + half) continue;
       const dist = Math.hypot(mx - screen.x, my - screen.y);
