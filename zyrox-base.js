@@ -4294,6 +4294,51 @@
     applyAnimationSkipState(false);
   }
 
+  const ANTI_AFK_MODULE_NAME = "Anti AFK";
+  const antiAfkState = {
+    intervalId: null,
+    phase: 0,
+  };
+
+  function getAntiAfkConfig() {
+    const cfg = moduleCfg(ANTI_AFK_MODULE_NAME);
+    const pulseMs = Math.max(4000, Number(cfg.pulseMs) || 12000);
+    return { pulseMs };
+  }
+
+  function dispatchAntiAfkPulse() {
+    const phase = antiAfkState.phase++ % 4;
+    if (phase === 0) {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 6, clientY: 6, bubbles: true }));
+      return;
+    }
+    if (phase === 1) {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 10, clientY: 10, bubbles: true }));
+      return;
+    }
+    if (phase === 2) {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", code: "ShiftLeft", bubbles: true }));
+      return;
+    }
+    document.dispatchEvent(new Event("visibilitychange", { bubbles: false }));
+  }
+
+  function startAntiAfk() {
+    if (antiAfkState.intervalId) clearInterval(antiAfkState.intervalId);
+    const { pulseMs } = getAntiAfkConfig();
+    dispatchAntiAfkPulse();
+    antiAfkState.intervalId = setInterval(() => {
+      dispatchAntiAfkPulse();
+    }, pulseMs);
+  }
+
+  function stopAntiAfk() {
+    if (antiAfkState.intervalId) {
+      clearInterval(antiAfkState.intervalId);
+      antiAfkState.intervalId = null;
+    }
+  }
+
   const MODULE_BEHAVIORS = {
     [ANIMATION_SKIP_MODULE_NAME]: {
       onEnable: startAnimationSkip,
@@ -4343,6 +4388,10 @@
       onEnable: startHidePopups,
       onDisable: stopHidePopups,
     },
+    [ANTI_AFK_MODULE_NAME]: {
+      onEnable: startAntiAfk,
+      onDisable: stopAntiAfk,
+    },
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
@@ -4358,6 +4407,7 @@
     "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
     [CAMERA_ZOOM_MODULE_NAME]: "Adjust how much you can see on the screen",
     [HIDE_POPUPS_MODULE_NAME]: "Hides Floor is Lava building purchase toasts and energy/resource popups.",
+    [ANTI_AFK_MODULE_NAME]: "Sends lightweight synthetic activity pulses to reduce AFK kicks.",
   };
 
   // --- End of Core Utilities ---
@@ -4374,6 +4424,13 @@
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
+              ],
+            },
+            {
+              name: ANTI_AFK_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[ANTI_AFK_MODULE_NAME],
+              settings: [
+                { id: "pulseMs", label: "Activity Pulse", type: "slider", min: 4000, max: 45000, step: 500, default: 12000 },
               ],
             },
           ],
