@@ -145,7 +145,7 @@
     return [];
   }
 
-  function handlePacket(decodedPacket, source) {
+  function handlePowerupPacket(decodedPacket, source) {
     if (!decodedPacket) return;
 
     const key = decodedPacket?.payload?.key || decodedPacket?.payload?.type || "unknown";
@@ -169,6 +169,26 @@
     console.groupEnd();
   }
 
+
+  function handleBalancePacket(decodedPacket, source) {
+    if (!decodedPacket) return;
+
+    const isStateUpdate = decodedPacket?.payload?.key === "STATE_UPDATE";
+    const balanceType = decodedPacket?.payload?.data?.type;
+    if (!isStateUpdate || balanceType !== "BALANCE") return;
+
+    const currentBalance = decodedPacket?.payload?.data?.value;
+    if (typeof currentBalance !== "number") return;
+
+    console.group(`${LOG_PREFIX} balance packet intercepted`);
+    console.log("source:", source);
+    console.log("transport:", decodedPacket.transport);
+    console.log("packet key:", decodedPacket.payload.key);
+    console.log("current balance:", currentBalance);
+    console.log("full balance payload:", safeJson(decodedPacket.payload.data));
+    console.groupEnd();
+  }
+
   const originalSend = WebSocket.prototype.send;
   WebSocket.prototype.send = function sendPatched(data) {
     if (!this.__zyroxAbilityHooked) {
@@ -178,8 +198,13 @@
 
         if (!(payload instanceof ArrayBuffer)) return;
 
-        handlePacket(decodeBlueboatBinary(payload), "socket.io/blueboat");
-        handlePacket(decodeColyseusPacket(payload), "colyseus");
+        const blueboatPacket = decodeBlueboatBinary(payload);
+        const colyseusPacket = decodeColyseusPacket(payload);
+
+        handlePowerupPacket(blueboatPacket, "socket.io/blueboat");
+        handlePowerupPacket(colyseusPacket, "colyseus");
+        handleBalancePacket(blueboatPacket, "socket.io/blueboat");
+        handleBalancePacket(colyseusPacket, "colyseus");
       });
     }
 
