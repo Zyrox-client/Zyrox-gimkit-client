@@ -4359,6 +4359,7 @@
     renderTimerId: null,
     wired: false,
     listeners: null,
+    packetLogCount: 0,
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4429,6 +4430,15 @@
   function onAbilityHudInbound(event) {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
+    if (abilityHudState.packetLogCount < 18) {
+      abilityHudState.packetLogCount += 1;
+      console.debug(`${ABILITY_HUD_LOG} inbound packet`, {
+        key,
+        eventName: packet?.eventName,
+        hasData: Boolean(packet?.data),
+        dataKeys: packet?.data && typeof packet.data === "object" ? Object.keys(packet.data).slice(0, 12) : [],
+      });
+    }
     if (key === "PLAYER_JOINS_STATIC_STATE") {
       console.debug(`${ABILITY_HUD_LOG} static join packet intercepted`);
     }
@@ -4443,7 +4453,20 @@
       }
     }
     const abilities = extractAbilitiesFromPacket(packet);
-    if (!abilities.length) return;
+    if (!abilities.length) {
+      if (key === "PLAYER_JOINS_STATIC_STATE" || key === "STATE_UPDATE") {
+        console.debug(`${ABILITY_HUD_LOG} no abilities extracted`, {
+          key,
+          probe: {
+            hasDataPowerups: Array.isArray(packet?.data?.powerups),
+            hasPayloadDataPowerups: Array.isArray(packet?.payload?.data?.powerups),
+            hasPayloadPowerups: Array.isArray(packet?.payload?.powerups),
+          },
+        });
+      }
+      return;
+    }
+    console.debug(`${ABILITY_HUD_LOG} extracted abilities`, { key, count: abilities.length });
     let changed = false;
     for (const rawAbility of abilities) {
       const normalized = normalizeAbility(rawAbility);
@@ -4545,6 +4568,13 @@
     });
     document.addEventListener("mousemove", abilityHudMouseMove);
     document.addEventListener("mouseup", abilityHudMouseUp);
+    if (abilityHudBootstrap.latestPacket) {
+      console.debug(`${ABILITY_HUD_LOG} hydrating from bootstrap cache`);
+      onAbilityHudInbound({ detail: abilityHudBootstrap.latestPacket });
+    }
+    if (Number.isFinite(abilityHudBootstrap.latestBalance)) {
+      abilityHudState.currentBalance = Number(abilityHudBootstrap.latestBalance) || 0;
+    }
     requestAbilityHudRender();
   }
 
@@ -4574,6 +4604,33 @@
     document.removeEventListener("mousemove", abilityHudMouseMove);
     document.removeEventListener("mouseup", abilityHudMouseUp);
   }
+
+  const abilityHudBootstrap = {
+    latestPacket: null,
+    latestBalance: 0,
+  };
+
+  socketManager.addEventListener("blueboatMessage", (event) => {
+    const packet = event?.detail;
+    const key = packet?.key ?? packet?.payload?.key;
+    if (!key) return;
+    if (key === "PLAYER_JOINS_STATIC_STATE") {
+      abilityHudBootstrap.latestPacket = packet;
+      const count = Array.isArray(packet?.data?.powerups) ? packet.data.powerups.length : 0;
+      console.debug(`${ABILITY_HUD_LOG} bootstrap captured static state`, { count });
+      return;
+    }
+    if (key === "STATE_UPDATE") {
+      const type = packet?.data?.type ?? packet?.payload?.data?.type;
+      if (type === "BALANCE") {
+        const value = Number(packet?.data?.value ?? packet?.payload?.data?.value);
+        if (Number.isFinite(value)) abilityHudBootstrap.latestBalance = value;
+      }
+      if (!abilityHudBootstrap.latestPacket) {
+        abilityHudBootstrap.latestPacket = packet;
+      }
+    }
+  });
 
   const MODULE_BEHAVIORS = {
     [ANIMATION_SKIP_MODULE_NAME]: {
