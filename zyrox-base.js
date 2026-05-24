@@ -4559,6 +4559,10 @@
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
     abilityHudState.purchasedAbilities.add(ability.name);
+    if (String(ability.name || "").trim().toLowerCase() === "rebooter") {
+      console.debug(`${ABILITY_HUD_LOG} rebooter purchased; clearing used abilities set while preserving purchased abilities`);
+      abilityHudState.usedAbilities.clear();
+    }
     requestAbilityHudRender();
   }
 
