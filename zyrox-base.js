@@ -4669,10 +4669,7 @@
     const frag = document.createDocumentFragment();
     for (const ability of entries) {
       const wrap = document.createElement("div");
-      wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
-      const chip = document.createElement("div");
-      chip.style.cssText = `min-width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:12px;`;
-      chip.textContent = (ability.icon || "✦").includes("fa-") ? "❄" : (ability.icon || "✦");
+      wrap.style.cssText = "display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
       const info = document.createElement("div");
       info.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;";
       const name = document.createElement("div");
@@ -4691,12 +4688,16 @@
       const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
       buyBtn.disabled = disabled;
       buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
-      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${disabled ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${disabled ? ".55" : "1"};`;
+      const buttonBorder = disabled ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)";
+      const buttonBg = disabled ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)";
+      const buttonColor = "#fff";
+      buyBtn.className = "zyrox-upgrade-hud-button";
+      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};min-width:72px;text-align:center;opacity:${disabled ? ".65" : "1"};`;
       buyBtn.addEventListener("click", () => {
         if (alreadyPurchased) sendAbilityUse(ability);
         else sendAbilityPurchase(ability);
       });
-      wrap.append(chip, info, buyBtn);
+      wrap.append(info, buyBtn);
       frag.appendChild(wrap);
     }
     abilityHudState.body.innerHTML = "";
