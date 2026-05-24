@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.7.8
+// @version      2.8.1
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.7.8";
+    const CLIENT_VERSION = "2.8.1";
     return CLIENT_VERSION;
   }
 
@@ -1352,6 +1352,26 @@
         break;
     }
   });
+
+  const extractDrawItAnswerCandidates = (stateUpdateData) => {
+    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
+    const answers = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
+      for (const item of row.value) {
+        const directKey = item?.key;
+        const nestedKey = item?.value?.key;
+        const fieldKey = directKey ?? nestedKey;
+        const directValue = item?.value;
+        const nestedValue = item?.value?.value;
+        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
+        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
+        const answer = fieldValue.trim();
+        if (answer) answers.push(answer);
+      }
+    }
+    return answers;
+  };
 
   socketManager.addEventListener("blueboatMessage", (event) => {
     if (event.detail?.key !== "STATE_UPDATE") return;
@@ -4513,6 +4533,18 @@
       console.debug(`${ABILITY_HUD_LOG} ASSERT freeze mapping ok: display="${ability.displayName}" payload="${ability.name}"`);
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
+    abilityHudState.purchasedAbilities.add(ability.name);
+    requestAbilityHudRender();
+  }
+
+  function sendAbilityUse(ability) {
+    if (!ability?.name) return;
+    if (abilityHudState.usedAbilities.has(ability.name)) return;
+    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    abilityHudState.usedAbilities.add(ability.name);
+    requestAbilityHudRender();
   }
 
   function sendAbilityUse(ability) {
@@ -6510,26 +6542,6 @@
         if (popup.style.opacity === "0") popup.style.display = "none";
       }, 180);
     }, cfg.durationMs);
-  }
-
-  function extractDrawItAnswerCandidates(stateUpdateData) {
-    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
-    const answers = [];
-    for (const row of rows) {
-      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
-      for (const item of row.value) {
-        const directKey = item?.key;
-        const nestedKey = item?.value?.key;
-        const fieldKey = directKey ?? nestedKey;
-        const directValue = item?.value;
-        const nestedValue = item?.value?.value;
-        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
-        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
-        const answer = fieldValue.trim();
-        if (answer) answers.push(answer);
-      }
-    }
-    return answers;
   }
 
 
