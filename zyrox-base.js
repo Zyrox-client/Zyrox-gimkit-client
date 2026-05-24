@@ -4517,19 +4517,16 @@
   function onAbilityHudOutbound(event) {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
-    if (key !== "POWERUP_PURCHASED") return;
+    if (key !== "POWERUP_PURCHASED" && key !== "POWERUP_ACTIVATED") return;
     const payload = packet?.payload || packet;
-    console.debug(`${ABILITY_HUD_LOG} outbound purchase observed`, payload);
-    const purchasedName = typeof payload?.data === "string" ? payload.data.trim() : "";
-    if (purchasedName) {
-      abilityHudState.purchasedAbilities.add(purchasedName);
-      requestAbilityHudRender();
-    }
+    console.debug(`${ABILITY_HUD_LOG} outbound powerup observed`, payload);
   }
 
   function sendAbilityPurchase(ability) {
     if (!ability?.name) return;
     if (abilityHudState.purchasedAbilities.has(ability.name) || abilityHudState.usedAbilities.has(ability.name)) return;
+    const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
+    if (abilityHudState.currentBalance < pricing.roundedCost) return;
     const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_PURCHASED", data: ability.name };
     console.debug(`${ABILITY_HUD_LOG} sending purchase payload`, payload);
     if (ability.name === "Icer") {
@@ -4537,6 +4534,16 @@
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
     abilityHudState.purchasedAbilities.add(ability.name);
+    requestAbilityHudRender();
+  }
+
+  function sendAbilityUse(ability) {
+    if (!ability?.name) return;
+    if (abilityHudState.usedAbilities.has(ability.name)) return;
+    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    abilityHudState.usedAbilities.add(ability.name);
     requestAbilityHudRender();
   }
 
@@ -4574,6 +4581,7 @@
       desc.textContent = ability.description || "No description";
       desc.title = ability.description || "";
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
+      const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
       const price = document.createElement("div");
       price.style.cssText = "font-size:11px;color:#89f0b0;font-weight:600;";
       price.textContent = `$${pricing.roundedCost} (raw ${pricing.rawCost.toFixed(2)})`;
@@ -4582,7 +4590,7 @@
       buyBtn.type = "button";
       const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
       const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
-      const disabled = alreadyUsed;
+      const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
       buyBtn.disabled = disabled;
       buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
       buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${disabled ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${disabled ? ".55" : "1"};`;
