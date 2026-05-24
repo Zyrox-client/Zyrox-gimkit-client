@@ -1,0 +1,1428 @@
+{
+  "transport": "blueboat-binary",
+  "eventName": "message-YFsagFwEN9kfhD",
+  "payload": {
+    "key": "PLAYER_JOINS_STATIC_STATE",
+    "data": {
+      "gameOptions": {
+        "type": "live",
+        "specialGameType": [
+          "THANOS"
+        ],
+        "goal": {
+          "type": "time",
+          "value": 59
+        },
+        "currency": "$",
+        "language": "en",
+        "startingCash": 0,
+        "handicap": -50,
+        "clapping": true,
+        "cleanPowerupsOnly": false,
+        "music": true,
+        "allowGoogleTranslate": false,
+        "modeOptions": {}
+      },
+      "powerups": [
+        {
+          "name": "Soul Stone",
+          "description": "Steal, control, manipulate, and alter souls",
+          "icon": "far fa-gem",
+          "color": {
+            "background": "#f4511e",
+            "text": "white"
+          },
+          "baseCost": 1,
+          "percentageCost": 0,
+          "disabled": [
+            "nonThanosMode"
+          ]
+        },
+        {
+          "name": "Time Stone",
+          "description": "See into the past and the future",
+          "icon": "far fa-gem",
+          "color": {
+            "background": "#388e3c",
+            "text": "white"
+          },
+          "baseCost": 10,
+          "percentageCost": 0.1,
+          "disabled": [
+            "nonThanosMode"
+          ]
+        },
+        {
+          "name": "Space Stone",
+          "description": "Exist in any location, move any object anywhere throughout reality and warp space",
+          "icon": "far fa-gem",
+          "color": {
+            "background": "#1976d2",
+            "text": "white"
+          },
+          "baseCost": 100,
+          "percentageCost": 0.2,
+          "disabled": [
+            "nonThanosMode"
+          ]
+        },
+        {
+          "name": "Mind Stone",
+          "description": "Access the thoughts and dreams of others",
+          "icon": "far fa-gem",
+          "color": {
+            "background": "#ffcc80",
+            "text": "white"
+          },
+          "baseCost": 1000,
+          "percentageCost": 0.3,
+          "disabled": [
+            "nonThanosMode"
+          ]
+        },
+        {
+          "name": "Reality Stone",
+          "description": "Create a new reality, one that breaks all rules",
+          "icon": "far fa-gem",
+          "color": {
+            "background": "#d32f2f",
+            "text": "white"
+          },
+          "baseCost": 10000,
+          "percentageCost": 0.4,
+          "disabled": [
+            "nonThanosMode"
+          ]
+        },
+        {
+          "name": "Power Stone",
+          "description": " Access and manipulate all forms of energy",
+          "icon": "far fa-gem",
+          "color": {
+            "background": "#4527a0",
+            "text": "white"
+          },
+          "baseCost": 150000,
+          "percentageCost": 0,
+          "disabled": [
+            "nonThanosMode"
+          ]
+        },
+        {
+          "name": "summerSong",
+          "displayName": "Summer Song",
+          "description": "Purchase and get ready for the summer!",
+          "icon": "fas fa-music",
+          "color": {
+            "background": "#ff6f00",
+            "text": "white"
+          },
+          "category": [
+            "specialSound"
+          ],
+          "baseCost": 50,
+          "percentageCost": 0.3,
+          "disabled": [
+            "musicOff"
+          ],
+          "customTag": "",
+          "autoActivate": false
+        },
+        {
+          "name": "Icer",
+          "displayName": "Freezer",
+          "description": "Freeze other #s! They won't be able to answer questions or visit the shop for 15 seconds!",
+          "icon": "fas fa-snowflake",
+          "color": {
+            "background": "#495057",
+            "text": "white"
+          },
+          "baseCost": 40,
+          "percentageCost": 0.15,
+          "disabled": [
+            "cleanOnly"
+          ]
+        },
+        {
+          "name": "Link",
+          "description": "Link new earnings with another # for 60 seconds",
+          "icon": "fas fa-link",
+          "color": {
+            "background": "#002171",
+            "text": "white"
+          },
+          "customTag": "",
+          "baseCost": 1500,
+          "percentageCost": 0.38,
+          "disabled": [
+            "cleanOnly"
+          ]
+        },
+        {
+          "name": "dreamweaver",
+          "displayName": "Dreamweaver",
+          "description": "Take it easy with this catchy tune.",
+          "icon": "fas fa-music",
+          "color": {
+            "background": "#00796b",
+            "text": "white"
+          },
+          "category": [
+            "specialSound"
+          ],
+          "baseCost": 50,
+          "percentageCost": 0.3,
+          "disabled": [
+            "musicOff"
+          ],
+          "customTag": "",
+          "autoActivate": false
+        },
+        {
+          "name": "repurchasePowerups",
+          "displayName": "Rebooter",
+          "description": "Reuse all your powerups a second time",
+          "icon": "fas fa-power-off",
+          "customTag": "",
+          "color": {
+            "background": "#009688",
+            "text": "white"
+          },
+          "baseCost": 1000,
+          "percentageCost": 0.3
+        },
+        {
+          "name": "minuteMoreEarnings",
+          "displayName": "Minute To Win It",
+          "description": "Double your earnings for the next 60 seconds!",
+          "icon": "fad fa-sack-dollar",
+          "customTag": "",
+          "color": {
+            "background": "#fff3e0",
+            "text": "#2e7d32"
+          },
+          "baseCost": 500,
+          "percentageCost": 0.06,
+          "disabled": null
+        },
+        0,
+        0,
+        {
+          "name": "outnumbered",
+          "displayName": "Outnumbered",
+          "description": "Inundate another # with numbers!",
+          "icon": "fal fa-calculator-alt",
+          "customTag": "",
+          "color": {
+            "background": "#1a237e",
+            "text": "white"
+          },
+          "baseCost": 150,
+          "percentageCost": 0.22,
+          "disabled": [
+            "cleanOnly"
+          ]
+        },
+        {
+          "name": "Discounter",
+          "description": "All shop upgrades are 25% off for 5 minutes",
+          "icon": "fas fa-dollar-sign",
+          "color": {
+            "background": "#5C097C",
+            "text": "white"
+          },
+          "baseCost": 250,
+          "percentageCost": 0.16
+        },
+        {
+          "name": "Blurred Screen",
+          "displayName": "Blur",
+          "description": "Blur another #'s screen for 15 seconds!",
+          "icon": "fad fa-adjust",
+          "color": {
+            "background": "#004d40",
+            "text": "white"
+          },
+          "baseCost": 40,
+          "percentageCost": 0.15,
+          "disabled": [
+            "cleanOnly"
+          ]
+        },
+        {
+          "name": "Clap Multiplier",
+          "displayName": "Clapinator",
+          "description": "Your claps, but multiplied by 10x",
+          "icon": "fas fa-hands",
+          "color": {
+            "background": "#c62828",
+            "text": "#ffee58"
+          },
+          "baseCost": 20,
+          "percentageCost": 0.1,
+          "customTag": "",
+          "disabled": [
+            "clappingOff"
+          ],
+          "autoActivate": true
+        },
+        {
+          "name": "Shield",
+          "description": "Prevent other #s from negatively impacting you for 3 minutes",
+          "icon": "fas fa-shield-alt",
+          "color": {
+            "background": "#3C8944",
+            "text": "white"
+          },
+          "baseCost": 25,
+          "percentageCost": 0.15,
+          "disabled": [
+            "cleanOnly"
+          ]
+        },
+        {
+          "name": "Giving",
+          "displayName": "Gift",
+          "description": "Increase another #'s balance by 25%",
+          "icon": "fas fa-gifts",
+          "color": {
+            "background": "#691b99",
+            "text": "white"
+          },
+          "baseCost": 200,
+          "percentageCost": 0.26
+        },
+        {
+          "name": "Subtractor",
+          "description": "Remove 20% of a #'s earnings",
+          "icon": "fas fa-minus-circle",
+          "color": {
+            "background": "#FF5964",
+            "text": "white"
+          },
+          "baseCost": 150,
+          "percentageCost": 0.2,
+          "disabled": [
+            "cleanOnly"
+          ]
+        }
+      ],
+      "[object Object]": {
+        "name": "Mega Bonus",
+        "description": "Earnings are multiplied by 5x for a single question",
+        "icon": "fas fa-medal",
+        "color": {
+          "background": "#054F00",
+          "text": "white"
+        },
+        "baseCost": 50,
+        "percentageCost": 0.06
+      },
+      "upgrades": [
+        {
+          "name": "Money Per Question",
+          "description": "Amount of money you lose and gain per question.",
+          "icon": "fas fa-piggy-bank",
+          "levels": [
+            {
+              "price": 0,
+              "value": 1
+            },
+            {
+              "price": 10,
+              "value": 5
+            },
+            {
+              "price": 100,
+              "value": 50
+            },
+            {
+              "price": 1000,
+              "value": 100
+            },
+            {
+              "price": 10000,
+              "value": 500
+            },
+            {
+              "price": 75000,
+              "value": 2000
+            },
+            {
+              "price": 300000,
+              "value": 5000
+            },
+            {
+              "price": 1000000,
+              "value": 10000
+            },
+            {
+              "price": 10000000,
+              "value": 250000
+            },
+            {
+              "price": 100000000,
+              "value": 1000000
+            }
+          ]
+        },
+        {
+          "name": "Streak Bonus",
+          "description": "Bonus that stacks when answering multiple questions correctly.",
+          "icon": "fas fa-money-bill-wave-alt",
+          "levels": [
+            {
+              "price": 0,
+              "value": 1
+            },
+            {
+              "price": 20,
+              "value": 3
+            },
+            {
+              "price": 200,
+              "value": 10
+            },
+            {
+              "price": 2000,
+              "value": 50
+            },
+            {
+              "price": 20000,
+              "value": 250
+            },
+            {
+              "price": 200000,
+              "value": 1200
+            },
+            {
+              "price": 2000000,
+              "value": 6500
+            },
+            {
+              "price": 20000000,
+              "value": 35000
+            },
+            {
+              "price": 200000000,
+              "value": 175000
+            },
+            {
+              "price": 2000000000,
+              "value": 1000000
+            }
+          ]
+        },
+        {
+          "name": "Multiplier",
+          "description": "Every dollar in or out gets multiplied.",
+          "icon": "fas fa-bolt",
+          "levels": [
+            {
+              "price": 0,
+              "value": 1
+            },
+            {
+              "price": 50,
+              "value": 1.5
+            },
+            {
+              "price": 300,
+              "value": 2
+            },
+            {
+              "price": 2000,
+              "value": 3
+            },
+            {
+              "price": 12000,
+              "value": 5
+            },
+            {
+              "price": 85000,
+              "value": 8
+            },
+            {
+              "price": 700000,
+              "value": 12
+            },
+            {
+              "price": 6500000,
+              "value": 18
+            },
+            {
+              "price": 65000000,
+              "value": 30
+            },
+            {
+              "price": 1000000000,
+              "value": 100
+            }
+          ]
+        },
+        {
+          "name": "Insurance",
+          "description": "Only pay a percentage back when answering incorrectly.",
+          "icon": "fas fa-band-aid",
+          "levels": [
+            {
+              "price": 0,
+              "value": 1
+            },
+            {
+              "price": 10,
+              "value": 0.9
+            },
+            {
+              "price": 250,
+              "value": 0.75
+            },
+            {
+              "price": 1000,
+              "value": 0.6
+            },
+            {
+              "price": 25000,
+              "value": 0.5
+            },
+            {
+              "price": 100000,
+              "value": 0.3
+            },
+            {
+              "price": 1000000,
+              "value": 0.2
+            },
+            {
+              "price": 5000000,
+              "value": 0.1
+            },
+            {
+              "price": 25000000,
+              "value": 0.05
+            },
+            {
+              "price": 500000000,
+              "value": 0.01
+            }
+          ]
+        }
+      ],
+      "themes": [
+        {
+          "cost": 0,
+          "name": "Default",
+          "description": "Works fine, that's all",
+          "question": {
+            "background": "#303f9f",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#771322",
+              "text": "white"
+            },
+            {
+              "background": "#A85C15",
+              "text": "white"
+            },
+            {
+              "background": "#0D6B33",
+              "text": "white"
+            },
+            {
+              "background": "#076296",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "cost": 5,
+          "name": "Night",
+          "description": "A little easier on the eyes",
+          "question": {
+            "background": "#000a12",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#263238",
+              "text": "white"
+            },
+            {
+              "background": "#37474f",
+              "text": "white"
+            },
+            {
+              "background": "#455a64",
+              "text": "white"
+            },
+            {
+              "background": "#546e7a",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "cost": 15,
+          "name": "Thanos",
+          "description": "Perfectly balanced, as all things should be",
+          "question": {
+            "background": "#0D0019",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#220044",
+              "text": "white"
+            },
+            {
+              "background": "#330066",
+              "text": "white"
+            },
+            {
+              "background": "#3E007C",
+              "text": "white"
+            },
+            {
+              "background": "#4F1787",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "cost": 30,
+          "name": "Ocean",
+          "description": "Under the sea...",
+          "question": {
+            "background": "#000063",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#283593",
+              "text": "white"
+            },
+            {
+              "background": "#076296",
+              "text": "white"
+            },
+            {
+              "background": "#0277bd",
+              "text": "white"
+            },
+            {
+              "background": "#1565c0",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "cost": 50,
+          "name": "Forest",
+          "description": "A walk through the woods",
+          "question": {
+            "background": "#4c3d33",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#385645",
+              "text": "white"
+            },
+            {
+              "background": "#425C49",
+              "text": "white"
+            },
+            {
+              "background": "#415641",
+              "text": "white"
+            },
+            {
+              "background": "#4C6349",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "cost": 100,
+          "name": "Sunset",
+          "description": "Take a breather",
+          "question": {
+            "background": "#7F7496",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#F46F5A",
+              "text": "white"
+            },
+            {
+              "background": "#ED712D",
+              "text": "white"
+            },
+            {
+              "background": "#7A596A",
+              "text": "white"
+            },
+            {
+              "background": "#E8AB3C",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "cost": 200,
+          "name": "Retro",
+          "description": "Old school...",
+          "question": {
+            "background": "#9C0022",
+            "text": "white"
+          },
+          "palette": [
+            {
+              "background": "#001D3B",
+              "text": "white"
+            },
+            {
+              "background": "#FFAE52",
+              "text": "white"
+            },
+            {
+              "background": "#FE5963",
+              "text": "white"
+            },
+            {
+              "background": "#A71C94",
+              "text": "white"
+            }
+          ]
+        },
+        {
+          "0": -24,
+          "101": "Pure Gold",
+          "cost": null,
+          "null": "\u0010\u0000\udc7a\udc6d"
+        }
+      ],
+      "description": "Now you're just showing off"
+    }
+  },
+  "raw": {
+    "type": 2,
+    "data": [
+      "message-YFsagFwEN9kfhD",
+      {
+        "key": "PLAYER_JOINS_STATIC_STATE",
+        "data": {
+          "gameOptions": {
+            "type": "live",
+            "specialGameType": [
+              "THANOS"
+            ],
+            "goal": {
+              "type": "time",
+              "value": 59
+            },
+            "currency": "$",
+            "language": "en",
+            "startingCash": 0,
+            "handicap": -50,
+            "clapping": true,
+            "cleanPowerupsOnly": false,
+            "music": true,
+            "allowGoogleTranslate": false,
+            "modeOptions": {}
+          },
+          "powerups": [
+            {
+              "name": "Soul Stone",
+              "description": "Steal, control, manipulate, and alter souls",
+              "icon": "far fa-gem",
+              "color": {
+                "background": "#f4511e",
+                "text": "white"
+              },
+              "baseCost": 1,
+              "percentageCost": 0,
+              "disabled": [
+                "nonThanosMode"
+              ]
+            },
+            {
+              "name": "Time Stone",
+              "description": "See into the past and the future",
+              "icon": "far fa-gem",
+              "color": {
+                "background": "#388e3c",
+                "text": "white"
+              },
+              "baseCost": 10,
+              "percentageCost": 0.1,
+              "disabled": [
+                "nonThanosMode"
+              ]
+            },
+            {
+              "name": "Space Stone",
+              "description": "Exist in any location, move any object anywhere throughout reality and warp space",
+              "icon": "far fa-gem",
+              "color": {
+                "background": "#1976d2",
+                "text": "white"
+              },
+              "baseCost": 100,
+              "percentageCost": 0.2,
+              "disabled": [
+                "nonThanosMode"
+              ]
+            },
+            {
+              "name": "Mind Stone",
+              "description": "Access the thoughts and dreams of others",
+              "icon": "far fa-gem",
+              "color": {
+                "background": "#ffcc80",
+                "text": "white"
+              },
+              "baseCost": 1000,
+              "percentageCost": 0.3,
+              "disabled": [
+                "nonThanosMode"
+              ]
+            },
+            {
+              "name": "Reality Stone",
+              "description": "Create a new reality, one that breaks all rules",
+              "icon": "far fa-gem",
+              "color": {
+                "background": "#d32f2f",
+                "text": "white"
+              },
+              "baseCost": 10000,
+              "percentageCost": 0.4,
+              "disabled": [
+                "nonThanosMode"
+              ]
+            },
+            {
+              "name": "Power Stone",
+              "description": " Access and manipulate all forms of energy",
+              "icon": "far fa-gem",
+              "color": {
+                "background": "#4527a0",
+                "text": "white"
+              },
+              "baseCost": 150000,
+              "percentageCost": 0,
+              "disabled": [
+                "nonThanosMode"
+              ]
+            },
+            {
+              "name": "summerSong",
+              "displayName": "Summer Song",
+              "description": "Purchase and get ready for the summer!",
+              "icon": "fas fa-music",
+              "color": {
+                "background": "#ff6f00",
+                "text": "white"
+              },
+              "category": [
+                "specialSound"
+              ],
+              "baseCost": 50,
+              "percentageCost": 0.3,
+              "disabled": [
+                "musicOff"
+              ],
+              "customTag": "",
+              "autoActivate": false
+            },
+            {
+              "name": "Icer",
+              "displayName": "Freezer",
+              "description": "Freeze other #s! They won't be able to answer questions or visit the shop for 15 seconds!",
+              "icon": "fas fa-snowflake",
+              "color": {
+                "background": "#495057",
+                "text": "white"
+              },
+              "baseCost": 40,
+              "percentageCost": 0.15,
+              "disabled": [
+                "cleanOnly"
+              ]
+            },
+            {
+              "name": "Link",
+              "description": "Link new earnings with another # for 60 seconds",
+              "icon": "fas fa-link",
+              "color": {
+                "background": "#002171",
+                "text": "white"
+              },
+              "customTag": "",
+              "baseCost": 1500,
+              "percentageCost": 0.38,
+              "disabled": [
+                "cleanOnly"
+              ]
+            },
+            {
+              "name": "dreamweaver",
+              "displayName": "Dreamweaver",
+              "description": "Take it easy with this catchy tune.",
+              "icon": "fas fa-music",
+              "color": {
+                "background": "#00796b",
+                "text": "white"
+              },
+              "category": [
+                "specialSound"
+              ],
+              "baseCost": 50,
+              "percentageCost": 0.3,
+              "disabled": [
+                "musicOff"
+              ],
+              "customTag": "",
+              "autoActivate": false
+            },
+            {
+              "name": "repurchasePowerups",
+              "displayName": "Rebooter",
+              "description": "Reuse all your powerups a second time",
+              "icon": "fas fa-power-off",
+              "customTag": "",
+              "color": {
+                "background": "#009688",
+                "text": "white"
+              },
+              "baseCost": 1000,
+              "percentageCost": 0.3
+            },
+            {
+              "name": "minuteMoreEarnings",
+              "displayName": "Minute To Win It",
+              "description": "Double your earnings for the next 60 seconds!",
+              "icon": "fad fa-sack-dollar",
+              "customTag": "",
+              "color": {
+                "background": "#fff3e0",
+                "text": "#2e7d32"
+              },
+              "baseCost": 500,
+              "percentageCost": 0.06,
+              "disabled": null
+            },
+            0,
+            0,
+            {
+              "name": "outnumbered",
+              "displayName": "Outnumbered",
+              "description": "Inundate another # with numbers!",
+              "icon": "fal fa-calculator-alt",
+              "customTag": "",
+              "color": {
+                "background": "#1a237e",
+                "text": "white"
+              },
+              "baseCost": 150,
+              "percentageCost": 0.22,
+              "disabled": [
+                "cleanOnly"
+              ]
+            },
+            {
+              "name": "Discounter",
+              "description": "All shop upgrades are 25% off for 5 minutes",
+              "icon": "fas fa-dollar-sign",
+              "color": {
+                "background": "#5C097C",
+                "text": "white"
+              },
+              "baseCost": 250,
+              "percentageCost": 0.16
+            },
+            {
+              "name": "Blurred Screen",
+              "displayName": "Blur",
+              "description": "Blur another #'s screen for 15 seconds!",
+              "icon": "fad fa-adjust",
+              "color": {
+                "background": "#004d40",
+                "text": "white"
+              },
+              "baseCost": 40,
+              "percentageCost": 0.15,
+              "disabled": [
+                "cleanOnly"
+              ]
+            },
+            {
+              "name": "Clap Multiplier",
+              "displayName": "Clapinator",
+              "description": "Your claps, but multiplied by 10x",
+              "icon": "fas fa-hands",
+              "color": {
+                "background": "#c62828",
+                "text": "#ffee58"
+              },
+              "baseCost": 20,
+              "percentageCost": 0.1,
+              "customTag": "",
+              "disabled": [
+                "clappingOff"
+              ],
+              "autoActivate": true
+            },
+            {
+              "name": "Shield",
+              "description": "Prevent other #s from negatively impacting you for 3 minutes",
+              "icon": "fas fa-shield-alt",
+              "color": {
+                "background": "#3C8944",
+                "text": "white"
+              },
+              "baseCost": 25,
+              "percentageCost": 0.15,
+              "disabled": [
+                "cleanOnly"
+              ]
+            },
+            {
+              "name": "Giving",
+              "displayName": "Gift",
+              "description": "Increase another #'s balance by 25%",
+              "icon": "fas fa-gifts",
+              "color": {
+                "background": "#691b99",
+                "text": "white"
+              },
+              "baseCost": 200,
+              "percentageCost": 0.26
+            },
+            {
+              "name": "Subtractor",
+              "description": "Remove 20% of a #'s earnings",
+              "icon": "fas fa-minus-circle",
+              "color": {
+                "background": "#FF5964",
+                "text": "white"
+              },
+              "baseCost": 150,
+              "percentageCost": 0.2,
+              "disabled": [
+                "cleanOnly"
+              ]
+            }
+          ],
+          "[object Object]": {
+            "name": "Mega Bonus",
+            "description": "Earnings are multiplied by 5x for a single question",
+            "icon": "fas fa-medal",
+            "color": {
+              "background": "#054F00",
+              "text": "white"
+            },
+            "baseCost": 50,
+            "percentageCost": 0.06
+          },
+          "upgrades": [
+            {
+              "name": "Money Per Question",
+              "description": "Amount of money you lose and gain per question.",
+              "icon": "fas fa-piggy-bank",
+              "levels": [
+                {
+                  "price": 0,
+                  "value": 1
+                },
+                {
+                  "price": 10,
+                  "value": 5
+                },
+                {
+                  "price": 100,
+                  "value": 50
+                },
+                {
+                  "price": 1000,
+                  "value": 100
+                },
+                {
+                  "price": 10000,
+                  "value": 500
+                },
+                {
+                  "price": 75000,
+                  "value": 2000
+                },
+                {
+                  "price": 300000,
+                  "value": 5000
+                },
+                {
+                  "price": 1000000,
+                  "value": 10000
+                },
+                {
+                  "price": 10000000,
+                  "value": 250000
+                },
+                {
+                  "price": 100000000,
+                  "value": 1000000
+                }
+              ]
+            },
+            {
+              "name": "Streak Bonus",
+              "description": "Bonus that stacks when answering multiple questions correctly.",
+              "icon": "fas fa-money-bill-wave-alt",
+              "levels": [
+                {
+                  "price": 0,
+                  "value": 1
+                },
+                {
+                  "price": 20,
+                  "value": 3
+                },
+                {
+                  "price": 200,
+                  "value": 10
+                },
+                {
+                  "price": 2000,
+                  "value": 50
+                },
+                {
+                  "price": 20000,
+                  "value": 250
+                },
+                {
+                  "price": 200000,
+                  "value": 1200
+                },
+                {
+                  "price": 2000000,
+                  "value": 6500
+                },
+                {
+                  "price": 20000000,
+                  "value": 35000
+                },
+                {
+                  "price": 200000000,
+                  "value": 175000
+                },
+                {
+                  "price": 2000000000,
+                  "value": 1000000
+                }
+              ]
+            },
+            {
+              "name": "Multiplier",
+              "description": "Every dollar in or out gets multiplied.",
+              "icon": "fas fa-bolt",
+              "levels": [
+                {
+                  "price": 0,
+                  "value": 1
+                },
+                {
+                  "price": 50,
+                  "value": 1.5
+                },
+                {
+                  "price": 300,
+                  "value": 2
+                },
+                {
+                  "price": 2000,
+                  "value": 3
+                },
+                {
+                  "price": 12000,
+                  "value": 5
+                },
+                {
+                  "price": 85000,
+                  "value": 8
+                },
+                {
+                  "price": 700000,
+                  "value": 12
+                },
+                {
+                  "price": 6500000,
+                  "value": 18
+                },
+                {
+                  "price": 65000000,
+                  "value": 30
+                },
+                {
+                  "price": 1000000000,
+                  "value": 100
+                }
+              ]
+            },
+            {
+              "name": "Insurance",
+              "description": "Only pay a percentage back when answering incorrectly.",
+              "icon": "fas fa-band-aid",
+              "levels": [
+                {
+                  "price": 0,
+                  "value": 1
+                },
+                {
+                  "price": 10,
+                  "value": 0.9
+                },
+                {
+                  "price": 250,
+                  "value": 0.75
+                },
+                {
+                  "price": 1000,
+                  "value": 0.6
+                },
+                {
+                  "price": 25000,
+                  "value": 0.5
+                },
+                {
+                  "price": 100000,
+                  "value": 0.3
+                },
+                {
+                  "price": 1000000,
+                  "value": 0.2
+                },
+                {
+                  "price": 5000000,
+                  "value": 0.1
+                },
+                {
+                  "price": 25000000,
+                  "value": 0.05
+                },
+                {
+                  "price": 500000000,
+                  "value": 0.01
+                }
+              ]
+            }
+          ],
+          "themes": [
+            {
+              "cost": 0,
+              "name": "Default",
+              "description": "Works fine, that's all",
+              "question": {
+                "background": "#303f9f",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#771322",
+                  "text": "white"
+                },
+                {
+                  "background": "#A85C15",
+                  "text": "white"
+                },
+                {
+                  "background": "#0D6B33",
+                  "text": "white"
+                },
+                {
+                  "background": "#076296",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "cost": 5,
+              "name": "Night",
+              "description": "A little easier on the eyes",
+              "question": {
+                "background": "#000a12",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#263238",
+                  "text": "white"
+                },
+                {
+                  "background": "#37474f",
+                  "text": "white"
+                },
+                {
+                  "background": "#455a64",
+                  "text": "white"
+                },
+                {
+                  "background": "#546e7a",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "cost": 15,
+              "name": "Thanos",
+              "description": "Perfectly balanced, as all things should be",
+              "question": {
+                "background": "#0D0019",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#220044",
+                  "text": "white"
+                },
+                {
+                  "background": "#330066",
+                  "text": "white"
+                },
+                {
+                  "background": "#3E007C",
+                  "text": "white"
+                },
+                {
+                  "background": "#4F1787",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "cost": 30,
+              "name": "Ocean",
+              "description": "Under the sea...",
+              "question": {
+                "background": "#000063",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#283593",
+                  "text": "white"
+                },
+                {
+                  "background": "#076296",
+                  "text": "white"
+                },
+                {
+                  "background": "#0277bd",
+                  "text": "white"
+                },
+                {
+                  "background": "#1565c0",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "cost": 50,
+              "name": "Forest",
+              "description": "A walk through the woods",
+              "question": {
+                "background": "#4c3d33",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#385645",
+                  "text": "white"
+                },
+                {
+                  "background": "#425C49",
+                  "text": "white"
+                },
+                {
+                  "background": "#415641",
+                  "text": "white"
+                },
+                {
+                  "background": "#4C6349",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "cost": 100,
+              "name": "Sunset",
+              "description": "Take a breather",
+              "question": {
+                "background": "#7F7496",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#F46F5A",
+                  "text": "white"
+                },
+                {
+                  "background": "#ED712D",
+                  "text": "white"
+                },
+                {
+                  "background": "#7A596A",
+                  "text": "white"
+                },
+                {
+                  "background": "#E8AB3C",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "cost": 200,
+              "name": "Retro",
+              "description": "Old school...",
+              "question": {
+                "background": "#9C0022",
+                "text": "white"
+              },
+              "palette": [
+                {
+                  "background": "#001D3B",
+                  "text": "white"
+                },
+                {
+                  "background": "#FFAE52",
+                  "text": "white"
+                },
+                {
+                  "background": "#FE5963",
+                  "text": "white"
+                },
+                {
+                  "background": "#A71C94",
+                  "text": "white"
+                }
+              ]
+            },
+            {
+              "0": -24,
+              "101": "Pure Gold",
+              "cost": null,
+              "null": "\u0010\u0000\udc7a\udc6d"
+            }
+          ],
+          "description": "Now you're just showing off"
+        }
+      }
+    ],
+    "question": {
+      "background": "black",
+      "text": "#FFCD2B"
+    }
+  }
+}
