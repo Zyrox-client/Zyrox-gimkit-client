@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.8.4
+// @version      2.8.5
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.8.4";
+    const CLIENT_VERSION = "2.8.5";
     return CLIENT_VERSION;
   }
 
@@ -4376,6 +4376,7 @@
     usedAbilities: new Set(),
     pendingTargetAbility: null,
     pendingTargetRequestedAt: 0,
+    selfPlayerId: null,
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4488,15 +4489,26 @@
         }
       }
     }
+    if (packet?.eventName === "CLIENT_ID_SET") {
+      const selfPlayerId = packet?.payload ?? packet?.data ?? null;
+      if (typeof selfPlayerId === "string" && selfPlayerId.trim()) {
+        abilityHudState.selfPlayerId = selfPlayerId.trim();
+        console.debug(`${ABILITY_HUD_LOG} captured self player id from CLIENT_ID_SET`, { selfPlayerId: abilityHudState.selfPlayerId });
+      }
+    }
     if (key === "UPDATED_PLAYER_LEADERBOARD") {
       const pendingAbility = abilityHudState.pendingTargetAbility;
       const items = packet?.data?.items ?? packet?.payload?.data?.items;
+      const rawPlayers = Array.isArray(items) ? items.filter((item) => item && item.id) : [];
+      const players = rawPlayers.filter((item) => item.id !== abilityHudState.selfPlayerId);
       console.debug(`${ABILITY_HUD_LOG} [Step 3] received leaderboard packet`, {
         hasPendingAbility: Boolean(pendingAbility),
-        itemCount: Array.isArray(items) ? items.length : 0,
+        selfPlayerId: abilityHudState.selfPlayerId,
+        itemCountRaw: rawPlayers.length,
+        itemCountFiltered: players.length,
       });
-      if (pendingAbility && Array.isArray(items) && items.length) {
-        openTargetSelectionMenu(pendingAbility, items.filter((item) => item && item.id));
+      if (pendingAbility && players.length) {
+        openTargetSelectionMenu(pendingAbility, players);
       }
     }
     const abilities = extractAbilitiesFromPacket(packet);
