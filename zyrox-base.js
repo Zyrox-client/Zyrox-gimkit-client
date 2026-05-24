@@ -4373,6 +4373,7 @@
     listeners: null,
     packetLogCount: 0,
     purchasedAbilities: new Set(),
+    usedAbilities: new Set(),
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4445,6 +4446,7 @@
     const key = packet?.key ?? packet?.payload?.key;
     if (key === "PLAYER_JOINS_STATIC_STATE") {
       abilityHudState.purchasedAbilities.clear();
+      abilityHudState.usedAbilities.clear();
     }
     if (abilityHudState.packetLogCount < 18) {
       abilityHudState.packetLogCount += 1;
@@ -4465,6 +4467,22 @@
         if (Number.isFinite(balance)) {
           abilityHudState.currentBalance = balance;
           requestAbilityHudRender();
+        }
+      }
+      if (type === "PURCHASED_POWERUPS" || type === "USED_POWERUPS") {
+        const list = packet?.data?.value ?? packet?.payload?.data?.value;
+        if (Array.isArray(list)) {
+          const targetSet = type === "PURCHASED_POWERUPS" ? abilityHudState.purchasedAbilities : abilityHudState.usedAbilities;
+          let changed = false;
+          for (const entry of list) {
+            const abilityName = typeof entry === "string" ? entry.trim() : "";
+            if (!abilityName) continue;
+            if (!targetSet.has(abilityName)) {
+              targetSet.add(abilityName);
+              changed = true;
+            }
+          }
+          if (changed) requestAbilityHudRender();
         }
       }
     }
@@ -4511,7 +4529,7 @@
 
   function sendAbilityPurchase(ability) {
     if (!ability?.name) return;
-    if (abilityHudState.purchasedAbilities.has(ability.name)) return;
+    if (abilityHudState.purchasedAbilities.has(ability.name) || abilityHudState.usedAbilities.has(ability.name)) return;
     const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_PURCHASED", data: ability.name };
     console.debug(`${ABILITY_HUD_LOG} sending purchase payload`, payload);
     if (ability.name === "Icer") {
@@ -4553,9 +4571,11 @@
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
       const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
-      buyBtn.disabled = alreadyPurchased;
-      buyBtn.textContent = alreadyPurchased ? "Bought" : "Buy";
-      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${alreadyPurchased ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${alreadyPurchased ? ".55" : "1"};`;
+      const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
+      const disabled = alreadyPurchased || alreadyUsed;
+      buyBtn.disabled = disabled;
+      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Bought" : "Buy");
+      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${disabled ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${disabled ? ".55" : "1"};`;
       buyBtn.addEventListener("click", () => sendAbilityPurchase(ability));
       wrap.append(chip, info, buyBtn);
       frag.appendChild(wrap);
