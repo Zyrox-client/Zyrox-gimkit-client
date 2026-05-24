@@ -173,19 +173,22 @@
   function handleBalancePacket(decodedPacket, source) {
     if (!decodedPacket) return;
 
-    const isStateUpdate = decodedPacket?.payload?.key === "STATE_UPDATE";
-    const balanceType = decodedPacket?.payload?.data?.type;
-    if (!isStateUpdate || balanceType !== "BALANCE") return;
+    if (decodedPacket.transport !== "blueboat-binary") return;
 
-    const currentBalance = decodedPacket?.payload?.data?.value;
-    if (typeof currentBalance !== "number") return;
+    const payload = decodedPacket.payload;
+    const stateData = payload?.data;
+    const isExactBalanceUpdate = payload?.key === "STATE_UPDATE" && stateData?.type === "BALANCE";
+    if (!isExactBalanceUpdate) return;
+
+    const currentBalance = stateData?.value;
+    if (!Number.isFinite(currentBalance)) return;
 
     console.group(`${LOG_PREFIX} balance packet intercepted`);
     console.log("source:", source);
     console.log("transport:", decodedPacket.transport);
-    console.log("packet key:", decodedPacket.payload.key);
+    console.log("packet key:", payload.key);
     console.log("current balance:", currentBalance);
-    console.log("full balance payload:", safeJson(decodedPacket.payload.data));
+    console.log("full balance payload:", safeJson(stateData));
     console.groupEnd();
   }
 
@@ -204,7 +207,6 @@
         handlePowerupPacket(blueboatPacket, "socket.io/blueboat");
         handlePowerupPacket(colyseusPacket, "colyseus");
         handleBalancePacket(blueboatPacket, "socket.io/blueboat");
-        handleBalancePacket(colyseusPacket, "colyseus");
       });
     }
 
