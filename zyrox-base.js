@@ -1031,15 +1031,11 @@
       this.socket = socket;
       const socketUrl = String(socket?.url || "");
       const looksLikeColyseus = socketUrl.includes("gimkitconnect.com") && !socketUrl.includes("/socket.io/");
-      if (window.Phaser || looksLikeColyseus) {
-        this.transportType = "colyseus";
-        this.addEventListener("colyseusMessage", (e) => {
-          if (e.detail.type !== "DEVICES_STATES_CHANGES") return;
-          this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
-        });
-      } else {
-        this.transportType = "blueboat";
-      }
+      this.transportType = looksLikeColyseus ? "colyseus" : "unknown";
+      this.addEventListener("colyseusMessage", (e) => {
+        if (e.detail.type !== "DEVICES_STATES_CHANGES") return;
+        this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
+      });
       socket.addEventListener("message", (e) => {
         const blueboatDecoded = decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null;
         if (blueboatDecoded) {
@@ -1087,9 +1083,10 @@
     }
     sendMessage(channel, data) {
       if (!this.socket) return;
-      if (!this.blueboatRoomId && this.transportType === "blueboat") return;
+      const shouldUseColyseus = this.transportType === "colyseus" && !this.blueboatRoomId;
+      if (!this.blueboatRoomId && !shouldUseColyseus) return;
       let encoded;
-      if (this.transportType === "colyseus") {
+      if (shouldUseColyseus) {
         const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
         const channelEncoded = msgpackEncode(channel);
         const packetEncoded = msgpackEncode(data);
