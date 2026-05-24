@@ -1085,6 +1085,10 @@
         if (decoded?.roomId) this.blueboatRoomId = decoded.roomId;
         if (decoded?.room) this.blueboatRoomId = decoded.room;
       }
+      const outbound = blueboat.decode(data);
+      if (outbound) {
+        this.dispatchEvent(new CustomEvent("blueboatSend", { detail: outbound }));
+      }
     }
     sendMessage(channel, data) {
       if (!this.socket) return;
@@ -4339,6 +4343,295 @@
     }
   }
 
+  const ABILITY_HUD_MODULE_NAME = "Ability HUD";
+  const ABILITY_HUD_LOG = "[AbilityHUD]";
+  const abilityHudState = {
+    enabled: false,
+    container: null,
+    body: null,
+    abilities: new Map(),
+    currentBalance: 0,
+    roomId: null,
+    isDragging: false,
+    dragOffsetX: 0,
+    dragOffsetY: 0,
+    position: { x: 24, y: 92 },
+    renderTimerId: null,
+    wired: false,
+    listeners: null,
+    packetLogCount: 0,
+  };
+
+  function calculateAbilityCost(ability, playerState = {}) {
+    const baseCost = Number(ability?.baseCost) || 0;
+    const percentageCost = Number(ability?.percentageCost) || 0;
+    const balance = Number(playerState?.balance) || 0;
+    const rawCost = (percentageCost * balance) + baseCost;
+    const roundedCost = Math.ceil(rawCost / 5) * 5;
+    return { rawCost, roundedCost, displayCost: roundedCost };
+  }
+
+  function extractAbilitiesFromPacket(packet) {
+    const containers = [
+      packet?.data,
+      packet?.payload?.data,
+      packet?.payload,
+      packet,
+    ].filter(Boolean);
+
+    for (const container of containers) {
+      const direct = container?.powerups;
+      if (Array.isArray(direct)) return direct;
+      const fallback = container?.abilities;
+      if (Array.isArray(fallback)) return fallback;
+    }
+
+    for (const container of containers) {
+      if (!container || typeof container !== "object") continue;
+      for (const value of Object.values(container)) {
+        if (!value || typeof value !== "object") continue;
+        if (Array.isArray(value?.powerups)) return value.powerups;
+        if (Array.isArray(value?.abilities)) return value.abilities;
+      }
+    }
+
+    return [];
+  }
+
+  function normalizeAbility(entry) {
+    if (!entry || typeof entry !== "object") return null;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    if (!name) return null;
+    const displayName = typeof entry.displayName === "string" && entry.displayName.trim() ? entry.displayName.trim() : name;
+    return {
+      name,
+      displayName,
+      description: typeof entry.description === "string" ? entry.description : "",
+      icon: typeof entry.icon === "string" ? entry.icon : "",
+      color: {
+        background: entry?.color?.background || "#2a2f3a",
+        text: entry?.color?.text || "#ffffff",
+      },
+      baseCost: Number(entry.baseCost) || 0,
+      percentageCost: Number(entry.percentageCost) || 0,
+      disabled: Array.isArray(entry.disabled) ? entry.disabled.slice() : [],
+    };
+  }
+
+  function requestAbilityHudRender() {
+    if (!abilityHudState.enabled || !abilityHudState.container) return;
+    if (abilityHudState.renderTimerId) clearTimeout(abilityHudState.renderTimerId);
+    abilityHudState.renderTimerId = setTimeout(() => {
+      abilityHudState.renderTimerId = null;
+      renderAbilityHud();
+    }, 35);
+  }
+
+  function onAbilityHudInbound(event) {
+    const packet = event?.detail;
+    const key = packet?.key ?? packet?.payload?.key;
+    if (abilityHudState.packetLogCount < 18) {
+      abilityHudState.packetLogCount += 1;
+      console.debug(`${ABILITY_HUD_LOG} inbound packet`, {
+        key,
+        eventName: packet?.eventName,
+        hasData: Boolean(packet?.data),
+        dataKeys: packet?.data && typeof packet.data === "object" ? Object.keys(packet.data).slice(0, 12) : [],
+      });
+    }
+    if (key === "PLAYER_JOINS_STATIC_STATE") {
+      console.debug(`${ABILITY_HUD_LOG} static join packet intercepted`);
+    }
+    if (key === "STATE_UPDATE") {
+      const type = packet?.data?.type ?? packet?.payload?.data?.type;
+      if (type === "BALANCE") {
+        const balance = Number(packet?.data?.value ?? packet?.payload?.data?.value);
+        if (Number.isFinite(balance)) {
+          abilityHudState.currentBalance = balance;
+          requestAbilityHudRender();
+        }
+      }
+    }
+    const abilities = extractAbilitiesFromPacket(packet);
+    if (!abilities.length) {
+      if (key === "PLAYER_JOINS_STATIC_STATE" || key === "STATE_UPDATE") {
+        console.debug(`${ABILITY_HUD_LOG} no abilities extracted`, {
+          key,
+          probe: {
+            hasDataPowerups: Array.isArray(packet?.data?.powerups),
+            hasPayloadDataPowerups: Array.isArray(packet?.payload?.data?.powerups),
+            hasPayloadPowerups: Array.isArray(packet?.payload?.powerups),
+          },
+        });
+      }
+      return;
+    }
+    console.debug(`${ABILITY_HUD_LOG} extracted abilities`, { key, count: abilities.length });
+    let changed = false;
+    for (const rawAbility of abilities) {
+      const normalized = normalizeAbility(rawAbility);
+      if (!normalized) continue;
+      abilityHudState.abilities.set(normalized.name, normalized);
+      changed = true;
+      if (normalized.name === "Icer" || normalized.displayName === "Freezer") {
+        console.debug(`${ABILITY_HUD_LOG} freeze mapping`, { displayName: normalized.displayName, purchaseName: normalized.name });
+      }
+    }
+    if (changed) requestAbilityHudRender();
+  }
+
+  function onAbilityHudOutbound(event) {
+    const packet = event?.detail;
+    const key = packet?.key ?? packet?.payload?.key;
+    if (key !== "POWERUP_PURCHASED") return;
+    const payload = packet?.payload || packet;
+    console.debug(`${ABILITY_HUD_LOG} outbound purchase observed`, payload);
+  }
+
+  function sendAbilityPurchase(ability) {
+    if (!ability?.name) return;
+    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_PURCHASED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} sending purchase payload`, payload);
+    if (ability.name === "Icer") {
+      console.debug(`${ABILITY_HUD_LOG} ASSERT freeze mapping ok: display="${ability.displayName}" payload="${ability.name}"`);
+    }
+    socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
+  }
+
+  function renderAbilityHud() {
+    if (!abilityHudState.body) return;
+    const entries = Array.from(abilityHudState.abilities.values());
+    if (!entries.length) {
+      abilityHudState.body.innerHTML = `<div style="font-size:12px;color:#b3b9c7;opacity:.85;">Waiting for abilities…</div>`;
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const ability of entries) {
+      const wrap = document.createElement("div");
+      wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
+      const chip = document.createElement("div");
+      chip.style.cssText = `min-width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:13px;`;
+      chip.textContent = (ability.icon || "✦").includes("fa-") ? "❄" : (ability.icon || "✦");
+      const info = document.createElement("div");
+      info.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;";
+      const name = document.createElement("div");
+      name.style.cssText = "font-size:13px;font-weight:700;color:#fff;";
+      name.textContent = ability.displayName;
+      const desc = document.createElement("div");
+      desc.style.cssText = "font-size:11px;color:#c0c7d8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+      desc.textContent = ability.description || "No description";
+      desc.title = ability.description || "";
+      const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
+      const price = document.createElement("div");
+      price.style.cssText = "font-size:11px;color:#89f0b0;font-weight:600;";
+      price.textContent = `$${pricing.roundedCost} (raw ${pricing.rawCost.toFixed(2)})`;
+      info.append(name, desc, price);
+      const buyBtn = document.createElement("button");
+      buyBtn.type = "button";
+      buyBtn.textContent = "Buy";
+      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:pointer;font-size:12px;font-weight:700;`;
+      buyBtn.addEventListener("click", () => sendAbilityPurchase(ability));
+      wrap.append(chip, info, buyBtn);
+      frag.appendChild(wrap);
+    }
+    abilityHudState.body.innerHTML = "";
+    abilityHudState.body.appendChild(frag);
+  }
+
+  function startAbilityHud() {
+    if (abilityHudState.enabled) return;
+    abilityHudState.enabled = true;
+    if (!abilityHudState.wired) {
+      abilityHudState.listeners = {
+        inbound: (event) => onAbilityHudInbound(event),
+        outbound: (event) => onAbilityHudOutbound(event),
+      };
+      socketManager.addEventListener("blueboatMessage", abilityHudState.listeners.inbound);
+      socketManager.addEventListener("blueboatSend", abilityHudState.listeners.outbound);
+      abilityHudState.wired = true;
+    }
+    const panel = document.createElement("section");
+    panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;`;
+    const head = document.createElement("header");
+    head.style.cssText = "display:flex;align-items:center;justify-content:space-between;cursor:move;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
+    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:11px;color:#9ab2d8;">Classic/Tycoon</div>`;
+    const body = document.createElement("div");
+    body.style.cssText = "display:flex;flex-direction:column;gap:7px;";
+    panel.append(head, body);
+    abilityHudState.container = panel;
+    abilityHudState.body = body;
+    document.documentElement.appendChild(panel);
+    head.addEventListener("mousedown", (event) => {
+      abilityHudState.isDragging = true;
+      abilityHudState.dragOffsetX = event.clientX - panel.offsetLeft;
+      abilityHudState.dragOffsetY = event.clientY - panel.offsetTop;
+    });
+    document.addEventListener("mousemove", abilityHudMouseMove);
+    document.addEventListener("mouseup", abilityHudMouseUp);
+    if (abilityHudBootstrap.latestPacket) {
+      console.debug(`${ABILITY_HUD_LOG} hydrating from bootstrap cache`);
+      onAbilityHudInbound({ detail: abilityHudBootstrap.latestPacket });
+    }
+    if (Number.isFinite(abilityHudBootstrap.latestBalance)) {
+      abilityHudState.currentBalance = Number(abilityHudBootstrap.latestBalance) || 0;
+    }
+    requestAbilityHudRender();
+  }
+
+  function abilityHudMouseMove(event) {
+    if (!abilityHudState.isDragging || !abilityHudState.container) return;
+    abilityHudState.position.x = Math.max(8, event.clientX - abilityHudState.dragOffsetX);
+    abilityHudState.position.y = Math.max(8, event.clientY - abilityHudState.dragOffsetY);
+    abilityHudState.container.style.left = `${abilityHudState.position.x}px`;
+    abilityHudState.container.style.top = `${abilityHudState.position.y}px`;
+  }
+
+  function abilityHudMouseUp() {
+    abilityHudState.isDragging = false;
+  }
+
+  function stopAbilityHud() {
+    abilityHudState.enabled = false;
+    if (abilityHudState.container) {
+      abilityHudState.container.remove();
+      abilityHudState.container = null;
+      abilityHudState.body = null;
+    }
+    if (abilityHudState.renderTimerId) {
+      clearTimeout(abilityHudState.renderTimerId);
+      abilityHudState.renderTimerId = null;
+    }
+    document.removeEventListener("mousemove", abilityHudMouseMove);
+    document.removeEventListener("mouseup", abilityHudMouseUp);
+  }
+
+  const abilityHudBootstrap = {
+    latestPacket: null,
+    latestBalance: 0,
+  };
+
+  socketManager.addEventListener("blueboatMessage", (event) => {
+    const packet = event?.detail;
+    const key = packet?.key ?? packet?.payload?.key;
+    if (!key) return;
+    if (key === "PLAYER_JOINS_STATIC_STATE") {
+      abilityHudBootstrap.latestPacket = packet;
+      const count = Array.isArray(packet?.data?.powerups) ? packet.data.powerups.length : 0;
+      console.debug(`${ABILITY_HUD_LOG} bootstrap captured static state`, { count });
+      return;
+    }
+    if (key === "STATE_UPDATE") {
+      const type = packet?.data?.type ?? packet?.payload?.data?.type;
+      if (type === "BALANCE") {
+        const value = Number(packet?.data?.value ?? packet?.payload?.data?.value);
+        if (Number.isFinite(value)) abilityHudBootstrap.latestBalance = value;
+      }
+      if (!abilityHudBootstrap.latestPacket) {
+        abilityHudBootstrap.latestPacket = packet;
+      }
+    }
+  });
+
   const MODULE_BEHAVIORS = {
     [ANIMATION_SKIP_MODULE_NAME]: {
       onEnable: startAnimationSkip,
@@ -4376,6 +4669,10 @@
       onEnable: startLavaBuildingHud,
       onDisable: stopLavaBuildingHud,
     },
+    [ABILITY_HUD_MODULE_NAME]: {
+      onEnable: startAbilityHud,
+      onDisable: stopAbilityHud,
+    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
@@ -4405,6 +4702,7 @@
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
     "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
     "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
+    [ABILITY_HUD_MODULE_NAME]: "Shows intercepted abilities with live Classic/Tycoon pricing and one-click purchases.",
     [CAMERA_ZOOM_MODULE_NAME]: "Adjust how much you can see on the screen",
     [HIDE_POPUPS_MODULE_NAME]: "Hides Floor is Lava building purchase toasts and energy/resource popups.",
     [ANTI_AFK_MODULE_NAME]: "Sends lightweight synthetic activity pulses to reduce AFK kicks.",
@@ -4646,6 +4944,11 @@
                 { id: "streakBonus", label: "Streak Bonus", type: "checkbox", default: true },
                 { id: "insurance", label: "Insurance", type: "checkbox", default: true },
               ],
+            },
+            {
+              name: ABILITY_HUD_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[ABILITY_HUD_MODULE_NAME],
+              settings: [],
             },
           ],
         },
