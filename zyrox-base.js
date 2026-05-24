@@ -1353,6 +1353,26 @@
     }
   });
 
+  const extractDrawItAnswerCandidates = (stateUpdateData) => {
+    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
+    const answers = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
+      for (const item of row.value) {
+        const directKey = item?.key;
+        const nestedKey = item?.value?.key;
+        const fieldKey = directKey ?? nestedKey;
+        const directValue = item?.value;
+        const nestedValue = item?.value?.value;
+        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
+        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
+        const answer = fieldValue.trim();
+        if (answer) answers.push(answer);
+      }
+    }
+    return answers;
+  };
+
   socketManager.addEventListener("blueboatMessage", (event) => {
     if (event.detail?.key !== "STATE_UPDATE") return;
     const answers = extractDrawItAnswerCandidates(event.detail.data);
@@ -6467,26 +6487,6 @@
         if (popup.style.opacity === "0") popup.style.display = "none";
       }, 180);
     }, cfg.durationMs);
-  }
-
-  function extractDrawItAnswerCandidates(stateUpdateData) {
-    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
-    const answers = [];
-    for (const row of rows) {
-      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
-      for (const item of row.value) {
-        const directKey = item?.key;
-        const nestedKey = item?.value?.key;
-        const fieldKey = directKey ?? nestedKey;
-        const directValue = item?.value;
-        const nestedValue = item?.value?.value;
-        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
-        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
-        const answer = fieldValue.trim();
-        if (answer) answers.push(answer);
-      }
-    }
-    return answers;
   }
 
 
