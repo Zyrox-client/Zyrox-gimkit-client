@@ -4671,11 +4671,14 @@
     for (const ability of entries) {
       const wrap = document.createElement("div");
       wrap.style.cssText = "display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
+      const abilityDescription = typeof ability.description === "string" && ability.description.trim() ? ability.description.trim() : "No description available.";
+      wrap.title = abilityDescription;
       const info = document.createElement("div");
       info.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;flex:1;";
       const name = document.createElement("div");
       name.style.cssText = "font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
       name.textContent = ability.displayName;
+      name.title = abilityDescription;
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
       const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
       const price = document.createElement("div");
@@ -4695,7 +4698,7 @@
       const buttonBg = isUsed ? "rgba(120,120,120,.36)" : (isUnavailable ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)");
       const buttonColor = isUsed ? "rgba(230,230,230,.9)" : "#fff";
       buyBtn.className = "zyrox-upgrade-hud-button";
-      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};min-width:72px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
+      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};min-width:88px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
       buyBtn.addEventListener("click", () => {
         if (alreadyPurchased) sendAbilityUse(ability);
         else sendAbilityPurchase(ability);
@@ -4723,7 +4726,7 @@
     panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;`;
     const head = document.createElement("header");
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;cursor:move;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
-    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:11px;color:#9ab2d8;">Classic/Tycoon</div>`;
+    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:12px;color:#9ab2d8;">Classic/Tycoon</div>`;
     const body = document.createElement("div");
     body.style.cssText = "display:flex;flex-direction:column;gap:7px;";
     panel.append(head, body);
