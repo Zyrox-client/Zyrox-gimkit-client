@@ -4371,10 +4371,29 @@
   }
 
   function extractAbilitiesFromPacket(packet) {
-    const direct = packet?.payload?.data?.powerups;
-    if (Array.isArray(direct)) return direct;
-    const fallback = packet?.payload?.data?.abilities;
-    if (Array.isArray(fallback)) return fallback;
+    const containers = [
+      packet?.data,
+      packet?.payload?.data,
+      packet?.payload,
+      packet,
+    ].filter(Boolean);
+
+    for (const container of containers) {
+      const direct = container?.powerups;
+      if (Array.isArray(direct)) return direct;
+      const fallback = container?.abilities;
+      if (Array.isArray(fallback)) return fallback;
+    }
+
+    for (const container of containers) {
+      if (!container || typeof container !== "object") continue;
+      for (const value of Object.values(container)) {
+        if (!value || typeof value !== "object") continue;
+        if (Array.isArray(value?.powerups)) return value.powerups;
+        if (Array.isArray(value?.abilities)) return value.abilities;
+      }
+    }
+
     return [];
   }
 
@@ -4410,6 +4429,9 @@
   function onAbilityHudInbound(event) {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
+    if (key === "PLAYER_JOINS_STATIC_STATE") {
+      console.debug(`${ABILITY_HUD_LOG} static join packet intercepted`);
+    }
     if (key === "STATE_UPDATE") {
       const type = packet?.data?.type ?? packet?.payload?.data?.type;
       if (type === "BALANCE") {
