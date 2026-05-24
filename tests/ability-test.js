@@ -179,7 +179,8 @@
   function calculatePowerupCost(powerup, balance) {
     const baseCost = Number(powerup?.baseCost) || 0;
     const percentageCost = Number(powerup?.percentageCost) || 0;
-    return Math.round((percentageCost * balance) + baseCost);
+    const rawCost = (percentageCost * balance) + baseCost;
+    return Math.ceil(rawCost / 5) * 5;
   }
 
   function logPowerupPricesForBalance(balance) {
