@@ -4352,6 +4352,7 @@
     wired: false,
     listeners: null,
     packetLogCount: 0,
+    purchasedAbilities: new Set(),
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4422,6 +4423,9 @@
   function onAbilityHudInbound(event) {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
+    if (key === "PLAYER_JOINS_STATIC_STATE") {
+      abilityHudState.purchasedAbilities.clear();
+    }
     if (abilityHudState.packetLogCount < 18) {
       abilityHudState.packetLogCount += 1;
       console.debug(`${ABILITY_HUD_LOG} inbound packet`, {
@@ -4478,16 +4482,24 @@
     if (key !== "POWERUP_PURCHASED") return;
     const payload = packet?.payload || packet;
     console.debug(`${ABILITY_HUD_LOG} outbound purchase observed`, payload);
+    const purchasedName = typeof payload?.data === "string" ? payload.data.trim() : "";
+    if (purchasedName) {
+      abilityHudState.purchasedAbilities.add(purchasedName);
+      requestAbilityHudRender();
+    }
   }
 
   function sendAbilityPurchase(ability) {
     if (!ability?.name) return;
+    if (abilityHudState.purchasedAbilities.has(ability.name)) return;
     const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_PURCHASED", data: ability.name };
     console.debug(`${ABILITY_HUD_LOG} sending purchase payload`, payload);
     if (ability.name === "Icer") {
       console.debug(`${ABILITY_HUD_LOG} ASSERT freeze mapping ok: display="${ability.displayName}" payload="${ability.name}"`);
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
+    abilityHudState.purchasedAbilities.add(ability.name);
+    requestAbilityHudRender();
   }
 
   function renderAbilityHud() {
@@ -4520,8 +4532,10 @@
       info.append(name, desc, price);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
-      buyBtn.textContent = "Buy";
-      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:pointer;font-size:12px;font-weight:700;`;
+      const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
+      buyBtn.disabled = alreadyPurchased;
+      buyBtn.textContent = alreadyPurchased ? "Bought" : "Buy";
+      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${alreadyPurchased ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${alreadyPurchased ? ".55" : "1"};`;
       buyBtn.addEventListener("click", () => sendAbilityPurchase(ability));
       wrap.append(chip, info, buyBtn);
       frag.appendChild(wrap);
