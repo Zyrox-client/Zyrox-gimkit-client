@@ -1041,6 +1041,13 @@
         this.transportType = "blueboat";
       }
       socket.addEventListener("message", (e) => {
+        const blueboatDecoded = decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null;
+        if (blueboatDecoded) {
+          const normalizedBlueboat = blueboatDecoded?.payload && typeof blueboatDecoded.payload === "object"
+            ? { ...blueboatDecoded.payload, eventName: blueboatDecoded.eventName, payload: blueboatDecoded.payload, raw: blueboatDecoded.raw }
+            : blueboatDecoded;
+          this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalizedBlueboat }));
+        }
         const firstByte = (() => {
           try {
             return new Uint8Array(e.data)[0];
@@ -1063,19 +1070,7 @@
             }
           }
         } else {
-          decoded = decodeBlueboatBinaryPacket(e.data);
-          if (!decoded) {
-            const fallback = blueboat.decode(e.data);
-            if (fallback) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: fallback }));
-          } else {
-            const payload = decoded.payload;
-            if (payload && typeof payload === "object") {
-              const normalized = { ...payload, eventName: decoded.eventName, payload, raw: decoded.raw };
-              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalized }));
-            } else {
-              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: { payload, eventName: decoded.eventName, raw: decoded.raw } }));
-            }
-          }
+          // already emitted above via universal Blueboat decode path
         }
       });
     }
