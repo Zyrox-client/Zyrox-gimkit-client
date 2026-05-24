@@ -4557,6 +4557,16 @@
     requestAbilityHudRender();
   }
 
+  function sendAbilityUse(ability) {
+    if (!ability?.name) return;
+    if (abilityHudState.usedAbilities.has(ability.name)) return;
+    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    abilityHudState.usedAbilities.add(ability.name);
+    requestAbilityHudRender();
+  }
+
   function renderAbilityHud() {
     if (!abilityHudState.body) return;
     const entries = Array.from(abilityHudState.abilities.values());
@@ -4569,23 +4579,19 @@
       const wrap = document.createElement("div");
       wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
       const chip = document.createElement("div");
-      chip.style.cssText = `min-width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:13px;`;
+      chip.style.cssText = `min-width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:12px;`;
       chip.textContent = (ability.icon || "✦").includes("fa-") ? "❄" : (ability.icon || "✦");
       const info = document.createElement("div");
       info.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;";
       const name = document.createElement("div");
       name.style.cssText = "font-size:13px;font-weight:700;color:#fff;";
       name.textContent = ability.displayName;
-      const desc = document.createElement("div");
-      desc.style.cssText = "font-size:11px;color:#c0c7d8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
-      desc.textContent = ability.description || "No description";
-      desc.title = ability.description || "";
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
       const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
       const price = document.createElement("div");
       price.style.cssText = "font-size:11px;color:#89f0b0;font-weight:600;";
       price.textContent = `$${pricing.roundedCost} (raw ${pricing.rawCost.toFixed(2)})`;
-      info.append(name, desc, price);
+      info.append(name, price);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
       const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
