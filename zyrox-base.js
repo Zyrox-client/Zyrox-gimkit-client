@@ -4540,6 +4540,16 @@
     requestAbilityHudRender();
   }
 
+  function sendAbilityUse(ability) {
+    if (!ability?.name) return;
+    if (abilityHudState.usedAbilities.has(ability.name)) return;
+    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    abilityHudState.usedAbilities.add(ability.name);
+    requestAbilityHudRender();
+  }
+
   function renderAbilityHud() {
     if (!abilityHudState.body) return;
     const entries = Array.from(abilityHudState.abilities.values());
@@ -4572,11 +4582,14 @@
       buyBtn.type = "button";
       const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
       const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
-      const disabled = alreadyPurchased || alreadyUsed;
+      const disabled = alreadyUsed;
       buyBtn.disabled = disabled;
-      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Bought" : "Buy");
+      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
       buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${disabled ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${disabled ? ".55" : "1"};`;
-      buyBtn.addEventListener("click", () => sendAbilityPurchase(ability));
+      buyBtn.addEventListener("click", () => {
+        if (alreadyPurchased) sendAbilityUse(ability);
+        else sendAbilityPurchase(ability);
+      });
       wrap.append(chip, info, buyBtn);
       frag.appendChild(wrap);
     }
