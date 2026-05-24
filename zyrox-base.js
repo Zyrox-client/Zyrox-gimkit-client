@@ -4374,6 +4374,8 @@
     packetLogCount: 0,
     purchasedAbilities: new Set(),
     usedAbilities: new Set(),
+    pendingTargetAbility: null,
+    pendingTargetRequestedAt: 0,
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4486,6 +4488,17 @@
         }
       }
     }
+    if (key === "UPDATED_PLAYER_LEADERBOARD") {
+      const pendingAbility = abilityHudState.pendingTargetAbility;
+      const items = packet?.data?.items ?? packet?.payload?.data?.items;
+      console.debug(`${ABILITY_HUD_LOG} [Step 3] received leaderboard packet`, {
+        hasPendingAbility: Boolean(pendingAbility),
+        itemCount: Array.isArray(items) ? items.length : 0,
+      });
+      if (pendingAbility && Array.isArray(items) && items.length) {
+        openTargetSelectionMenu(pendingAbility, items.filter((item) => item && item.id));
+      }
+    }
     const abilities = extractAbilitiesFromPacket(packet);
     if (!abilities.length) {
       if (key === "PLAYER_JOINS_STATIC_STATE" || key === "STATE_UPDATE") {
@@ -4537,32 +4550,99 @@
     requestAbilityHudRender();
   }
 
-  function sendAbilityUse(ability) {
-    if (!ability?.name) return;
-    if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
-    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+  function abilityRequiresTargetSelection(ability) {
+    if (!ability || !Array.isArray(ability.disabled)) return false;
+    const requires = ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly");
+    console.debug(`${ABILITY_HUD_LOG} [Step 1] ability target-selection requirement`, {
+      abilityName: ability?.name,
+      disabledFlags: ability?.disabled,
+      requiresTargetSelection: requires,
+    });
+    return requires;
+  }
+
+  function requestLeaderboardForAbilityTarget(ability) {
+    const roomId = socketManager.blueboatRoomId;
+    if (!roomId) {
+      console.warn(`${ABILITY_HUD_LOG} [Step 2] missing room id; cannot request leaderboard`, { abilityName: ability?.name });
+      return;
+    }
+    abilityHudState.pendingTargetAbility = ability;
+    abilityHudState.pendingTargetRequestedAt = Date.now();
+    const payload = { room: roomId, key: "PLAYER_LEADERBOARD_REQUESTED", data: null };
+    console.debug(`${ABILITY_HUD_LOG} [Step 2] requesting leaderboard for target selection`, payload);
+    socketManager.sendMessage("PLAYER_LEADERBOARD_REQUESTED", null);
+  }
+
+  function openTargetSelectionMenu(ability, players) {
+    console.debug(`${ABILITY_HUD_LOG} [Step 3] opening target selection menu`, {
+      abilityName: ability?.name,
+      playerCount: players.length,
+      players,
+    });
+    const existing = document.getElementById("zyrox-target-menu");
+    if (existing) existing.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "zyrox-target-menu";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
+    const panel = document.createElement("div");
+    panel.style.cssText = "width:min(360px,calc(100vw - 20px));max-height:min(80vh,520px);overflow:auto;background:#121722;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:10px;font-family:Inter,system-ui,sans-serif;color:#fff;";
+    const title = document.createElement("div");
+    title.textContent = `Select target for ${ability.displayName || ability.name}`;
+    title.style.cssText = "font-size:14px;font-weight:700;margin-bottom:8px;";
+    panel.appendChild(title);
+    players.forEach((player) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = `${player.name || "Unknown"} (${player.id})`;
+      btn.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 6px 0;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;";
+      btn.addEventListener("click", () => {
+        overlay.remove();
+        sendTargetedAbilityUse(ability, player.id);
+      });
+      panel.appendChild(btn);
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.style.cssText = "display:block;width:100%;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,0,0,.2);color:#fff;cursor:pointer;";
+    cancel.addEventListener("click", () => {
+      console.debug(`${ABILITY_HUD_LOG} [Step 3] target selection canceled`, { abilityName: ability?.name });
+      abilityHudState.pendingTargetAbility = null;
+      overlay.remove();
+    });
+    panel.appendChild(cancel);
+    overlay.appendChild(panel);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) overlay.remove();
+    });
+    document.body.appendChild(overlay);
+  }
+
+  function sendTargetedAbilityUse(ability, targetId) {
+    const roomId = socketManager.blueboatRoomId;
+    if (!roomId || !ability?.name || !targetId) return;
+    const data = { name: ability.name, target: targetId };
+    const payload = { room: roomId, key: "POWERUP_ATTACK", data };
+    console.debug(`${ABILITY_HUD_LOG} [Step 4] sending targeted ability payload`, payload);
+    socketManager.sendMessage("POWERUP_ATTACK", data);
     abilityHudState.usedAbilities.add(ability.name);
+    abilityHudState.pendingTargetAbility = null;
     requestAbilityHudRender();
   }
 
   function sendAbilityUse(ability) {
     if (!ability?.name) return;
     if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    const activatePayload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} [Step 0] sending regular activate payload`, activatePayload);
     socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
-    abilityHudState.usedAbilities.add(ability.name);
-    requestAbilityHudRender();
-  }
 
-  function sendAbilityUse(ability) {
-    if (!ability?.name) return;
-    if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
-    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    if (abilityRequiresTargetSelection(ability)) {
+      requestLeaderboardForAbilityTarget(ability);
+      return;
+    }
+
     abilityHudState.usedAbilities.add(ability.name);
     requestAbilityHudRender();
   }
