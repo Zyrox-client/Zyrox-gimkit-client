@@ -15,6 +15,10 @@
   const LOG_PREFIX = "[ZyroxAbilityTest]";
   const ROOM_DATA = 13;
 
+  const runtimeState = {
+    latestPowerups: [],
+  };
+
   function safeJson(value) {
     try {
       return JSON.stringify(value, null, 2);
@@ -154,6 +158,8 @@
     const powerups = extractPowerups(decodedPacket);
     if (!powerups.length) return;
 
+    runtimeState.latestPowerups = powerups;
+
     console.group(`${LOG_PREFIX} 1D ability/powerup packet intercepted`);
     console.log("source:", source);
     console.log("transport:", decodedPacket.transport);
@@ -166,6 +172,30 @@
       disabled: Array.isArray(p.disabled) ? p.disabled.join(",") : p.disabled,
     })));
     console.log("full powerups payload:", safeJson(powerups));
+    console.groupEnd();
+  }
+
+
+  function calculatePowerupCost(powerup, balance) {
+    const baseCost = Number(powerup?.baseCost) || 0;
+    const percentageCost = Number(powerup?.percentageCost) || 0;
+    return Math.round((percentageCost * balance) + baseCost);
+  }
+
+  function logPowerupPricesForBalance(balance) {
+    if (!runtimeState.latestPowerups.length) return;
+
+    const priceRows = runtimeState.latestPowerups.map((powerup) => ({
+      name: powerup.displayName || powerup.name || "unknown",
+      balance,
+      baseCost: Number(powerup.baseCost) || 0,
+      percentageCost: Number(powerup.percentageCost) || 0,
+      price: calculatePowerupCost(powerup, balance),
+    }));
+
+    console.group(`${LOG_PREFIX} powerup/ability prices at current balance`);
+    console.log("balance:", balance);
+    console.table(priceRows);
     console.groupEnd();
   }
 
@@ -190,6 +220,8 @@
     console.log("current balance:", currentBalance);
     console.log("full balance payload:", safeJson(stateData));
     console.groupEnd();
+
+    logPowerupPricesForBalance(currentBalance);
   }
 
   const originalSend = WebSocket.prototype.send;
@@ -213,5 +245,5 @@
     return originalSend.apply(this, arguments);
   };
 
-  console.log(`${LOG_PREFIX} ready - waiting for 1D ability/powerup packets.`);
+  console.log(`${LOG_PREFIX} ready - waiting for 1D ability/powerup and balance packets.`);
 })();
