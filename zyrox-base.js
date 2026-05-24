@@ -4374,6 +4374,9 @@
     packetLogCount: 0,
     purchasedAbilities: new Set(),
     usedAbilities: new Set(),
+    pendingTargetAbility: null,
+    pendingTargetRequestedAt: 0,
+    selfPlayerId: null,
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4486,6 +4489,28 @@
         }
       }
     }
+    if (packet?.eventName === "CLIENT_ID_SET") {
+      const selfPlayerId = packet?.payload ?? packet?.data ?? null;
+      if (typeof selfPlayerId === "string" && selfPlayerId.trim()) {
+        abilityHudState.selfPlayerId = selfPlayerId.trim();
+        console.debug(`${ABILITY_HUD_LOG} captured self player id from CLIENT_ID_SET`, { selfPlayerId: abilityHudState.selfPlayerId });
+      }
+    }
+    if (key === "UPDATED_PLAYER_LEADERBOARD") {
+      const pendingAbility = abilityHudState.pendingTargetAbility;
+      const items = packet?.data?.items ?? packet?.payload?.data?.items;
+      const rawPlayers = Array.isArray(items) ? items.filter((item) => item && item.id) : [];
+      const players = rawPlayers.filter((item) => item.id !== abilityHudState.selfPlayerId);
+      console.debug(`${ABILITY_HUD_LOG} [Step 3] received leaderboard packet`, {
+        hasPendingAbility: Boolean(pendingAbility),
+        selfPlayerId: abilityHudState.selfPlayerId,
+        itemCountRaw: rawPlayers.length,
+        itemCountFiltered: players.length,
+      });
+      if (pendingAbility && players.length) {
+        openTargetSelectionMenu(pendingAbility, players);
+      }
+    }
     const abilities = extractAbilitiesFromPacket(packet);
     if (!abilities.length) {
       if (key === "PLAYER_JOINS_STATIC_STATE" || key === "STATE_UPDATE") {
@@ -4534,35 +4559,107 @@
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
     abilityHudState.purchasedAbilities.add(ability.name);
+    if (String(ability.name || "").trim().toLowerCase() === "rebooter") {
+      console.debug(`${ABILITY_HUD_LOG} rebooter purchased; clearing used abilities set while preserving purchased abilities`);
+      abilityHudState.usedAbilities.clear();
+    }
     requestAbilityHudRender();
   }
 
-  function sendAbilityUse(ability) {
-    if (!ability?.name) return;
-    if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
-    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+  function abilityRequiresTargetSelection(ability) {
+    if (!ability || !Array.isArray(ability.disabled)) return false;
+    const isShield = String(ability?.name || "").trim().toLowerCase() === "shield";
+    const requires = !isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly");
+    console.debug(`${ABILITY_HUD_LOG} [Step 1] ability target-selection requirement`, {
+      abilityName: ability?.name,
+      disabledFlags: ability?.disabled,
+      requiresTargetSelection: requires,
+    });
+    return requires;
+  }
+
+  function requestLeaderboardForAbilityTarget(ability) {
+    const roomId = socketManager.blueboatRoomId;
+    if (!roomId) {
+      console.warn(`${ABILITY_HUD_LOG} [Step 2] missing room id; cannot request leaderboard`, { abilityName: ability?.name });
+      return;
+    }
+    abilityHudState.pendingTargetAbility = ability;
+    abilityHudState.pendingTargetRequestedAt = Date.now();
+    const payload = { room: roomId, key: "PLAYER_LEADERBOARD_REQUESTED", data: null };
+    console.debug(`${ABILITY_HUD_LOG} [Step 2] requesting leaderboard for target selection`, payload);
+    socketManager.sendMessage("PLAYER_LEADERBOARD_REQUESTED", null);
+  }
+
+  function openTargetSelectionMenu(ability, players) {
+    console.debug(`${ABILITY_HUD_LOG} [Step 3] opening target selection menu`, {
+      abilityName: ability?.name,
+      playerCount: players.length,
+      players,
+    });
+    const existing = document.getElementById("zyrox-target-menu");
+    if (existing) existing.remove();
+    const overlay = document.createElement("div");
+    overlay.id = "zyrox-target-menu";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
+    const panel = document.createElement("div");
+    panel.style.cssText = "width:min(360px,calc(100vw - 20px));max-height:min(80vh,520px);overflow:auto;background:#121722;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:10px;font-family:Inter,system-ui,sans-serif;color:#fff;";
+    const title = document.createElement("div");
+    title.textContent = `Select target for ${ability.displayName || ability.name}`;
+    title.style.cssText = "font-size:14px;font-weight:700;margin-bottom:8px;";
+    panel.appendChild(title);
+    players.forEach((player) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = `${player.name || "Unknown"} (${player.id})`;
+      btn.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 6px 0;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;";
+      btn.addEventListener("click", () => {
+        overlay.remove();
+        sendTargetedAbilityUse(ability, player.id);
+      });
+      panel.appendChild(btn);
+    });
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.style.cssText = "display:block;width:100%;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,0,0,.2);color:#fff;cursor:pointer;";
+    cancel.addEventListener("click", () => {
+      console.debug(`${ABILITY_HUD_LOG} [Step 3] target selection canceled`, { abilityName: ability?.name });
+      abilityHudState.pendingTargetAbility = null;
+      overlay.remove();
+    });
+    panel.appendChild(cancel);
+    overlay.appendChild(panel);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) overlay.remove();
+    });
+    document.body.appendChild(overlay);
+  }
+
+  function sendTargetedAbilityUse(ability, targetId) {
+    const roomId = socketManager.blueboatRoomId;
+    if (!roomId || !ability?.name || !targetId) return;
+    const data = { name: ability.name, target: targetId };
+    const payload = { room: roomId, key: "POWERUP_ATTACK", data };
+    console.debug(`${ABILITY_HUD_LOG} [Step 4] sending targeted ability payload`, payload);
+    socketManager.sendMessage("POWERUP_ATTACK", data);
     abilityHudState.usedAbilities.add(ability.name);
+    abilityHudState.pendingTargetAbility = null;
     requestAbilityHudRender();
   }
 
   function sendAbilityUse(ability) {
     if (!ability?.name) return;
     if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    const activatePayload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} [Step 0] sending regular activate payload`, activatePayload);
     socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
-    abilityHudState.usedAbilities.add(ability.name);
-    requestAbilityHudRender();
-  }
 
-  function sendAbilityUse(ability) {
-    if (!ability?.name) return;
-    if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
-    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    if (abilityRequiresTargetSelection(ability)) {
+      requestLeaderboardForAbilityTarget(ability);
+      return;
+    }
+
     abilityHudState.usedAbilities.add(ability.name);
     requestAbilityHudRender();
   }
@@ -4577,34 +4674,37 @@
     const frag = document.createDocumentFragment();
     for (const ability of entries) {
       const wrap = document.createElement("div");
-      wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
-      const chip = document.createElement("div");
-      chip.style.cssText = `min-width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:12px;`;
-      chip.textContent = (ability.icon || "✦").includes("fa-") ? "❄" : (ability.icon || "✦");
+      wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:6px 7px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
+      const abilityDescription = typeof ability.description === "string" && ability.description.trim() ? ability.description.trim() : "No description available.";
+      wrap.title = abilityDescription;
       const info = document.createElement("div");
-      info.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;";
+      info.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;flex:1;";
       const name = document.createElement("div");
-      name.style.cssText = "font-size:13px;font-weight:700;color:#fff;";
+      name.style.cssText = "font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
       name.textContent = ability.displayName;
+      name.title = abilityDescription;
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
       const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
-      const price = document.createElement("div");
-      price.style.cssText = "font-size:11px;color:#89f0b0;font-weight:600;";
-      price.textContent = `$${pricing.roundedCost} (raw ${pricing.rawCost.toFixed(2)})`;
-      info.append(name, price);
+      info.append(name);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
       const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
       const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
       const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
       buyBtn.disabled = disabled;
-      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
-      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${disabled ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${disabled ? ".55" : "1"};`;
+      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost}`);
+      const isUsed = alreadyUsed;
+      const isUnavailable = !alreadyPurchased && !canAfford;
+      const buttonBorder = isUsed ? "rgba(160,160,160,.42)" : (isUnavailable ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)");
+      const buttonBg = isUsed ? "rgba(120,120,120,.36)" : (isUnavailable ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)");
+      const buttonColor = isUsed ? "rgba(230,230,230,.9)" : "#fff";
+      buyBtn.className = "zyrox-upgrade-hud-button";
+      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};width:96px;min-width:96px;max-width:96px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
       buyBtn.addEventListener("click", () => {
         if (alreadyPurchased) sendAbilityUse(ability);
         else sendAbilityPurchase(ability);
       });
-      wrap.append(chip, info, buyBtn);
+      wrap.append(info, buyBtn);
       frag.appendChild(wrap);
     }
     abilityHudState.body.innerHTML = "";
@@ -4627,9 +4727,9 @@
     panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;`;
     const head = document.createElement("header");
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;cursor:move;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
-    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:11px;color:#9ab2d8;">Classic/Tycoon</div>`;
+    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:12px;color:#9ab2d8;">Classic/Tycoon</div>`;
     const body = document.createElement("div");
-    body.style.cssText = "display:flex;flex-direction:column;gap:7px;";
+    body.style.cssText = "display:flex;flex-direction:column;gap:5px;";
     panel.append(head, body);
     abilityHudState.container = panel;
     abilityHudState.body = body;
@@ -4647,6 +4747,15 @@
     }
     if (Number.isFinite(abilityHudBootstrap.latestBalance)) {
       abilityHudState.currentBalance = Number(abilityHudBootstrap.latestBalance) || 0;
+    }
+    if (abilityHudBootstrap.purchasedAbilities.size) {
+      abilityHudState.purchasedAbilities = new Set(abilityHudBootstrap.purchasedAbilities);
+    }
+    if (abilityHudBootstrap.usedAbilities.size) {
+      abilityHudState.usedAbilities = new Set(abilityHudBootstrap.usedAbilities);
+    }
+    if (abilityHudBootstrap.selfPlayerId) {
+      abilityHudState.selfPlayerId = abilityHudBootstrap.selfPlayerId;
     }
     requestAbilityHudRender();
   }
@@ -4681,14 +4790,26 @@
   const abilityHudBootstrap = {
     latestPacket: null,
     latestBalance: 0,
+    purchasedAbilities: new Set(),
+    usedAbilities: new Set(),
+    selfPlayerId: null,
   };
 
   socketManager.addEventListener("blueboatMessage", (event) => {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
+
+    if (packet?.eventName === "CLIENT_ID_SET") {
+      const selfPlayerId = packet?.payload ?? packet?.data ?? null;
+      if (typeof selfPlayerId === "string" && selfPlayerId.trim()) {
+        abilityHudBootstrap.selfPlayerId = selfPlayerId.trim();
+      }
+    }
+
     if (!key) return;
     if (key === "PLAYER_JOINS_STATIC_STATE") {
       abilityHudBootstrap.latestPacket = packet;
+      abilityHudBootstrap.usedAbilities.clear();
       const count = Array.isArray(packet?.data?.powerups) ? packet.data.powerups.length : 0;
       console.debug(`${ABILITY_HUD_LOG} bootstrap captured static state`, { count });
       return;
@@ -4698,6 +4819,17 @@
       if (type === "BALANCE") {
         const value = Number(packet?.data?.value ?? packet?.payload?.data?.value);
         if (Number.isFinite(value)) abilityHudBootstrap.latestBalance = value;
+      }
+      if (type === "PURCHASED_POWERUPS" || type === "USED_POWERUPS") {
+        const list = packet?.data?.value ?? packet?.payload?.data?.value;
+        if (Array.isArray(list)) {
+          const targetSet = type === "PURCHASED_POWERUPS" ? abilityHudBootstrap.purchasedAbilities : abilityHudBootstrap.usedAbilities;
+          targetSet.clear();
+          for (const item of list) {
+            const name = typeof item === "string" ? item.trim() : "";
+            if (name) targetSet.add(name);
+          }
+        }
       }
       if (!abilityHudBootstrap.latestPacket) {
         abilityHudBootstrap.latestPacket = packet;
