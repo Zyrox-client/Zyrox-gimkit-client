@@ -4681,24 +4681,21 @@
       name.title = abilityDescription;
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
       const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
-      const price = document.createElement("div");
-      price.style.cssText = "font-size:12px;color:#89f0b0;font-weight:700;white-space:nowrap;";
-      price.textContent = `$${pricing.roundedCost}`;
-      info.append(name, price);
+      info.append(name);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
       const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
       const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
       const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
       buyBtn.disabled = disabled;
-      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
+      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost}`);
       const isUsed = alreadyUsed;
       const isUnavailable = !alreadyPurchased && !canAfford;
       const buttonBorder = isUsed ? "rgba(160,160,160,.42)" : (isUnavailable ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)");
       const buttonBg = isUsed ? "rgba(120,120,120,.36)" : (isUnavailable ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)");
       const buttonColor = isUsed ? "rgba(230,230,230,.9)" : "#fff";
       buyBtn.className = "zyrox-upgrade-hud-button";
-      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};min-width:88px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
+      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};width:96px;min-width:96px;max-width:96px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
       buyBtn.addEventListener("click", () => {
         if (alreadyPurchased) sendAbilityUse(ability);
         else sendAbilityPurchase(ability);
