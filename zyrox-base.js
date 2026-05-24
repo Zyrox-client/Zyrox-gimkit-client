@@ -4352,6 +4352,8 @@
     wired: false,
     listeners: null,
     packetLogCount: 0,
+    purchasedAbilities: new Set(),
+    usedAbilities: new Set(),
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4422,6 +4424,10 @@
   function onAbilityHudInbound(event) {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
+    if (key === "PLAYER_JOINS_STATIC_STATE") {
+      abilityHudState.purchasedAbilities.clear();
+      abilityHudState.usedAbilities.clear();
+    }
     if (abilityHudState.packetLogCount < 18) {
       abilityHudState.packetLogCount += 1;
       console.debug(`${ABILITY_HUD_LOG} inbound packet`, {
@@ -4441,6 +4447,22 @@
         if (Number.isFinite(balance)) {
           abilityHudState.currentBalance = balance;
           requestAbilityHudRender();
+        }
+      }
+      if (type === "PURCHASED_POWERUPS" || type === "USED_POWERUPS") {
+        const list = packet?.data?.value ?? packet?.payload?.data?.value;
+        if (Array.isArray(list)) {
+          const targetSet = type === "PURCHASED_POWERUPS" ? abilityHudState.purchasedAbilities : abilityHudState.usedAbilities;
+          let changed = false;
+          for (const entry of list) {
+            const abilityName = typeof entry === "string" ? entry.trim() : "";
+            if (!abilityName) continue;
+            if (!targetSet.has(abilityName)) {
+              targetSet.add(abilityName);
+              changed = true;
+            }
+          }
+          if (changed) requestAbilityHudRender();
         }
       }
     }
@@ -4475,19 +4497,32 @@
   function onAbilityHudOutbound(event) {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
-    if (key !== "POWERUP_PURCHASED") return;
+    if (key !== "POWERUP_PURCHASED" && key !== "POWERUP_ACTIVATED") return;
     const payload = packet?.payload || packet;
-    console.debug(`${ABILITY_HUD_LOG} outbound purchase observed`, payload);
+    console.debug(`${ABILITY_HUD_LOG} outbound powerup observed`, payload);
   }
 
   function sendAbilityPurchase(ability) {
     if (!ability?.name) return;
+    if (abilityHudState.purchasedAbilities.has(ability.name) || abilityHudState.usedAbilities.has(ability.name)) return;
+    const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
+    if (abilityHudState.currentBalance < pricing.roundedCost) return;
     const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_PURCHASED", data: ability.name };
     console.debug(`${ABILITY_HUD_LOG} sending purchase payload`, payload);
     if (ability.name === "Icer") {
       console.debug(`${ABILITY_HUD_LOG} ASSERT freeze mapping ok: display="${ability.displayName}" payload="${ability.name}"`);
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
+  }
+
+  function sendAbilityUse(ability) {
+    if (!ability?.name) return;
+    if (abilityHudState.usedAbilities.has(ability.name)) return;
+    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
+    console.debug(`${ABILITY_HUD_LOG} sending use payload`, payload);
+    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    abilityHudState.usedAbilities.add(ability.name);
+    requestAbilityHudRender();
   }
 
   function renderAbilityHud() {
@@ -4502,27 +4537,31 @@
       const wrap = document.createElement("div");
       wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
       const chip = document.createElement("div");
-      chip.style.cssText = `min-width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:13px;`;
+      chip.style.cssText = `min-width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:${ability.color.background};color:${ability.color.text};font-weight:700;font-size:12px;`;
       chip.textContent = (ability.icon || "✦").includes("fa-") ? "❄" : (ability.icon || "✦");
       const info = document.createElement("div");
       info.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;";
       const name = document.createElement("div");
       name.style.cssText = "font-size:13px;font-weight:700;color:#fff;";
       name.textContent = ability.displayName;
-      const desc = document.createElement("div");
-      desc.style.cssText = "font-size:11px;color:#c0c7d8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
-      desc.textContent = ability.description || "No description";
-      desc.title = ability.description || "";
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
+      const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
       const price = document.createElement("div");
       price.style.cssText = "font-size:11px;color:#89f0b0;font-weight:600;";
       price.textContent = `$${pricing.roundedCost} (raw ${pricing.rawCost.toFixed(2)})`;
-      info.append(name, desc, price);
+      info.append(name, price);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
-      buyBtn.textContent = "Buy";
-      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:pointer;font-size:12px;font-weight:700;`;
-      buyBtn.addEventListener("click", () => sendAbilityPurchase(ability));
+      const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
+      const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
+      const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
+      buyBtn.disabled = disabled;
+      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
+      buyBtn.style.cssText = `border:1px solid ${ability.color.background};background:${ability.color.background};color:${ability.color.text};border-radius:8px;padding:5px 9px;cursor:${disabled ? "default" : "pointer"};font-size:12px;font-weight:700;opacity:${disabled ? ".55" : "1"};`;
+      buyBtn.addEventListener("click", () => {
+        if (alreadyPurchased) sendAbilityUse(ability);
+        else sendAbilityPurchase(ability);
+      });
       wrap.append(chip, info, buyBtn);
       frag.appendChild(wrap);
     }
