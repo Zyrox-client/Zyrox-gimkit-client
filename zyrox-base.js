@@ -4674,13 +4674,13 @@
     const frag = document.createDocumentFragment();
     for (const ability of entries) {
       const wrap = document.createElement("div");
-      wrap.style.cssText = "display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
+      wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:6px 7px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
       const abilityDescription = typeof ability.description === "string" && ability.description.trim() ? ability.description.trim() : "No description available.";
       wrap.title = abilityDescription;
       const info = document.createElement("div");
       info.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;flex:1;";
       const name = document.createElement("div");
-      name.style.cssText = "font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+      name.style.cssText = "font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
       name.textContent = ability.displayName;
       name.title = abilityDescription;
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
@@ -4729,7 +4729,7 @@
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;cursor:move;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
     head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:12px;color:#9ab2d8;">Classic/Tycoon</div>`;
     const body = document.createElement("div");
-    body.style.cssText = "display:flex;flex-direction:column;gap:7px;";
+    body.style.cssText = "display:flex;flex-direction:column;gap:5px;";
     panel.append(head, body);
     abilityHudState.container = panel;
     abilityHudState.body = body;
@@ -4747,6 +4747,15 @@
     }
     if (Number.isFinite(abilityHudBootstrap.latestBalance)) {
       abilityHudState.currentBalance = Number(abilityHudBootstrap.latestBalance) || 0;
+    }
+    if (abilityHudBootstrap.purchasedAbilities.size) {
+      abilityHudState.purchasedAbilities = new Set(abilityHudBootstrap.purchasedAbilities);
+    }
+    if (abilityHudBootstrap.usedAbilities.size) {
+      abilityHudState.usedAbilities = new Set(abilityHudBootstrap.usedAbilities);
+    }
+    if (abilityHudBootstrap.selfPlayerId) {
+      abilityHudState.selfPlayerId = abilityHudBootstrap.selfPlayerId;
     }
     requestAbilityHudRender();
   }
@@ -4781,14 +4790,26 @@
   const abilityHudBootstrap = {
     latestPacket: null,
     latestBalance: 0,
+    purchasedAbilities: new Set(),
+    usedAbilities: new Set(),
+    selfPlayerId: null,
   };
 
   socketManager.addEventListener("blueboatMessage", (event) => {
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
+
+    if (packet?.eventName === "CLIENT_ID_SET") {
+      const selfPlayerId = packet?.payload ?? packet?.data ?? null;
+      if (typeof selfPlayerId === "string" && selfPlayerId.trim()) {
+        abilityHudBootstrap.selfPlayerId = selfPlayerId.trim();
+      }
+    }
+
     if (!key) return;
     if (key === "PLAYER_JOINS_STATIC_STATE") {
       abilityHudBootstrap.latestPacket = packet;
+      abilityHudBootstrap.usedAbilities.clear();
       const count = Array.isArray(packet?.data?.powerups) ? packet.data.powerups.length : 0;
       console.debug(`${ABILITY_HUD_LOG} bootstrap captured static state`, { count });
       return;
@@ -4798,6 +4819,17 @@
       if (type === "BALANCE") {
         const value = Number(packet?.data?.value ?? packet?.payload?.data?.value);
         if (Number.isFinite(value)) abilityHudBootstrap.latestBalance = value;
+      }
+      if (type === "PURCHASED_POWERUPS" || type === "USED_POWERUPS") {
+        const list = packet?.data?.value ?? packet?.payload?.data?.value;
+        if (Array.isArray(list)) {
+          const targetSet = type === "PURCHASED_POWERUPS" ? abilityHudBootstrap.purchasedAbilities : abilityHudBootstrap.usedAbilities;
+          targetSet.clear();
+          for (const item of list) {
+            const name = typeof item === "string" ? item.trim() : "";
+            if (name) targetSet.add(name);
+          }
+        }
       }
       if (!abilityHudBootstrap.latestPacket) {
         abilityHudBootstrap.latestPacket = packet;
