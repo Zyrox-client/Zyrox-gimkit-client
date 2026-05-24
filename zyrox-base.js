@@ -4564,7 +4564,8 @@
 
   function abilityRequiresTargetSelection(ability) {
     if (!ability || !Array.isArray(ability.disabled)) return false;
-    const requires = ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly");
+    const isShield = String(ability?.name || "").trim().toLowerCase() === "shield";
+    const requires = !isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly");
     console.debug(`${ABILITY_HUD_LOG} [Step 1] ability target-selection requirement`, {
       abilityName: ability?.name,
       disabledFlags: ability?.disabled,
@@ -4671,15 +4672,15 @@
       const wrap = document.createElement("div");
       wrap.style.cssText = "display:flex;gap:10px;align-items:center;padding:8px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
       const info = document.createElement("div");
-      info.style.cssText = "display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;";
+      info.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;flex:1;";
       const name = document.createElement("div");
-      name.style.cssText = "font-size:13px;font-weight:700;color:#fff;";
+      name.style.cssText = "font-size:13px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
       name.textContent = ability.displayName;
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
       const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
       const price = document.createElement("div");
-      price.style.cssText = "font-size:11px;color:#89f0b0;font-weight:600;";
-      price.textContent = `$${pricing.roundedCost} (raw ${pricing.rawCost.toFixed(2)})`;
+      price.style.cssText = "font-size:12px;color:#89f0b0;font-weight:700;white-space:nowrap;";
+      price.textContent = `$${pricing.roundedCost}`;
       info.append(name, price);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
@@ -4688,11 +4689,13 @@
       const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
       buyBtn.disabled = disabled;
       buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : "Buy");
-      const buttonBorder = disabled ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)";
-      const buttonBg = disabled ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)";
-      const buttonColor = "#fff";
+      const isUsed = alreadyUsed;
+      const isUnavailable = !alreadyPurchased && !canAfford;
+      const buttonBorder = isUsed ? "rgba(160,160,160,.42)" : (isUnavailable ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)");
+      const buttonBg = isUsed ? "rgba(120,120,120,.36)" : (isUnavailable ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)");
+      const buttonColor = isUsed ? "rgba(230,230,230,.9)" : "#fff";
       buyBtn.className = "zyrox-upgrade-hud-button";
-      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};min-width:72px;text-align:center;opacity:${disabled ? ".65" : "1"};`;
+      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:3px 8px;font-size:11px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};min-width:72px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
       buyBtn.addEventListener("click", () => {
         if (alreadyPurchased) sendAbilityUse(ability);
         else sendAbilityPurchase(ability);
