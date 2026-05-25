@@ -3539,12 +3539,38 @@
     return readHudPositionFromStorage(moduleName, fallback);
   }
 
+  function persistHudPositionToStorage(moduleName, hudPosition) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig.slice() : [];
+      let found = false;
+      for (let i = 0; i < moduleConfig.length; i += 1) {
+        const entry = moduleConfig[i];
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        if (entry[0] !== moduleName) continue;
+        const cfg = entry[1] && typeof entry[1] === "object" ? { ...entry[1] } : {};
+        cfg.hudPosition = { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) };
+        moduleConfig[i] = [entry[0], cfg];
+        found = true;
+        break;
+      }
+      if (!found) moduleConfig.push([moduleName, { keybind: null, hudPosition: { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) } }]);
+      saved.moduleConfig = moduleConfig;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      console.log("[HUD Position] Forced localStorage sync", { moduleName, hudPosition: { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) } });
+    } catch (_) {}
+  }
+
   function writeHudPosition(moduleName, pos) {
     const normalized = normalizeHudPosition(pos, null);
     if (!normalized) return null;
     const cfg = getHudModuleConfigObject(moduleName, {});
     if (!cfg || typeof cfg !== "object") return null;
     cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
+    console.log("[HUD Position] Stored", { moduleName, hudPosition: { ...cfg.hudPosition } });
+    persistHudPositionToStorage(moduleName, cfg.hudPosition);
     markHudFallbackConfigDirty(moduleName);
     if (typeof saveSettings === "function") saveSettings();
     return { ...cfg.hudPosition };
@@ -4654,6 +4680,7 @@
         x: Math.round(Number(abilityHudState.position.x) || 0),
         y: Math.round(Number(abilityHudState.position.y) || 0),
       };
+      console.log("[HUD Position] Stored", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } });
       if (typeof saveSettings === "function") saveSettings();
     } catch (_) {}
   }
@@ -8148,21 +8175,21 @@
         const pos = readHudPositionFromElement(upgradeHudState.container);
         if (pos) {
           const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
-          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: "Upgrade HUD", hudPosition: { ...cfg.hudPosition } }); }
         }
       }
       if (lavaBuildingHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(lavaBuildingHudState.container);
         if (pos) {
           const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
-          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: "Building HUD", hudPosition: { ...cfg.hudPosition } }); }
         }
       }
       if (abilityHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(abilityHudState.container);
         if (pos) {
           const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
-          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } }); }
         }
       }
     } catch (_) {}
@@ -8983,10 +9010,11 @@
     resetModuleConfig(moduleName);
     if (moduleName === ABILITY_HUD_MODULE_NAME) {
       applyAbilityHudLiveConfig({ cfg: moduleCfg(moduleName) });
-    } else if (moduleName === "Upgrade HUD" && upgradeHudState.enabled) {
-      renderUpgradeHud();
-    } else if (moduleName === "Building HUD" && lavaBuildingHudState.enabled) {
-      renderLavaBuildingHud();
+      requestAbilityHudRender();
+    } else if (moduleName === "Upgrade HUD") {
+      hardRefreshUpgradeHud(moduleCfg(moduleName));
+    } else if (moduleName === "Building HUD") {
+      hardRefreshLavaBuildingHud(moduleCfg(moduleName));
     }
     openConfig(moduleName);
   });
