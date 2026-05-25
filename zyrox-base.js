@@ -4496,14 +4496,18 @@
     const iconFallback = document.createElement("span");
     iconFallback.className = "zyrox-ability-icon-fallback";
     iconFallback.textContent = "◻";
-    icon.append(iconImg, iconFallback);
+    const iconFa = document.createElement("i");
+    iconFa.className = "zyrox-ability-icon-fa";
+    iconFa.setAttribute("aria-hidden", "true");
+    iconFa.style.cssText = "display:none;font-size:28px;line-height:1;";
+    icon.append(iconImg, iconFa, iconFallback);
     const price = document.createElement("div");
     price.className = "zyrox-ability-price";
     price.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
     const overlay = document.createElement("div");
     overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.07) 42%,rgba(0,0,0,.25));z-index:1;";
     tile.append(title, icon, price, overlay);
-    return { tile, title, icon, iconImg, iconFallback, price };
+    return { tile, title, icon, iconImg, iconFa, iconFallback, price };
   }
 
   function updateAbilityTileData(slot, ability) {
@@ -4523,6 +4527,8 @@
       slot.title.textContent = "Empty";
       slot.iconImg.style.display = "none";
       slot.iconImg.removeAttribute("src");
+      slot.iconFa.style.display = "none";
+      slot.iconFa.className = "zyrox-ability-icon-fa";
       slot.iconFallback.style.display = "";
       slot.iconFallback.textContent = fallbackIcon;
       slot.price.textContent = "--";
@@ -4546,16 +4552,28 @@
     slot.title.style.fontSize = abilityName.length > 14 ? "9px" : "11px";
     slot.icon.style.color = textColor;
     const isLikelyImage = /^https?:\/\//i.test(iconRaw) || /^data:image\//i.test(iconRaw) || iconRaw.startsWith("/");
+    const isLikelyFaClass = /\bfa[srbld]?\b/i.test(iconRaw) || /\bfa-[a-z0-9-]+\b/i.test(iconRaw);
     if (isLikelyImage) {
       slot.iconImg.src = iconRaw;
       slot.iconImg.style.display = "";
+      slot.iconFa.style.display = "none";
+      slot.iconFa.className = "zyrox-ability-icon-fa";
+      slot.iconFallback.style.display = "none";
+    } else if (isLikelyFaClass) {
+      slot.iconImg.style.display = "none";
+      slot.iconImg.removeAttribute("src");
+      slot.iconFa.className = `zyrox-ability-icon-fa ${iconRaw}`.trim();
+      slot.iconFa.style.display = "";
       slot.iconFallback.style.display = "none";
     } else {
       slot.iconImg.style.display = "none";
       slot.iconImg.removeAttribute("src");
+      slot.iconFa.style.display = "none";
+      slot.iconFa.className = "zyrox-ability-icon-fa";
       slot.iconFallback.style.display = "";
       slot.iconFallback.textContent = iconText;
     }
+    slot.iconFa.style.color = textColor;
     slot.iconFallback.style.color = textColor;
     slot.price.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`);
     slot.price.style.color = textColor;
