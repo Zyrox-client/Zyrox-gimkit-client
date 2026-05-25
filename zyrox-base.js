@@ -3870,7 +3870,7 @@
       return false;
     };
     try {
-      const cfg = moduleCfg("Auto Upgrade") || {};
+      const cfg = getModuleConfigSafe("Auto Upgrade");
       const resolved = {
         multiplier: parseToggle(cfg.multiplier, defaults.multiplier),
         moneyPerQuestion: parseToggle(cfg.moneyPerQuestion, defaults.moneyPerQuestion),
@@ -4335,6 +4335,15 @@
     applyAnimationSkipState(false);
   }
 
+  function getModuleConfigSafe(name, fallback = {}) {
+    if (typeof moduleCfg !== "function") return fallback;
+    try {
+      return moduleCfg(name) || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   const ANTI_AFK_MODULE_NAME = "Anti AFK";
   const antiAfkState = {
     intervalId: null,
@@ -4342,7 +4351,7 @@
   };
 
   function getAntiAfkConfig() {
-    const cfg = moduleCfg(ANTI_AFK_MODULE_NAME);
+    const cfg = getModuleConfigSafe(ANTI_AFK_MODULE_NAME);
     const pulseMs = Math.max(4000, Number(cfg.pulseMs) || 12000);
     return { pulseMs };
   }
@@ -8294,7 +8303,7 @@
 
   function applyPreset(presetName) {
     state.globalPreset = normalizePopupPresetName(presetName || "default");
-    const popupCfg = moduleCfg("Answer Popup");
+    const popupCfg = getModuleConfigSafe("Answer Popup");
     popupCfg.preset = state.globalPreset;
     applyAnswerPopupPreset(popupCfg, state.globalPreset);
     const preset = (() => {
