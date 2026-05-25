@@ -4930,8 +4930,7 @@
     }
 
     if (isRebooterAbility(ability)) {
-      console.debug(`${ABILITY_HUD_LOG} rebooter activated; resetting purchased/used ability state to require repurchase`);
-      abilityHudState.purchasedAbilities.clear();
+      console.debug(`${ABILITY_HUD_LOG} rebooter activated; clearing USED state while preserving PURCHASED state`);
       abilityHudState.usedAbilities.clear();
       abilityHudState.usedAbilities.add(ability.name);
       requestAbilityHudRender();
@@ -4946,6 +4945,10 @@
     if (!abilityHudState.body) return;
     const entries = Array.from(abilityHudState.abilities.values());
     const cfg = getAbilityHudConfig();
+    if (abilityHudState.container) {
+      abilityHudState.container.style.transformOrigin = "top left";
+      abilityHudState.container.style.transform = `scale(${cfg.abilityHudScale})`;
+    }
     if (!entries.length) {
       abilityHudState.body.innerHTML = `<div style="font-size:12px;color:#b3b9c7;opacity:.85;">Waiting for abilities…</div>`;
       return;
