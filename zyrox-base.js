@@ -5021,6 +5021,7 @@
       name.title = abilityDescription;
       const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
       const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
+      const showPrices = abilityHudState.config.abilityHudShowPrices !== false;
       info.append(name);
       const buyBtn = document.createElement("button");
       buyBtn.type = "button";
@@ -5028,7 +5029,9 @@
       const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
       const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
       buyBtn.disabled = disabled;
-      buyBtn.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost}`);
+      buyBtn.textContent = alreadyUsed
+        ? "Used"
+        : (alreadyPurchased ? "Use" : (showPrices ? `$${pricing.roundedCost}` : "Buy"));
       const isUsed = alreadyUsed;
       const isUnavailable = !alreadyPurchased && !canAfford;
       const buttonBorder = isUsed ? "rgba(160,160,160,.42)" : (isUnavailable ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)");
