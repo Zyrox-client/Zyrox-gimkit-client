@@ -3557,6 +3557,30 @@
     return readHudPositionFromStorage(moduleName, fallback);
   }
 
+  function persistHudPositionToStorage(moduleName, hudPosition) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig.slice() : [];
+      let found = false;
+      for (let i = 0; i < moduleConfig.length; i += 1) {
+        const entry = moduleConfig[i];
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        if (entry[0] !== moduleName) continue;
+        const cfg = entry[1] && typeof entry[1] === "object" ? { ...entry[1] } : {};
+        cfg.hudPosition = { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) };
+        moduleConfig[i] = [entry[0], cfg];
+        found = true;
+        break;
+      }
+      if (!found) moduleConfig.push([moduleName, { keybind: null, hudPosition: { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) } }]);
+      saved.moduleConfig = moduleConfig;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      console.log("[HUD Position] Forced localStorage sync", { moduleName, hudPosition: { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) } });
+    } catch (_) {}
+  }
+
   function writeHudPosition(moduleName, pos) {
     const normalized = normalizeHudPosition(pos, null);
     if (!normalized) return null;
@@ -3564,6 +3588,7 @@
     if (!cfg || typeof cfg !== "object") return null;
     cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
     console.log("[HUD Position] Stored", { moduleName, hudPosition: { ...cfg.hudPosition } });
+    persistHudPositionToStorage(moduleName, cfg.hudPosition);
     markHudFallbackConfigDirty(moduleName);
     if (typeof saveSettings === "function") saveSettings();
     return { ...cfg.hudPosition };
