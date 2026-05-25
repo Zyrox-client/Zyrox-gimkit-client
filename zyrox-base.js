@@ -4464,6 +4464,12 @@
   }
 
   function getAbilityHudConfig() {
+    const readModuleCfg = () => {
+      if (typeof moduleCfg === "function") {
+        try { return moduleCfg(ABILITY_HUD_MODULE_NAME); } catch (_) {}
+      }
+      return abilityHudState.config || ABILITY_HUD_CONFIG_DEFAULTS;
+    };
     const apply = (cfg) => {
       const mode = String(cfg?.abilityHudDisplayMode ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudDisplayMode).trim().toLowerCase();
       const anchorRaw = String(cfg?.abilityHudAnchor ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor).trim().toLowerCase();
@@ -4476,7 +4482,7 @@
       return { ...abilityHudState.config };
     };
     try {
-      return apply(moduleCfg(ABILITY_HUD_MODULE_NAME));
+      return apply(readModuleCfg());
     } catch (_) {
       return apply(abilityHudState.config || ABILITY_HUD_CONFIG_DEFAULTS);
     }
@@ -4504,9 +4510,10 @@
   }
 
   function persistAbilityHudPosition() {
+    if (typeof moduleCfg !== "function") return;
     const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
     cfg.abilityHudPosition = { x: Math.round(Number(abilityHudState.position.x) || 0), y: Math.round(Number(abilityHudState.position.y) || 0) };
-    saveSettings();
+    if (typeof saveSettings === "function") saveSettings();
   }
 
   function getAbilityHudTextColor(hex) {
@@ -4968,7 +4975,7 @@
     }
     const cfg = getAbilityHudConfig();
     if (!Number.isFinite(abilityHudState.position.x) || !Number.isFinite(abilityHudState.position.y)) {
-      const savedPos = moduleCfg(ABILITY_HUD_MODULE_NAME)?.abilityHudPosition;
+      const savedPos = typeof moduleCfg === "function" ? moduleCfg(ABILITY_HUD_MODULE_NAME)?.abilityHudPosition : null;
       if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)) {
         abilityHudState.position.x = savedPos.x;
         abilityHudState.position.y = savedPos.y;
