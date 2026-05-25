@@ -3511,6 +3511,24 @@
     return normalizePoint(pos) || normalizePoint(fallback) || null;
   }
 
+
+  function readModuleConfigFromStorage(moduleName) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig : [];
+      for (const entry of moduleConfig) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        if (entry[0] !== moduleName) continue;
+        const cfg = entry[1];
+        if (cfg && typeof cfg === "object") return { ...cfg };
+        break;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   function readHudPositionFromStorage(moduleName, fallback = null) {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -3608,7 +3626,7 @@
     } catch (_) {}
 
     if (!window[cacheKey][moduleName] || typeof window[cacheKey][moduleName] !== "object") {
-      window[cacheKey][moduleName] = { ...defaults };
+      window[cacheKey][moduleName] = { ...defaults, ...(readModuleConfigFromStorage(moduleName) || {}) };
     }
     return window[cacheKey][moduleName];
   }
