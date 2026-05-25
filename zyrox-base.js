@@ -4613,15 +4613,18 @@
     const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
     const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
     const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
-    const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
+    const isTooExpensive = !alreadyPurchased && !canAfford;
+    const disabled = alreadyUsed || isTooExpensive;
     slot.tile.disabled = disabled;
-    slot.tile.style.opacity = alreadyUsed ? ".66" : (disabled ? ".8" : "1");
+    slot.tile.style.opacity = alreadyUsed ? ".58" : (isTooExpensive ? ".68" : "1");
     slot.tile.style.cursor = disabled ? "default" : "pointer";
     slot.tile.style.background = bg;
-    slot.tile.style.borderColor = disabled ? "rgba(255,255,255,.2)" : "rgba(255,255,255,.34)";
+    slot.tile.style.borderColor = alreadyUsed
+      ? "rgba(140,146,160,.38)"
+      : (isTooExpensive ? "rgba(172,158,128,.42)" : "rgba(255,255,255,.34)");
     slot.tile.style.filter = alreadyUsed
-      ? "saturate(0.45) brightness(0.72)"
-      : (disabled ? "saturate(0.55) brightness(0.82)" : "none");
+      ? "grayscale(0.95) saturate(0.2) brightness(0.62)"
+      : (isTooExpensive ? "grayscale(0.65) saturate(0.35) brightness(0.74)" : "none");
     slot.title.textContent = abilityName;
     slot.title.title = abilityName;
     slot.title.style.color = textColor;
@@ -4651,6 +4654,11 @@
     }
     slot.iconFa.style.color = textColor;
     slot.iconFallback.style.color = textColor;
+    const dimText = alreadyUsed ? "rgba(196,200,208,.92)" : (isTooExpensive ? "rgba(216,208,188,.9)" : textColor);
+    slot.title.style.color = dimText;
+    slot.icon.style.color = dimText;
+    slot.iconFa.style.color = dimText;
+    slot.iconFallback.style.color = dimText;
     const showPrices = abilityHudState.config.abilityHudShowPrices !== false;
     slot.price.textContent = showPrices ? (alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`)) : "";
     slot.price.style.display = showPrices ? "" : "none";
@@ -4668,7 +4676,7 @@
       abilityHudState.body.innerHTML = "";
       row = document.createElement("div");
       row.className = "zyrox-ability-icon-row";
-      row.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,96px));gap:8px;justify-content:flex-start;pointer-events:auto;";
+      row.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,96px));gap:8px;justify-content:start;align-items:start;pointer-events:auto;width:max-content;";
       abilityHudState.body.appendChild(row);
       abilityHudState.iconTiles = [];
     }
@@ -4935,9 +4943,17 @@
       return;
     }
     if (cfg.abilityHudDisplayMode === "icons") {
+      if (abilityHudState.container) {
+        abilityHudState.container.style.width = "fit-content";
+      }
+      if (abilityHudState.body) {
+        abilityHudState.body.style.width = "fit-content";
+      }
       renderAbilityHudIcons(entries);
       return;
     }
+    if (abilityHudState.container) abilityHudState.container.style.width = "min(360px,calc(100vw - 24px))";
+    if (abilityHudState.body) abilityHudState.body.style.width = "";
     const frag = document.createDocumentFragment();
     for (const ability of entries) {
       const wrap = document.createElement("div");
