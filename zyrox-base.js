@@ -3688,7 +3688,12 @@
       event.preventDefault();
     });
     const savedPos = readHudPosition("Upgrade HUD", null);
-    if (savedPos) applyHudPosition(hud, savedPos, true);
+    if (savedPos) {
+      const applied = applyHudPosition(hud, savedPos, true);
+      upgradeHudLog("Restored HUD position", { moduleName: "Upgrade HUD", saved: savedPos, applied });
+    } else {
+      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Upgrade HUD" });
+    }
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
     return hud;
@@ -4077,7 +4082,12 @@
       event.preventDefault();
     });
     const savedPos = readHudPosition("Building HUD", null);
-    if (savedPos) applyHudPosition(hud, savedPos, true);
+    if (savedPos) {
+      const applied = applyHudPosition(hud, savedPos, true);
+      upgradeHudLog("Restored HUD position", { moduleName: "Building HUD", saved: savedPos, applied });
+    } else {
+      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Building HUD" });
+    }
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
     return hud;
@@ -5078,11 +5088,13 @@
     if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)) {
       abilityHudState.position.x = savedPos.x;
       abilityHudState.position.y = savedPos.y;
+      console.debug(`${ABILITY_HUD_LOG} restored HUD position`, { saved: savedPos });
     }
     if (!Number.isFinite(abilityHudState.position.x) || !Number.isFinite(abilityHudState.position.y)) {
       const position = getAbilityHudDefaultPosition({ width: 360, height: 120 });
       abilityHudState.position.x = position.x;
       abilityHudState.position.y = position.y;
+      console.debug(`${ABILITY_HUD_LOG} no saved HUD position; using default`, { position });
     }
     const panel = document.createElement("section");
     panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:${ABILITY_HUD_INTERNAL_Z_INDEX};width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,${ABILITY_HUD_INTERNAL_OPACITY}),rgba(8,10,16,${ABILITY_HUD_INTERNAL_OPACITY}));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
@@ -5101,6 +5113,7 @@
     panel.style.left = `${clampedStart.x}px`;
     panel.style.top = `${clampedStart.y}px`;
     writeHudPosition(ABILITY_HUD_MODULE_NAME, clampedStart);
+    console.debug(`${ABILITY_HUD_LOG} applied HUD position`, { applied: clampedStart });
     applyAbilityHudLiveConfig({ cfg });
     renderAbilityHud();
     panel.addEventListener("mousedown", (event) => {
