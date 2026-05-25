@@ -3536,9 +3536,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     hud.style.setProperty("right", "14px");
   }
 
-  function renderUpgradeHud() {
+  function renderUpgradeHud(configOverride = null) {
     const hud = ensureUpgradeHudContainer();
-    const cfg = getUpgradeHudConfig();
+    const cfg = configOverride && typeof configOverride === "object"
+      ? { ...getUpgradeHudConfig(), ...configOverride }
+      : getUpgradeHudConfig();
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
@@ -3898,9 +3900,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     return hud;
   }
 
-  function renderLavaBuildingHud() {
+  function renderLavaBuildingHud(configOverride = null) {
     const hud = ensureLavaBuildingHudContainer();
-    const cfg = getLavaBuildingHudConfig();
+    const cfg = configOverride && typeof configOverride === "object"
+      ? { ...getLavaBuildingHudConfig(), ...configOverride }
+      : getLavaBuildingHudConfig();
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
@@ -6529,12 +6533,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
                 upgradeHudState.config.hudSize = newVal;
                 patchHudModuleConfig("Upgrade HUD", { hudSize: newVal });
-                renderUpgradeHud();
+                renderUpgradeHud({ hudSize: newVal });
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
                 lavaBuildingHudState.config.hudSize = newVal;
                 patchHudModuleConfig("Building HUD", { hudSize: newVal });
-                renderLavaBuildingHud();
+                renderLavaBuildingHud({ hudSize: newVal });
               }
               saveSettings();
             });
@@ -6555,12 +6559,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 patchHudModuleConfig("Upgrade HUD", { [setting.id]: cfg[setting.id] });
-                renderUpgradeHud();
+                renderUpgradeHud({ [setting.id]: cfg[setting.id] });
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
                 lavaBuildingHudState.config.displayTitle = cfg[setting.id];
                 patchHudModuleConfig("Building HUD", { displayTitle: cfg[setting.id] });
-                renderLavaBuildingHud();
+                renderLavaBuildingHud({ displayTitle: cfg[setting.id] });
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
@@ -6606,7 +6610,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                   customX: null,
                   customY: null,
                 });
-                renderUpgradeHud();
+                renderUpgradeHud({
+                  hudLocation: cfg[setting.id],
+                  useCustomPosition: false,
+                  customX: null,
+                  customY: null,
+                });
               }
               if (moduleName === "Building HUD" && setting.id === "hudLocation") {
                 lavaBuildingHudState.config.hudLocation = cfg[setting.id];
@@ -6622,7 +6631,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                   customX: null,
                   customY: null,
                 });
-                renderLavaBuildingHud();
+                renderLavaBuildingHud({
+                  hudLocation: cfg[setting.id],
+                  useCustomPosition: false,
+                  customX: null,
+                  customY: null,
+                });
               }
               saveSettings();
             });
