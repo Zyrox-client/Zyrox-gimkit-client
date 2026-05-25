@@ -4488,21 +4488,30 @@
     title.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
     const icon = document.createElement("div");
     icon.className = "zyrox-ability-icon";
-    icon.style.cssText = "display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;max-width:44px;max-height:44px;font-size:29px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4));z-index:2;";
+    icon.style.cssText = "display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;max-width:44px;max-height:44px;font-size:29px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4));z-index:2;overflow:hidden;";
+    const iconImg = document.createElement("img");
+    iconImg.className = "zyrox-ability-icon-img";
+    iconImg.alt = "";
+    iconImg.style.cssText = "display:none;width:100%;height:100%;object-fit:contain;";
+    const iconFallback = document.createElement("span");
+    iconFallback.className = "zyrox-ability-icon-fallback";
+    iconFallback.textContent = "◻";
+    icon.append(iconImg, iconFallback);
     const price = document.createElement("div");
     price.className = "zyrox-ability-price";
     price.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
     const overlay = document.createElement("div");
     overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.07) 42%,rgba(0,0,0,.25));z-index:1;";
     tile.append(title, icon, price, overlay);
-    return { tile, title, icon, price };
+    return { tile, title, icon, iconImg, iconFallback, price };
   }
 
   function updateAbilityTileData(slot, ability) {
     const fallbackBg = "#2a2f3a";
     const fallbackIcon = "◻";
     const abilityName = ability?.displayName || ability?.name || "Unknown";
-    const iconText = (typeof ability?.icon === "string" && ability.icon.trim()) ? ability.icon.trim() : fallbackIcon;
+    const iconText = fallbackIcon;
+    const iconRaw = typeof ability?.icon === "string" ? ability.icon.trim() : "";
     const bg = ability?.color?.background || fallbackBg;
     const textColor = ability?.color?.text || getAbilityHudTextColor(bg);
     if (!ability) {
@@ -4512,7 +4521,10 @@
       slot.tile.style.background = fallbackBg;
       slot.tile.style.borderColor = "rgba(255,255,255,.16)";
       slot.title.textContent = "Empty";
-      slot.icon.textContent = fallbackIcon;
+      slot.iconImg.style.display = "none";
+      slot.iconImg.removeAttribute("src");
+      slot.iconFallback.style.display = "";
+      slot.iconFallback.textContent = fallbackIcon;
       slot.price.textContent = "--";
       slot.title.style.color = "#d6dbea";
       slot.price.style.color = "#d6dbea";
@@ -4532,8 +4544,19 @@
     slot.title.title = abilityName;
     slot.title.style.color = textColor;
     slot.title.style.fontSize = abilityName.length > 14 ? "9px" : "11px";
-    slot.icon.textContent = iconText;
     slot.icon.style.color = textColor;
+    const isLikelyImage = /^https?:\/\//i.test(iconRaw) || /^data:image\//i.test(iconRaw) || iconRaw.startsWith("/");
+    if (isLikelyImage) {
+      slot.iconImg.src = iconRaw;
+      slot.iconImg.style.display = "";
+      slot.iconFallback.style.display = "none";
+    } else {
+      slot.iconImg.style.display = "none";
+      slot.iconImg.removeAttribute("src");
+      slot.iconFallback.style.display = "";
+      slot.iconFallback.textContent = iconText;
+    }
+    slot.iconFallback.style.color = textColor;
     slot.price.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`);
     slot.price.style.color = textColor;
     slot.tile.onclick = () => {
@@ -4549,16 +4572,23 @@
       abilityHudState.body.innerHTML = "";
       row = document.createElement("div");
       row.className = "zyrox-ability-icon-row";
-      row.style.cssText = "display:flex;align-items:center;justify-content:flex-start;gap:8px;pointer-events:auto;";
+      row.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,96px));gap:8px;justify-content:flex-start;pointer-events:auto;";
       abilityHudState.body.appendChild(row);
       abilityHudState.iconTiles = [];
-      for (let i = 0; i < 3; i += 1) {
-        const slot = createAbilityTile(i);
-        abilityHudState.iconTiles.push(slot);
-        row.appendChild(slot.tile);
-      }
     }
-    for (let i = 0; i < 3; i += 1) {
+
+    const slotCount = Math.max(3, entries.length);
+    while (abilityHudState.iconTiles.length < slotCount) {
+      const slot = createAbilityTile(abilityHudState.iconTiles.length);
+      abilityHudState.iconTiles.push(slot);
+      row.appendChild(slot.tile);
+    }
+    while (abilityHudState.iconTiles.length > slotCount) {
+      const slot = abilityHudState.iconTiles.pop();
+      slot?.tile?.remove();
+    }
+
+    for (let i = 0; i < slotCount; i += 1) {
       updateAbilityTileData(abilityHudState.iconTiles[i], entries[i] || null);
     }
   }
