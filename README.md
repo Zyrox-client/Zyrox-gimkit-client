@@ -21,6 +21,7 @@ More browser extension versions are (probably) coming soon (not for chrome sadly
 
 <a href="https://addons.mozilla.org/addon/zyrox-client-for-gimkit"><img src="https://blog.mozilla.org/opendesign/files/2018/07/firefox-logo.png" alt="Firefox logo" width="60"/></a>
 <a href="https://microsoftedge.microsoft.com/addons/detail/zyrox-client-for-gimkit/nbhkgcilohejipnefdamgefihedalffm"><img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Microsoft_Edge_logo_%282019%29.png" alt="Edge logo" width="60"/><a/>
+<p>Note: The exention version of zyrox client is updated only when the userscript reaches a major version.</p>
 <br>
 
 **Install as userscript:**
