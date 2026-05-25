@@ -4546,6 +4546,9 @@
     slot.tile.style.cursor = disabled ? "default" : "pointer";
     slot.tile.style.background = bg;
     slot.tile.style.borderColor = disabled ? "rgba(255,255,255,.2)" : "rgba(255,255,255,.34)";
+    slot.tile.style.filter = alreadyUsed
+      ? "saturate(0.45) brightness(0.72)"
+      : (disabled ? "saturate(0.55) brightness(0.82)" : "none");
     slot.title.textContent = abilityName;
     slot.title.title = abilityName;
     slot.title.style.color = textColor;
@@ -4891,6 +4894,7 @@
   function startAbilityHud() {
     if (abilityHudState.enabled) return;
     abilityHudState.enabled = true;
+    getAbilityHudConfig();
     if (!abilityHudState.wired) {
       abilityHudState.listeners = {
         inbound: (event) => onAbilityHudInbound(event),
@@ -4968,6 +4972,7 @@
       abilityHudState.container.remove();
       abilityHudState.container = null;
       abilityHudState.body = null;
+      abilityHudState.iconTiles = [];
     }
     if (abilityHudState.renderTimerId) {
       clearTimeout(abilityHudState.renderTimerId);
