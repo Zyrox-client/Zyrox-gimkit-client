@@ -3602,6 +3602,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     hud.style.display = upgradeHudState.enabled ? "block" : "none";
   }
 
+  function hardRefreshUpgradeHud(configOverride = null) {
+    if (upgradeHudState.container?.isConnected) upgradeHudState.container.remove();
+    upgradeHudState.container = null;
+    renderUpgradeHud(configOverride);
+  }
+
   function extractUpgradeLevelsFromStateUpdate(stateUpdate) {
     const tryReadLevels = (entry) => {
       if (!entry || typeof entry !== "object") return null;
@@ -3940,6 +3946,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       });
     }
     hud.style.display = lavaBuildingHudState.enabled ? "block" : "none";
+  }
+
+  function hardRefreshLavaBuildingHud(configOverride = null) {
+    if (lavaBuildingHudState.container?.isConnected) lavaBuildingHudState.container.remove();
+    lavaBuildingHudState.container = null;
+    renderLavaBuildingHud(configOverride);
   }
 
   function startLavaBuildingHud() {
@@ -6545,12 +6557,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
                 upgradeHudState.config.hudSize = newVal;
                 patchHudModuleConfig("Upgrade HUD", { hudSize: newVal });
-                renderUpgradeHud({ hudSize: newVal });
+                hardRefreshUpgradeHud({ hudSize: newVal });
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
                 lavaBuildingHudState.config.hudSize = newVal;
                 patchHudModuleConfig("Building HUD", { hudSize: newVal });
-                renderLavaBuildingHud({ hudSize: newVal });
+                hardRefreshLavaBuildingHud({ hudSize: newVal });
               }
               saveSettings();
             });
@@ -6571,12 +6583,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 patchHudModuleConfig("Upgrade HUD", { [setting.id]: cfg[setting.id] });
-                renderUpgradeHud({ [setting.id]: cfg[setting.id] });
+                hardRefreshUpgradeHud({ [setting.id]: cfg[setting.id] });
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
                 lavaBuildingHudState.config.displayTitle = cfg[setting.id];
                 patchHudModuleConfig("Building HUD", { displayTitle: cfg[setting.id] });
-                renderLavaBuildingHud({ displayTitle: cfg[setting.id] });
+                hardRefreshLavaBuildingHud({ displayTitle: cfg[setting.id] });
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
@@ -6622,7 +6634,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                   customX: null,
                   customY: null,
                 });
-                renderUpgradeHud({
+                hardRefreshUpgradeHud({
                   hudLocation: cfg[setting.id],
                   useCustomPosition: false,
                   customX: null,
@@ -6643,7 +6655,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                   customX: null,
                   customY: null,
                 });
-                renderLavaBuildingHud({
+                hardRefreshLavaBuildingHud({
                   hudLocation: cfg[setting.id],
                   useCustomPosition: false,
                   customX: null,
