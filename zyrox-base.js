@@ -3532,6 +3532,14 @@
     }
   }
 
+  function readHudPositionFromElement(el) {
+    if (!el) return null;
+    const left = Number.parseFloat(el.style.left || "");
+    const top = Number.parseFloat(el.style.top || "");
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { x: left, y: top };
+  }
+
   function applyHudPosition(el, pos, clamp = true) {
     if (!el || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return null;
     const rect = el.getBoundingClientRect();
@@ -3715,6 +3723,13 @@
   function renderUpgradeHud() {
     const hud = ensureUpgradeHudContainer();
     const cfg = getUpgradeHudConfig();
+    if (!normalizeHudPosition(cfg.hudPosition, null)) {
+      const livePos = readHudPositionFromElement(hud);
+      if (livePos) {
+        writeHudPosition("Upgrade HUD", livePos);
+        cfg.hudPosition = livePos;
+      }
+    }
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
@@ -4072,6 +4087,13 @@
   function renderLavaBuildingHud() {
     const hud = ensureLavaBuildingHudContainer();
     const cfg = getLavaBuildingHudConfig();
+    if (!normalizeHudPosition(cfg.hudPosition, null)) {
+      const livePos = readHudPositionFromElement(hud);
+      if (livePos) {
+        writeHudPosition("Building HUD", livePos);
+        cfg.hudPosition = livePos;
+      }
+    }
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
@@ -7849,10 +7871,18 @@
                 }
               }
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
+                if (upgradeHudState.container) {
+                  const livePos = readHudPositionFromElement(upgradeHudState.container);
+                  if (livePos) writeHudPosition("Upgrade HUD", livePos);
+                }
                 writeUpgradeHudConfigPatch({ hudSize: newVal });
                 renderUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
+                if (lavaBuildingHudState.container) {
+                  const livePos = readHudPositionFromElement(lavaBuildingHudState.container);
+                  if (livePos) writeHudPosition("Building HUD", livePos);
+                }
                 writeBuildingHudConfigPatch({ hudSize: newVal });
                 renderLavaBuildingHud();
               }
@@ -7883,10 +7913,18 @@
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
+                if (upgradeHudState.container) {
+                  const livePos = readHudPositionFromElement(upgradeHudState.container);
+                  if (livePos) writeHudPosition("Upgrade HUD", livePos);
+                }
                 writeUpgradeHudConfigPatch({ [setting.id]: cfg[setting.id] });
                 renderUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
+                if (lavaBuildingHudState.container) {
+                  const livePos = readHudPositionFromElement(lavaBuildingHudState.container);
+                  if (livePos) writeHudPosition("Building HUD", livePos);
+                }
                 writeBuildingHudConfigPatch({ displayTitle: cfg[setting.id] });
                 renderLavaBuildingHud();
               }
