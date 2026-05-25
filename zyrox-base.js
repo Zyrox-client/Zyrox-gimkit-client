@@ -4357,6 +4357,23 @@
 
   const ABILITY_HUD_MODULE_NAME = "Ability HUD";
   const ABILITY_HUD_LOG = "[AbilityHUD]";
+  const ABILITY_HUD_INTERNAL_OPACITY = 0.95;
+  const ABILITY_HUD_INTERNAL_Z_INDEX = 2147483646;
+  const ABILITY_HUD_DRAG_MARGIN = 10;
+  const ABILITY_HUD_CONFIG_DEFAULTS = {
+    // Switch between detailed card rows and compact icon tiles.
+    abilityHudDisplayMode: "default",
+    // Anchor used for the first mount and reset fallback.
+    abilityHudAnchor: "top-right",
+    // Scales the entire HUD UI (container + content).
+    abilityHudScale: 1,
+    // Gap spacing between icon tiles (pixels).
+    abilityHudGap: 8,
+    // Toggle price labels in both default + icon modes.
+    abilityHudShowPrices: true,
+    // Icon tile size (pixels), only used in icon mode.
+    abilityHudIconSize: 96,
+  };
   const abilityHudState = {
     enabled: false,
     container: null,
@@ -4367,7 +4384,7 @@
     isDragging: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
-    position: { x: null, y: 126 },
+    position: { x: null, y: null },
     renderTimerId: null,
     wired: false,
     listeners: null,
@@ -4377,9 +4394,7 @@
     pendingTargetAbility: null,
     pendingTargetRequestedAt: 0,
     selfPlayerId: null,
-    config: {
-      abilityHudDisplayMode: "default",
-    },
+    config: { ...ABILITY_HUD_CONFIG_DEFAULTS },
     iconTiles: [],
   };
 
@@ -4449,19 +4464,49 @@
   }
 
   function getAbilityHudConfig() {
-    const defaults = {
-      abilityHudDisplayMode: "default",
-    };
     const apply = (cfg) => {
-      const mode = String(cfg?.abilityHudDisplayMode ?? defaults.abilityHudDisplayMode).trim().toLowerCase();
+      const mode = String(cfg?.abilityHudDisplayMode ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudDisplayMode).trim().toLowerCase();
+      const anchorRaw = String(cfg?.abilityHudAnchor ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor).trim().toLowerCase();
       abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "default";
+      abilityHudState.config.abilityHudAnchor = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(anchorRaw) ? anchorRaw : ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor;
+      abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(2, Number(cfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
+      abilityHudState.config.abilityHudGap = Math.max(0, Math.min(36, Number(cfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
+      abilityHudState.config.abilityHudShowPrices = cfg?.abilityHudShowPrices !== false;
+      abilityHudState.config.abilityHudIconSize = Math.max(56, Math.min(164, Number(cfg?.abilityHudIconSize) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudIconSize));
       return { ...abilityHudState.config };
     };
     try {
       return apply(moduleCfg(ABILITY_HUD_MODULE_NAME));
     } catch (_) {
-      return apply(abilityHudState.config || defaults);
+      return apply(abilityHudState.config || ABILITY_HUD_CONFIG_DEFAULTS);
     }
+  }
+
+  function getAbilityHudAnchorPosition(anchor, panelRect) {
+    const inset = 18;
+    const topInset = 116;
+    const width = Math.max(100, panelRect?.width || 360);
+    const height = Math.max(44, panelRect?.height || 120);
+    if (anchor === "top-left") return { x: inset, y: topInset };
+    if (anchor === "bottom-left") return { x: inset, y: window.innerHeight - height - inset };
+    if (anchor === "bottom-right") return { x: window.innerWidth - width - inset, y: window.innerHeight - height - inset };
+    return { x: window.innerWidth - width - inset, y: topInset };
+  }
+
+  function clampAbilityHudPosition(x, y, panelRect) {
+    const width = Math.max(100, panelRect?.width || 360);
+    const height = Math.max(44, panelRect?.height || 120);
+    const minX = ABILITY_HUD_DRAG_MARGIN;
+    const minY = ABILITY_HUD_DRAG_MARGIN;
+    const maxX = Math.max(minX, window.innerWidth - width - ABILITY_HUD_DRAG_MARGIN);
+    const maxY = Math.max(minY, window.innerHeight - height - ABILITY_HUD_DRAG_MARGIN);
+    return { x: Math.max(minX, Math.min(maxX, Number(x) || minX)), y: Math.max(minY, Math.min(maxY, Number(y) || minY)) };
+  }
+
+  function persistAbilityHudPosition() {
+    const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+    cfg.abilityHudPosition = { x: Math.round(Number(abilityHudState.position.x) || 0), y: Math.round(Number(abilityHudState.position.y) || 0) };
+    saveSettings();
   }
 
   function getAbilityHudTextColor(hex) {
@@ -4578,7 +4623,9 @@
     }
     slot.iconFa.style.color = textColor;
     slot.iconFallback.style.color = textColor;
-    slot.price.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`);
+    const showPrices = abilityHudState.config.abilityHudShowPrices !== false;
+    slot.price.textContent = showPrices ? (alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`)) : "";
+    slot.price.style.display = showPrices ? "" : "none";
     slot.price.style.color = textColor;
     slot.tile.onclick = () => {
       if (alreadyPurchased) sendAbilityUse(ability);
@@ -4609,8 +4656,12 @@
       slot?.tile?.remove();
     }
 
+    const iconSize = abilityHudState.config.abilityHudIconSize;
+    row.style.gap = `${abilityHudState.config.abilityHudGap}px`;
     for (let i = 0; i < slotCount; i += 1) {
-      updateAbilityTileData(abilityHudState.iconTiles[i], entries[i] || null);
+      const slot = abilityHudState.iconTiles[i];
+      if (slot?.tile) { slot.tile.style.width = `${iconSize}px`; slot.tile.style.height = `${iconSize}px`; }
+      updateAbilityTileData(slot, entries[i] || null);
     }
   }
 
@@ -4915,13 +4966,21 @@
       socketManager.addEventListener("blueboatSend", abilityHudState.listeners.outbound);
       abilityHudState.wired = true;
     }
-    if (!Number.isFinite(abilityHudState.position.x)) {
-      const defaultWidth = 360;
-      const rightInset = 22;
-      abilityHudState.position.x = Math.max(18, window.innerWidth - defaultWidth - rightInset);
+    const cfg = getAbilityHudConfig();
+    if (!Number.isFinite(abilityHudState.position.x) || !Number.isFinite(abilityHudState.position.y)) {
+      const savedPos = moduleCfg(ABILITY_HUD_MODULE_NAME)?.abilityHudPosition;
+      if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)) {
+        abilityHudState.position.x = savedPos.x;
+        abilityHudState.position.y = savedPos.y;
+      }
+    }
+    if (!Number.isFinite(abilityHudState.position.x) || !Number.isFinite(abilityHudState.position.y)) {
+      const anchored = getAbilityHudAnchorPosition(cfg.abilityHudAnchor, { width: 360, height: 120 });
+      abilityHudState.position.x = anchored.x;
+      abilityHudState.position.y = anchored.y;
     }
     const panel = document.createElement("section");
-    panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
+    panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:${ABILITY_HUD_INTERNAL_Z_INDEX};width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,${ABILITY_HUD_INTERNAL_OPACITY}),rgba(8,10,16,${ABILITY_HUD_INTERNAL_OPACITY}));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
     const head = document.createElement("header");
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
     head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div>`;
@@ -4931,6 +4990,13 @@
     abilityHudState.container = panel;
     abilityHudState.body = body;
     document.documentElement.appendChild(panel);
+    const clampedStart = clampAbilityHudPosition(abilityHudState.position.x, abilityHudState.position.y, panel.getBoundingClientRect());
+    abilityHudState.position.x = clampedStart.x;
+    abilityHudState.position.y = clampedStart.y;
+    panel.style.left = `${clampedStart.x}px`;
+    panel.style.top = `${clampedStart.y}px`;
+    panel.style.transformOrigin = "top left";
+    panel.style.transform = `scale(${cfg.abilityHudScale})`;
     panel.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       if (event.target?.closest?.("button")) return;
@@ -4964,10 +5030,9 @@
   function abilityHudMouseMove(event) {
     if (!abilityHudState.isDragging || !abilityHudState.container) return;
     const rect = abilityHudState.container.getBoundingClientRect();
-    const maxX = Math.max(0, window.innerWidth - rect.width);
-    const maxY = Math.max(0, window.innerHeight - rect.height);
-    abilityHudState.position.x = Math.max(0, Math.min(maxX, event.clientX - abilityHudState.dragOffsetX));
-    abilityHudState.position.y = Math.max(0, Math.min(maxY, event.clientY - abilityHudState.dragOffsetY));
+    const clamped = clampAbilityHudPosition(event.clientX - abilityHudState.dragOffsetX, event.clientY - abilityHudState.dragOffsetY, rect);
+    abilityHudState.position.x = clamped.x;
+    abilityHudState.position.y = clamped.y;
     abilityHudState.container.style.left = `${abilityHudState.position.x}px`;
     abilityHudState.container.style.top = `${abilityHudState.position.y}px`;
   }
@@ -4975,6 +5040,7 @@
   function abilityHudMouseUp() {
     abilityHudState.isDragging = false;
     if (abilityHudState.container) abilityHudState.container.style.cursor = "grab";
+    persistAbilityHudPosition();
   }
 
   function stopAbilityHud() {
@@ -5360,16 +5426,12 @@
               name: ABILITY_HUD_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[ABILITY_HUD_MODULE_NAME],
               settings: [
-                {
-                  id: "abilityHudDisplayMode",
-                  label: "Display Mode",
-                  type: "select",
-                  default: "default",
-                  options: [
-                    { value: "default", label: "Default" },
-                    { value: "icons", label: "Icon Mode" },
-                  ],
-                },
+                { id: "abilityHudDisplayMode", label: "Display Mode", type: "select", default: "default", options: [{ value: "default", label: "Default" }, { value: "icons", label: "Icon Mode" }] },
+                { id: "abilityHudAnchor", label: "Anchor", type: "select", default: "top-right", options: [{ value: "top-left", label: "Top Left" }, { value: "top-right", label: "Top Right" }, { value: "bottom-left", label: "Bottom Left" }, { value: "bottom-right", label: "Bottom Right" }] },
+                { id: "abilityHudScale", label: "Scale", type: "slider", min: 0.75, max: 2, step: 0.05, default: 1 },
+                { id: "abilityHudGap", label: "Icon Gap", type: "slider", min: 0, max: 36, step: 1, default: 8, unit: "px" },
+                { id: "abilityHudShowPrices", label: "Show Prices", type: "checkbox", default: true },
+                { id: "abilityHudIconSize", label: "Icon Size", type: "slider", min: 56, max: 164, step: 2, default: 96, unit: "px" },
               ],
             },
           ],
@@ -7705,6 +7767,7 @@
       });
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
+        if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudIconSize" && cfg.abilityHudDisplayMode !== "icons") continue;
         const settingCard = document.createElement("div");
         settingCard.className = "zyrox-setting-card";
 
@@ -7740,6 +7803,11 @@
                 lavaBuildingHudState.config.hudSize = newVal;
                 renderLavaBuildingHud();
               }
+              if (moduleName === ABILITY_HUD_MODULE_NAME) {
+                if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap" || setting.id === "abilityHudIconSize") {
+                  if (abilityHudState.enabled) { getAbilityHudConfig(); requestAbilityHudRender(); if (abilityHudState.container) abilityHudState.container.style.transform = `scale(${abilityHudState.config.abilityHudScale})`; }
+                }
+              }
               if (moduleName === CAMERA_ZOOM_MODULE_NAME && setting.id === "zoom") {
                 cfg.zoom = clampCameraZoom(newVal);
                 if (valueLabel) valueLabel.textContent = `${cfg.zoom}${valueUnit}`;
@@ -7771,6 +7839,9 @@
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
+              }
+              if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudShowPrices") {
+                if (abilityHudState.enabled) { getAbilityHudConfig(); requestAbilityHudRender(); }
               }
               if (moduleName === HIDE_POPUPS_MODULE_NAME) {
                 syncHidePopups();
@@ -7822,9 +7893,9 @@
                 cfg.customY = null;
                 renderLavaBuildingHud();
               }
-              if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudDisplayMode") {
-                abilityHudState.config.abilityHudDisplayMode = cfg[setting.id] === "icons" ? "icons" : "default";
-                if (abilityHudState.enabled) requestAbilityHudRender();
+              if (moduleName === ABILITY_HUD_MODULE_NAME) {
+                if (setting.id === "abilityHudDisplayMode") openConfig(moduleName);
+                if (abilityHudState.enabled) { getAbilityHudConfig(); requestAbilityHudRender(); if (abilityHudState.container) abilityHudState.container.style.transform = `scale(${abilityHudState.config.abilityHudScale})`; }
               }
               saveSettings();
             });
@@ -8853,8 +8924,12 @@
           : (Array.isArray(saved.moduleSettings) ? saved.moduleSettings : null);
         if (savedModuleConfig) {
           const migratedModuleConfig = savedModuleConfig.map(([name, cfg]) => {
-            if (name === LEGACY_ANIMATION_SKIP_MODULE_NAME) return [ANIMATION_SKIP_MODULE_NAME, cfg];
-            return [name, cfg];
+            const nextName = name === LEGACY_ANIMATION_SKIP_MODULE_NAME ? ANIMATION_SKIP_MODULE_NAME : name;
+            const nextCfg = (cfg && typeof cfg === "object") ? { ...cfg } : cfg;
+            if (nextName === ABILITY_HUD_MODULE_NAME && nextCfg && typeof nextCfg === "object") {
+              delete nextCfg.abilityHudEnabled; delete nextCfg.abilityHudPositionX; delete nextCfg.abilityHudPositionY; delete nextCfg.abilityHudZIndex; delete nextCfg.abilityHudOpacity;
+            }
+            return [nextName, nextCfg];
           });
           state.moduleConfig = new Map(migratedModuleConfig);
         }
