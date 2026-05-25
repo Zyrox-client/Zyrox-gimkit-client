@@ -3615,6 +3615,7 @@
       showLvlPrefix: false,
       showUpgradeButton: true,
       hudSize: 100,
+      hudPosition: null,
     };
     const apply = (cfg) => {
       upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
@@ -3622,6 +3623,10 @@
       upgradeHudState.config.showUpgradeButton = cfg?.showUpgradeButton !== undefined ? Boolean(cfg.showUpgradeButton) : defaults.showUpgradeButton;
       const parsedSize = Number(cfg?.hudSize);
       upgradeHudState.config.hudSize = Number.isFinite(parsedSize) ? Math.max(60, Math.min(180, parsedSize)) : defaults.hudSize;
+      const pos = cfg?.hudPosition;
+      upgradeHudState.config.hudPosition = (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y))
+        ? { x: Number(pos.x), y: Number(pos.y) }
+        : defaults.hudPosition;
       return { ...upgradeHudState.config };
     };
     try {
@@ -3636,10 +3641,15 @@
     const defaults = {
       displayTitle: true,
       hudSize: 100,
+      hudPosition: null,
     };
     const apply = (cfg) => {
       lavaBuildingHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
       lavaBuildingHudState.config.hudSize = Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize;
+      const pos = cfg?.hudPosition;
+      lavaBuildingHudState.config.hudPosition = (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y))
+        ? { x: Number(pos.x), y: Number(pos.y) }
+        : defaults.hudPosition;
       return { ...lavaBuildingHudState.config };
     };
     try {
@@ -3650,8 +3660,13 @@
   }
 
   function applyUpgradeHudPosition(hud, cfg) {
-    const usingCustomPosition = hud.style.left && hud.style.top;
-    if (usingCustomPosition) return;
+    if (cfg?.hudPosition && Number.isFinite(cfg.hudPosition.x) && Number.isFinite(cfg.hudPosition.y)) {
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${Math.max(0, Number(cfg.hudPosition.x))}px`);
+      hud.style.setProperty("top", `${Math.max(0, Number(cfg.hudPosition.y))}px`);
+      return;
+    }
     hud.style.removeProperty("top");
     hud.style.removeProperty("right");
     hud.style.removeProperty("bottom");
