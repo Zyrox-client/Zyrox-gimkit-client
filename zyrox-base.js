@@ -3586,9 +3586,9 @@
     const defaults = { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null };
     const cfg = (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return {}; } })() || {};
     const normalized = {
-      displayTitle: cfg.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
-      showLvlPrefix: cfg.showLvlPrefix !== undefined ? Boolean(cfg.showLvlPrefix) : defaults.showLvlPrefix,
-      showUpgradeButton: cfg.showUpgradeButton !== undefined ? Boolean(cfg.showUpgradeButton) : defaults.showUpgradeButton,
+      displayTitle: parseBooleanSetting(cfg.displayTitle, defaults.displayTitle),
+      showLvlPrefix: parseBooleanSetting(cfg.showLvlPrefix, defaults.showLvlPrefix),
+      showUpgradeButton: parseBooleanSetting(cfg.showUpgradeButton, defaults.showUpgradeButton),
       hudSize: Number.isFinite(Number(cfg.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
       hudPosition: normalizeHudPosition(cfg.hudPosition, defaults.hudPosition),
     };
@@ -3613,7 +3613,7 @@
     const defaults = { displayTitle: true, hudSize: 100, hudPosition: null };
     const cfg = (() => { try { return moduleCfg("Building HUD"); } catch (_) { return {}; } })() || {};
     const normalized = {
-      displayTitle: cfg.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
+      displayTitle: parseBooleanSetting(cfg.displayTitle, defaults.displayTitle),
       hudSize: Number.isFinite(Number(cfg.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
       hudPosition: normalizeHudPosition(cfg.hudPosition, defaults.hudPosition),
     };
