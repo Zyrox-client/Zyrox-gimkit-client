@@ -3547,7 +3547,7 @@
       const cfg = getUpgradeHudModuleConfig?.();
       if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
-      const rememberPos = cfg?.rememberHudPosition === true;
+      const rememberPos = cfg?.rememberHudPosition !== false;
       upgradeHudState.config.useCustomPosition = rememberPos;
       upgradeHudState.config.customX = clamped.x;
       upgradeHudState.config.customY = clamped.y;
@@ -3574,7 +3574,7 @@
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      if (getUpgradeHudConfig().rememberHudPosition) persistUpgradeHudSettings?.();
+      if (getUpgradeHudConfig().rememberHudPosition !== false) persistUpgradeHudSettings?.();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -4017,7 +4017,7 @@
       const cfg = getLavaBuildingHudModuleConfig?.();
       if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
-      const rememberPos = cfg?.rememberHudPosition === true;
+      const rememberPos = cfg?.rememberHudPosition !== false;
       lavaBuildingHudState.config.useCustomPosition = rememberPos;
       lavaBuildingHudState.config.customX = clamped.x;
       lavaBuildingHudState.config.customY = clamped.y;
@@ -4042,7 +4042,7 @@
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      if (getLavaBuildingHudConfig().rememberHudPosition) persistLavaBuildingHudSettings?.();
+      if (getLavaBuildingHudConfig().rememberHudPosition !== false) persistLavaBuildingHudSettings?.();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -4524,7 +4524,7 @@
   function persistAbilityHudPosition() {
     if (typeof moduleCfg !== "function") return;
     const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
-    if (!cfg?.abilityHudRememberPosition) return;
+    if (cfg?.abilityHudRememberPosition === false) return;
     cfg.abilityHudPosition = { x: Math.round(Number(abilityHudState.position.x) || 0), y: Math.round(Number(abilityHudState.position.y) || 0) };
     if (typeof saveSettings === "function") saveSettings();
   }
@@ -4557,7 +4557,7 @@
     const anchorRaw = String(rawCfg?.abilityHudAnchor ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor).trim().toLowerCase();
     abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "list";
     abilityHudState.config.abilityHudAnchor = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(anchorRaw) ? anchorRaw : ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor;
-    abilityHudState.config.abilityHudRememberPosition = rawCfg?.abilityHudRememberPosition === true;
+    abilityHudState.config.abilityHudRememberPosition = rawCfg?.abilityHudRememberPosition !== false;
     abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(2, Number(rawCfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
     abilityHudState.config.abilityHudGap = Math.max(0, Math.min(36, Number(rawCfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
     abilityHudState.config.abilityHudShowPrices = rawCfg?.abilityHudShowPrices !== false;
