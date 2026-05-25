@@ -4700,6 +4700,9 @@
       const buttonColor = isUsed ? "rgba(230,230,230,.9)" : "#fff";
       buyBtn.className = "zyrox-upgrade-hud-button";
       buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};width:96px;min-width:96px;max-width:96px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
+      buyBtn.addEventListener("mousedown", (event) => {
+        event.stopPropagation();
+      });
       buyBtn.addEventListener("click", () => {
         if (alreadyPurchased) sendAbilityUse(ability);
         else sendAbilityPurchase(ability);
@@ -4724,9 +4727,9 @@
       abilityHudState.wired = true;
     }
     const panel = document.createElement("section");
-    panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;`;
+    panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
     const head = document.createElement("header");
-    head.style.cssText = "display:flex;align-items:center;justify-content:space-between;cursor:move;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
+    head.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
     head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:12px;color:#9ab2d8;">Classic/Tycoon</div>`;
     const body = document.createElement("div");
     body.style.cssText = "display:flex;flex-direction:column;gap:5px;";
@@ -4734,10 +4737,14 @@
     abilityHudState.container = panel;
     abilityHudState.body = body;
     document.documentElement.appendChild(panel);
-    head.addEventListener("mousedown", (event) => {
+    panel.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (event.target?.closest?.("button")) return;
       abilityHudState.isDragging = true;
       abilityHudState.dragOffsetX = event.clientX - panel.offsetLeft;
       abilityHudState.dragOffsetY = event.clientY - panel.offsetTop;
+      panel.style.cursor = "grabbing";
+      event.preventDefault();
     });
     document.addEventListener("mousemove", abilityHudMouseMove);
     document.addEventListener("mouseup", abilityHudMouseUp);
@@ -4762,14 +4769,18 @@
 
   function abilityHudMouseMove(event) {
     if (!abilityHudState.isDragging || !abilityHudState.container) return;
-    abilityHudState.position.x = Math.max(8, event.clientX - abilityHudState.dragOffsetX);
-    abilityHudState.position.y = Math.max(8, event.clientY - abilityHudState.dragOffsetY);
+    const rect = abilityHudState.container.getBoundingClientRect();
+    const maxX = Math.max(0, window.innerWidth - rect.width);
+    const maxY = Math.max(0, window.innerHeight - rect.height);
+    abilityHudState.position.x = Math.max(0, Math.min(maxX, event.clientX - abilityHudState.dragOffsetX));
+    abilityHudState.position.y = Math.max(0, Math.min(maxY, event.clientY - abilityHudState.dragOffsetY));
     abilityHudState.container.style.left = `${abilityHudState.position.x}px`;
     abilityHudState.container.style.top = `${abilityHudState.position.y}px`;
   }
 
   function abilityHudMouseUp() {
     abilityHudState.isDragging = false;
+    if (abilityHudState.container) abilityHudState.container.style.cursor = "grab";
   }
 
   function stopAbilityHud() {
