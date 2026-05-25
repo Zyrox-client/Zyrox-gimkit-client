@@ -4623,8 +4623,8 @@
       ? "rgba(140,146,160,.38)"
       : (isTooExpensive ? "rgba(172,158,128,.42)" : "rgba(255,255,255,.34)");
     slot.tile.style.filter = alreadyUsed
-      ? "grayscale(0.95) saturate(0.2) brightness(0.62)"
-      : (isTooExpensive ? "grayscale(0.65) saturate(0.35) brightness(0.74)" : "none");
+      ? "grayscale(0.7) saturate(0.45) brightness(0.74)"
+      : (isTooExpensive ? "grayscale(0.45) saturate(0.6) brightness(0.8)" : "none");
     slot.title.textContent = abilityName;
     slot.title.title = abilityName;
     slot.title.style.color = textColor;
@@ -4654,11 +4654,19 @@
     }
     slot.iconFa.style.color = textColor;
     slot.iconFallback.style.color = textColor;
-    const dimText = alreadyUsed ? "rgba(196,200,208,.92)" : (isTooExpensive ? "rgba(216,208,188,.9)" : textColor);
+    const dimText = alreadyUsed ? "rgba(230,234,242,.95)" : (isTooExpensive ? "rgba(244,235,210,.95)" : textColor);
     slot.title.style.color = dimText;
     slot.icon.style.color = dimText;
     slot.iconFa.style.color = dimText;
     slot.iconFallback.style.color = dimText;
+    const outlineShadow = alreadyUsed
+      ? "0 1px 0 rgba(0,0,0,.8), 0 0 2px rgba(0,0,0,.7), 0 0 6px rgba(110,120,140,.45)"
+      : (isTooExpensive ? "0 1px 0 rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.72), 0 0 6px rgba(184,152,86,.38)" : "0 1px 2px rgba(0,0,0,.45)");
+    slot.title.style.textShadow = outlineShadow;
+    slot.price.style.textShadow = outlineShadow;
+    slot.icon.style.filter = alreadyUsed
+      ? "drop-shadow(0 1px 1px rgba(0,0,0,.85)) drop-shadow(0 0 6px rgba(120,130,150,.38))"
+      : (isTooExpensive ? "drop-shadow(0 1px 1px rgba(0,0,0,.88)) drop-shadow(0 0 6px rgba(191,150,76,.3))" : "drop-shadow(0 2px 3px rgba(0,0,0,.4))");
     const showPrices = abilityHudState.config.abilityHudShowPrices !== false;
     slot.price.textContent = showPrices ? (alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`)) : "";
     slot.price.style.display = showPrices ? "" : "none";
