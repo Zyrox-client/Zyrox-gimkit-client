@@ -1232,6 +1232,7 @@
     balance: 0,
     config: {
       hudLocation: "topRight",
+      rememberHudPosition: false,
       displayTitle: true,
       hudSize: 100,
       useCustomPosition: false,
@@ -3456,6 +3457,7 @@
     container: null,
     config: {
       hudLocation: "topRight",
+      rememberHudPosition: false,
       displayTitle: true,
       showLvlPrefix: false,
       showUpgradeButton: true,
@@ -3545,12 +3547,15 @@
       const cfg = getUpgradeHudModuleConfig?.();
       if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
-      cfg.useCustomPosition = true;
-      cfg.customX = clamped.x;
-      cfg.customY = clamped.y;
-      upgradeHudState.config.useCustomPosition = true;
+      const rememberPos = cfg?.rememberHudPosition === true;
+      upgradeHudState.config.useCustomPosition = rememberPos;
       upgradeHudState.config.customX = clamped.x;
       upgradeHudState.config.customY = clamped.y;
+      if (rememberPos) {
+        cfg.useCustomPosition = true;
+        cfg.customX = clamped.x;
+        cfg.customY = clamped.y;
+      }
       return clamped;
     };
     const handleMouseMove = (event) => {
@@ -3569,7 +3574,7 @@
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      persistUpgradeHudSettings?.();
+      if (getUpgradeHudConfig().rememberHudPosition) persistUpgradeHudSettings?.();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -3591,6 +3596,7 @@
   function getUpgradeHudConfig() {
     const defaults = {
       hudLocation: "topRight",
+      rememberHudPosition: false,
       displayTitle: true,
       showLvlPrefix: false,
       showUpgradeButton: true,
@@ -3603,6 +3609,7 @@
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
       upgradeHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      upgradeHudState.config.rememberHudPosition = cfg?.rememberHudPosition === true;
       upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
       upgradeHudState.config.showLvlPrefix = cfg?.showLvlPrefix !== undefined ? Boolean(cfg.showLvlPrefix) : defaults.showLvlPrefix;
       upgradeHudState.config.showUpgradeButton = cfg?.showUpgradeButton !== undefined ? Boolean(cfg.showUpgradeButton) : defaults.showUpgradeButton;
@@ -3626,6 +3633,7 @@
   function getLavaBuildingHudConfig() {
     const defaults = {
       hudLocation: "topRight",
+      rememberHudPosition: false,
       displayTitle: true,
       hudSize: 100,
       useCustomPosition: false,
@@ -3636,6 +3644,7 @@
       const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
       const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
       lavaBuildingHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      lavaBuildingHudState.config.rememberHudPosition = cfg?.rememberHudPosition === true;
       lavaBuildingHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
       lavaBuildingHudState.config.hudSize = Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize;
       lavaBuildingHudState.config.useCustomPosition = cfg?.useCustomPosition !== undefined ? Boolean(cfg.useCustomPosition) : defaults.useCustomPosition;
@@ -4008,12 +4017,15 @@
       const cfg = getLavaBuildingHudModuleConfig?.();
       if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
-      cfg.useCustomPosition = true;
-      cfg.customX = clamped.x;
-      cfg.customY = clamped.y;
-      lavaBuildingHudState.config.useCustomPosition = true;
+      const rememberPos = cfg?.rememberHudPosition === true;
+      lavaBuildingHudState.config.useCustomPosition = rememberPos;
       lavaBuildingHudState.config.customX = clamped.x;
       lavaBuildingHudState.config.customY = clamped.y;
+      if (rememberPos) {
+        cfg.useCustomPosition = true;
+        cfg.customX = clamped.x;
+        cfg.customY = clamped.y;
+      }
       return clamped;
     };
     const handleMouseMove = (event) => {
@@ -4030,7 +4042,7 @@
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
-      persistLavaBuildingHudSettings?.();
+      if (getLavaBuildingHudConfig().rememberHudPosition) persistLavaBuildingHudSettings?.();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -4374,6 +4386,8 @@
     abilityHudDisplayMode: "icons",
     // Anchor used for the first mount and reset fallback.
     abilityHudAnchor: "top-right",
+    // Persist anchor + dragged position in module settings.
+    abilityHudRememberPosition: false,
     // Scales the entire HUD UI (container + content).
     abilityHudScale: 1,
     // Gap spacing between icon tiles (pixels).
@@ -4510,6 +4524,7 @@
   function persistAbilityHudPosition() {
     if (typeof moduleCfg !== "function") return;
     const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+    if (!cfg?.abilityHudRememberPosition) return;
     cfg.abilityHudPosition = { x: Math.round(Number(abilityHudState.position.x) || 0), y: Math.round(Number(abilityHudState.position.y) || 0) };
     if (typeof saveSettings === "function") saveSettings();
   }
@@ -4542,6 +4557,7 @@
     const anchorRaw = String(rawCfg?.abilityHudAnchor ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor).trim().toLowerCase();
     abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "list";
     abilityHudState.config.abilityHudAnchor = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(anchorRaw) ? anchorRaw : ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor;
+    abilityHudState.config.abilityHudRememberPosition = rawCfg?.abilityHudRememberPosition === true;
     abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(2, Number(rawCfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
     abilityHudState.config.abilityHudGap = Math.max(0, Math.min(36, Number(rawCfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
     abilityHudState.config.abilityHudShowPrices = rawCfg?.abilityHudShowPrices !== false;
@@ -4573,6 +4589,7 @@
   function persistAbilityHudPosition() {
     if (typeof moduleCfg !== "function") return;
     const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+    if (!cfg?.abilityHudRememberPosition) return;
     cfg.abilityHudPosition = { x: Math.round(Number(abilityHudState.position.x) || 0), y: Math.round(Number(abilityHudState.position.y) || 0) };
     if (typeof saveSettings === "function") saveSettings();
   }
@@ -5503,6 +5520,7 @@
                   type: "checkbox",
                   default: true,
                 },
+                { id: "rememberHudPosition", label: "Remember HUD Position", type: "checkbox", default: false },
                 {
                   id: "showLvlPrefix",
                   label: "Show Lvl Prefix",
@@ -5543,6 +5561,7 @@
               settings: [
                 { id: "abilityHudDisplayMode", label: "Display Mode", type: "select", default: "icons", options: [{ value: "icons", label: "Icons" }, { value: "list", label: "List" }] },
                 { id: "abilityHudAnchor", label: "Anchor", type: "select", default: "top-right", options: [{ value: "top-left", label: "Top Left" }, { value: "top-right", label: "Top Right" }, { value: "bottom-left", label: "Bottom Left" }, { value: "bottom-right", label: "Bottom Right" }] },
+                { id: "abilityHudRememberPosition", label: "Remember HUD Position", type: "checkbox", default: false },
                 { id: "abilityHudScale", label: "Scale", type: "slider", min: 0.75, max: 2, step: 0.05, default: 1 },
                 { id: "abilityHudGap", label: "Icon Gap", type: "slider", min: 0, max: 36, step: 1, default: 8, unit: "px" },
                 { id: "abilityHudShowPrices", label: "Show Prices", type: "checkbox", default: true },
@@ -5570,6 +5589,7 @@
                     { value: "bottomLeft", label: "Bottom Left" },
                   ],
                 },
+                { id: "rememberHudPosition", label: "Remember HUD Position", type: "checkbox", default: false },
                 { id: "displayTitle", label: "Display Title", type: "checkbox", default: true },
                 { id: "hudSize", label: "HUD Size", type: "slider", min: 60, max: 180, step: 5, default: 100, unit: "%" },
               ],
@@ -7948,8 +7968,28 @@
                 upgradeHudState.config[setting.id] = cfg[setting.id];
                 renderUpgradeHud();
               }
+              if (moduleName === "Upgrade HUD" && setting.id === "rememberHudPosition") {
+                upgradeHudState.config.rememberHudPosition = cfg[setting.id];
+                if (!cfg[setting.id]) {
+                  cfg.useCustomPosition = false;
+                  cfg.customX = null;
+                  cfg.customY = null;
+                  upgradeHudState.config.useCustomPosition = false;
+                }
+                renderUpgradeHud();
+              }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
                 lavaBuildingHudState.config.displayTitle = cfg[setting.id];
+                renderLavaBuildingHud();
+              }
+              if (moduleName === "Building HUD" && setting.id === "rememberHudPosition") {
+                lavaBuildingHudState.config.rememberHudPosition = cfg[setting.id];
+                if (!cfg[setting.id]) {
+                  cfg.useCustomPosition = false;
+                  cfg.customX = null;
+                  cfg.customY = null;
+                  lavaBuildingHudState.config.useCustomPosition = false;
+                }
                 renderLavaBuildingHud();
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
@@ -7957,6 +7997,9 @@
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudShowPrices") {
                 applyAbilityHudLiveConfig({ cfg });
+              }
+              if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudRememberPosition" && !cfg[setting.id]) {
+                delete cfg.abilityHudPosition;
               }
               if (moduleName === HIDE_POPUPS_MODULE_NAME) {
                 syncHidePopups();
