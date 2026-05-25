@@ -4367,7 +4367,7 @@
     isDragging: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
-    position: { x: 24, y: 92 },
+    position: { x: null, y: 126 },
     renderTimerId: null,
     wired: false,
     listeners: null,
@@ -4377,6 +4377,10 @@
     pendingTargetAbility: null,
     pendingTargetRequestedAt: 0,
     selfPlayerId: null,
+    config: {
+      abilityHudDisplayMode: "default",
+    },
+    iconTiles: [],
   };
 
   function calculateAbilityCost(ability, playerState = {}) {
@@ -4442,6 +4446,121 @@
       abilityHudState.renderTimerId = null;
       renderAbilityHud();
     }, 35);
+  }
+
+  function getAbilityHudConfig() {
+    const defaults = {
+      abilityHudDisplayMode: "default",
+    };
+    const apply = (cfg) => {
+      const mode = String(cfg?.abilityHudDisplayMode ?? defaults.abilityHudDisplayMode).trim().toLowerCase();
+      abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "default";
+      return { ...abilityHudState.config };
+    };
+    try {
+      return apply(moduleCfg(ABILITY_HUD_MODULE_NAME));
+    } catch (_) {
+      return apply(abilityHudState.config || defaults);
+    }
+  }
+
+  function getAbilityHudTextColor(hex) {
+    const color = String(hex || "").trim();
+    const match = color.match(/^#([0-9a-f]{6})$/i);
+    if (!match) return "#ffffff";
+    const raw = match[1];
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+    return luminance > 160 ? "#0a111d" : "#ffffff";
+  }
+
+  function createAbilityTile(index) {
+    const tile = document.createElement("button");
+    tile.type = "button";
+    tile.dataset.slotIndex = String(index);
+    tile.style.cssText = "appearance:none;position:relative;display:grid;grid-template-rows:auto 1fr auto;align-items:center;justify-items:center;gap:4px;width:96px;height:96px;border-radius:16px;border:1px solid rgba(255,255,255,.24);padding:7px;box-sizing:border-box;cursor:pointer;overflow:hidden;background:#2a2f3a;color:#fff;box-shadow:inset 0 -12px 20px rgba(0,0,0,.18),0 5px 14px rgba(0,0,0,.24);";
+
+    // Enforced order: title (top) -> icon (center) -> price (bottom), all inside tile.
+    const title = document.createElement("div");
+    title.className = "zyrox-ability-title";
+    title.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
+    const icon = document.createElement("div");
+    icon.className = "zyrox-ability-icon";
+    icon.style.cssText = "display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;max-width:44px;max-height:44px;font-size:29px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4));z-index:2;";
+    const price = document.createElement("div");
+    price.className = "zyrox-ability-price";
+    price.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.07) 42%,rgba(0,0,0,.25));z-index:1;";
+    tile.append(title, icon, price, overlay);
+    return { tile, title, icon, price };
+  }
+
+  function updateAbilityTileData(slot, ability) {
+    const fallbackBg = "#2a2f3a";
+    const fallbackIcon = "◻";
+    const abilityName = ability?.displayName || ability?.name || "Unknown";
+    const iconText = (typeof ability?.icon === "string" && ability.icon.trim()) ? ability.icon.trim() : fallbackIcon;
+    const bg = ability?.color?.background || fallbackBg;
+    const textColor = ability?.color?.text || getAbilityHudTextColor(bg);
+    if (!ability) {
+      slot.tile.disabled = true;
+      slot.tile.style.cursor = "default";
+      slot.tile.style.opacity = ".52";
+      slot.tile.style.background = fallbackBg;
+      slot.tile.style.borderColor = "rgba(255,255,255,.16)";
+      slot.title.textContent = "Empty";
+      slot.icon.textContent = fallbackIcon;
+      slot.price.textContent = "--";
+      slot.title.style.color = "#d6dbea";
+      slot.price.style.color = "#d6dbea";
+      return;
+    }
+    const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
+    const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
+    const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
+    const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
+    const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
+    slot.tile.disabled = disabled;
+    slot.tile.style.opacity = alreadyUsed ? ".66" : (disabled ? ".8" : "1");
+    slot.tile.style.cursor = disabled ? "default" : "pointer";
+    slot.tile.style.background = bg;
+    slot.tile.style.borderColor = disabled ? "rgba(255,255,255,.2)" : "rgba(255,255,255,.34)";
+    slot.title.textContent = abilityName;
+    slot.title.title = abilityName;
+    slot.title.style.color = textColor;
+    slot.title.style.fontSize = abilityName.length > 14 ? "9px" : "11px";
+    slot.icon.textContent = iconText;
+    slot.icon.style.color = textColor;
+    slot.price.textContent = alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`);
+    slot.price.style.color = textColor;
+    slot.tile.onclick = () => {
+      if (alreadyPurchased) sendAbilityUse(ability);
+      else sendAbilityPurchase(ability);
+    };
+  }
+
+  function renderAbilityHudIcons(entries) {
+    if (!abilityHudState.body) return;
+    let row = abilityHudState.body.querySelector(".zyrox-ability-icon-row");
+    if (!row) {
+      abilityHudState.body.innerHTML = "";
+      row = document.createElement("div");
+      row.className = "zyrox-ability-icon-row";
+      row.style.cssText = "display:flex;align-items:center;justify-content:flex-start;gap:8px;pointer-events:auto;";
+      abilityHudState.body.appendChild(row);
+      abilityHudState.iconTiles = [];
+      for (let i = 0; i < 3; i += 1) {
+        const slot = createAbilityTile(i);
+        abilityHudState.iconTiles.push(slot);
+        row.appendChild(slot.tile);
+      }
+    }
+    for (let i = 0; i < 3; i += 1) {
+      updateAbilityTileData(abilityHudState.iconTiles[i], entries[i] || null);
+    }
   }
 
   function onAbilityHudInbound(event) {
@@ -4569,7 +4688,9 @@
   function abilityRequiresTargetSelection(ability) {
     if (!ability || !Array.isArray(ability.disabled)) return false;
     const isShield = String(ability?.name || "").trim().toLowerCase() === "shield";
-    const requires = !isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly");
+    const isGiftAbility = String(ability?.name || "").trim().toLowerCase() === "giving"
+      || String(ability?.displayName || "").trim().toLowerCase() === "gift";
+    const requires = (!isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly")) || isGiftAbility;
     console.debug(`${ABILITY_HUD_LOG} [Step 1] ability target-selection requirement`, {
       abilityName: ability?.name,
       disabledFlags: ability?.disabled,
@@ -4611,7 +4732,7 @@
     players.forEach((player) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = `${player.name || "Unknown"} (${player.id})`;
+      btn.textContent = `${player.name || "Unknown"}`;
       btn.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 6px 0;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;";
       btn.addEventListener("click", () => {
         overlay.remove();
@@ -4667,6 +4788,11 @@
   function renderAbilityHud() {
     if (!abilityHudState.body) return;
     const entries = Array.from(abilityHudState.abilities.values());
+    const cfg = getAbilityHudConfig();
+    if (cfg.abilityHudDisplayMode === "icons") {
+      renderAbilityHudIcons(entries);
+      return;
+    }
     if (!entries.length) {
       abilityHudState.body.innerHTML = `<div style="font-size:12px;color:#b3b9c7;opacity:.85;">Waiting for abilities…</div>`;
       return;
@@ -4726,11 +4852,16 @@
       socketManager.addEventListener("blueboatSend", abilityHudState.listeners.outbound);
       abilityHudState.wired = true;
     }
+    if (!Number.isFinite(abilityHudState.position.x)) {
+      const defaultWidth = 360;
+      const rightInset = 22;
+      abilityHudState.position.x = Math.max(18, window.innerWidth - defaultWidth - rightInset);
+    }
     const panel = document.createElement("section");
     panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
     const head = document.createElement("header");
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
-    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:12px;color:#9ab2d8;">Classic/Tycoon</div>`;
+    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div>`;
     const body = document.createElement("div");
     body.style.cssText = "display:flex;flex-direction:column;gap:5px;";
     panel.append(head, body);
@@ -5164,7 +5295,18 @@
             {
               name: ABILITY_HUD_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[ABILITY_HUD_MODULE_NAME],
-              settings: [],
+              settings: [
+                {
+                  id: "abilityHudDisplayMode",
+                  label: "Display Mode",
+                  type: "select",
+                  default: "default",
+                  options: [
+                    { value: "default", label: "Default" },
+                    { value: "icons", label: "Icon Mode" },
+                  ],
+                },
+              ],
             },
           ],
         },
