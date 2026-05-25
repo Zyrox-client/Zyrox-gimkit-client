@@ -3511,15 +3511,35 @@
     return normalizePoint(pos) || normalizePoint(fallback) || null;
   }
 
+  function readHudPositionFromStorage(moduleName, fallback = null) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return normalizeHudPosition(null, fallback);
+      const saved = JSON.parse(raw);
+      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig : [];
+      for (const entry of moduleConfig) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        if (entry[0] !== moduleName) continue;
+        const cfg = entry[1] && typeof entry[1] === "object" ? entry[1] : null;
+        if (!cfg) break;
+        const legacy = { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top };
+        return normalizeHudPosition(cfg.hudPosition, legacy || fallback);
+      }
+    } catch (_) {}
+    return normalizeHudPosition(null, fallback);
+  }
+
   function readHudPosition(moduleName, fallback = null) {
     try {
       const cfg = moduleCfg(moduleName);
       const legacy = cfg && typeof cfg === "object"
         ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
         : null;
-      return normalizeHudPosition(cfg?.hudPosition, legacy || fallback);
+      const fromCfg = normalizeHudPosition(cfg?.hudPosition, legacy || null);
+      if (fromCfg) return fromCfg;
+      return readHudPositionFromStorage(moduleName, fallback);
     } catch (_) {
-      return normalizeHudPosition(null, fallback);
+      return readHudPositionFromStorage(moduleName, fallback);
     }
   }
 
@@ -3693,7 +3713,7 @@
       const applied = applyHudPosition(hud, savedPos, true);
       upgradeHudLog("Restored HUD position", { moduleName: "Upgrade HUD", saved: savedPos, applied });
     } else {
-      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Upgrade HUD", rawCfg: (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return null; } })() });
+      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Upgrade HUD", rawCfg: (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return null; } })(), storagePos: readHudPositionFromStorage("Upgrade HUD", null) });
     }
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
@@ -4087,7 +4107,7 @@
       const applied = applyHudPosition(hud, savedPos, true);
       upgradeHudLog("Restored HUD position", { moduleName: "Building HUD", saved: savedPos, applied });
     } else {
-      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Building HUD", rawCfg: (() => { try { return moduleCfg("Building HUD"); } catch (_) { return null; } })() });
+      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Building HUD", rawCfg: (() => { try { return moduleCfg("Building HUD"); } catch (_) { return null; } })(), storagePos: readHudPositionFromStorage("Building HUD", null) });
     }
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
