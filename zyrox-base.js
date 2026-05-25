@@ -3582,16 +3582,30 @@
     return next;
   }
 
-  function readUpgradeHudConfig() {
+
+  function normalizeUpgradeHudConfigFromRaw(rawCfg = {}) {
     const defaults = { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null };
-    const cfg = (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return {}; } })() || {};
-    const normalized = {
-      displayTitle: parseBooleanSetting(cfg.displayTitle, defaults.displayTitle),
-      showLvlPrefix: parseBooleanSetting(cfg.showLvlPrefix, defaults.showLvlPrefix),
-      showUpgradeButton: parseBooleanSetting(cfg.showUpgradeButton, defaults.showUpgradeButton),
-      hudSize: Number.isFinite(Number(cfg.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
-      hudPosition: normalizeHudPosition(cfg.hudPosition, defaults.hudPosition),
+    return {
+      displayTitle: parseBooleanSetting(rawCfg.displayTitle, defaults.displayTitle),
+      showLvlPrefix: parseBooleanSetting(rawCfg.showLvlPrefix, defaults.showLvlPrefix),
+      showUpgradeButton: parseBooleanSetting(rawCfg.showUpgradeButton, defaults.showUpgradeButton),
+      hudSize: Number.isFinite(Number(rawCfg.hudSize)) ? Math.max(60, Math.min(180, Number(rawCfg.hudSize))) : defaults.hudSize,
+      hudPosition: normalizeHudPosition(rawCfg.hudPosition, defaults.hudPosition),
     };
+  }
+
+  function normalizeBuildingHudConfigFromRaw(rawCfg = {}) {
+    const defaults = { displayTitle: true, hudSize: 100, hudPosition: null };
+    return {
+      displayTitle: parseBooleanSetting(rawCfg.displayTitle, defaults.displayTitle),
+      hudSize: Number.isFinite(Number(rawCfg.hudSize)) ? Math.max(60, Math.min(180, Number(rawCfg.hudSize))) : defaults.hudSize,
+      hudPosition: normalizeHudPosition(rawCfg.hudPosition, defaults.hudPosition),
+    };
+  }
+
+  function readUpgradeHudConfig() {
+    const cfg = (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return {}; } })() || {};
+    const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
     Object.assign(upgradeHudState.config, normalized);
     return { ...normalized };
   }
@@ -3601,22 +3615,20 @@
       const cfg = moduleCfg("Upgrade HUD");
       if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
       Object.assign(cfg, patch);
-      const normalized = readUpgradeHudConfig();
+      const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
+      Object.assign(cfg, normalized);
+      Object.assign(upgradeHudState.config, normalized);
       if (typeof saveSettings === "function") saveSettings();
-      return normalized;
-    } catch (_) {
+      return { ...normalized };
+    } catch (error) {
+      upgradeHudLog("Failed to write Upgrade HUD config patch", { patch, error });
       return readUpgradeHudConfig();
     }
   }
 
   function readBuildingHudConfig() {
-    const defaults = { displayTitle: true, hudSize: 100, hudPosition: null };
     const cfg = (() => { try { return moduleCfg("Building HUD"); } catch (_) { return {}; } })() || {};
-    const normalized = {
-      displayTitle: parseBooleanSetting(cfg.displayTitle, defaults.displayTitle),
-      hudSize: Number.isFinite(Number(cfg.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
-      hudPosition: normalizeHudPosition(cfg.hudPosition, defaults.hudPosition),
-    };
+    const normalized = normalizeBuildingHudConfigFromRaw(cfg);
     Object.assign(lavaBuildingHudState.config, normalized);
     return { ...normalized };
   }
@@ -3626,10 +3638,13 @@
       const cfg = moduleCfg("Building HUD");
       if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
       Object.assign(cfg, patch);
-      const normalized = readBuildingHudConfig();
+      const normalized = normalizeBuildingHudConfigFromRaw(cfg);
+      Object.assign(cfg, normalized);
+      Object.assign(lavaBuildingHudState.config, normalized);
       if (typeof saveSettings === "function") saveSettings();
-      return normalized;
-    } catch (_) {
+      return { ...normalized };
+    } catch (error) {
+      upgradeHudLog("Failed to write Building HUD config patch", { patch, error });
       return readBuildingHudConfig();
     }
   }
