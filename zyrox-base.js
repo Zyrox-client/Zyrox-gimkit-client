@@ -3511,6 +3511,24 @@
     return normalizePoint(pos) || normalizePoint(fallback) || null;
   }
 
+
+  function readModuleConfigFromStorage(moduleName) {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig : [];
+      for (const entry of moduleConfig) {
+        if (!Array.isArray(entry) || entry.length < 2) continue;
+        if (entry[0] !== moduleName) continue;
+        const cfg = entry[1];
+        if (cfg && typeof cfg === "object") return { ...cfg };
+        break;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   function readHudPositionFromStorage(moduleName, fallback = null) {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -3530,31 +3548,24 @@
   }
 
   function readHudPosition(moduleName, fallback = null) {
-    try {
-      const cfg = moduleCfg(moduleName);
-      const legacy = cfg && typeof cfg === "object"
-        ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
-        : null;
-      const fromCfg = normalizeHudPosition(cfg?.hudPosition, legacy || null);
-      if (fromCfg) return fromCfg;
-      return readHudPositionFromStorage(moduleName, fallback);
-    } catch (_) {
-      return readHudPositionFromStorage(moduleName, fallback);
-    }
+    const cfg = getHudModuleConfigObject(moduleName, {});
+    const legacy = cfg && typeof cfg === "object"
+      ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
+      : null;
+    const fromCfg = normalizeHudPosition(cfg?.hudPosition, legacy || null);
+    if (fromCfg) return fromCfg;
+    return readHudPositionFromStorage(moduleName, fallback);
   }
 
   function writeHudPosition(moduleName, pos) {
     const normalized = normalizeHudPosition(pos, null);
     if (!normalized) return null;
-    try {
-      const cfg = moduleCfg(moduleName);
-      if (!cfg || typeof cfg !== "object") return null;
-      cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
-      if (typeof saveSettings === "function") saveSettings();
-      return { ...cfg.hudPosition };
-    } catch (_) {
-      return null;
-    }
+    const cfg = getHudModuleConfigObject(moduleName, {});
+    if (!cfg || typeof cfg !== "object") return null;
+    cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
+    markHudFallbackConfigDirty(moduleName);
+    if (typeof saveSettings === "function") saveSettings();
+    return { ...cfg.hudPosition };
   }
 
   function readHudPositionFromElement(el) {
@@ -3582,56 +3593,100 @@
     return next;
   }
 
-  function readUpgradeHudConfig() {
+
+
+  function markHudFallbackConfigDirty(moduleName) {
+    const dirtyKey = "__zyroxHudFallbackConfigDirty";
+    if (!window[dirtyKey] || typeof window[dirtyKey] !== "object") window[dirtyKey] = {};
+    window[dirtyKey][moduleName] = true;
+  }
+
+  function getHudModuleConfigObject(moduleName, defaults = {}) {
+    const cacheKey = "__zyroxHudFallbackConfig";
+    const dirtyKey = "__zyroxHudFallbackConfigDirty";
+    if (!window[cacheKey] || typeof window[cacheKey] !== "object") window[cacheKey] = {};
+    if (!window[dirtyKey] || typeof window[dirtyKey] !== "object") window[dirtyKey] = {};
+
+    try {
+      if (typeof moduleCfg === "function") {
+        const cfg = moduleCfg(moduleName);
+        if (cfg && typeof cfg === "object") {
+          const fallbackCfg = window[cacheKey][moduleName];
+          const fallbackDirty = window[dirtyKey][moduleName] === true;
+          if (fallbackCfg && typeof fallbackCfg === "object") {
+            if (fallbackDirty) {
+              for (const [key, value] of Object.entries(fallbackCfg)) cfg[key] = value;
+            }
+            delete window[cacheKey][moduleName];
+            delete window[dirtyKey][moduleName];
+          }
+          return cfg;
+        }
+      }
+    } catch (_) {}
+
+    if (!window[cacheKey][moduleName] || typeof window[cacheKey][moduleName] !== "object") {
+      window[cacheKey][moduleName] = { ...defaults, ...(readModuleConfigFromStorage(moduleName) || {}) };
+    }
+    return window[cacheKey][moduleName];
+  }
+
+  function normalizeUpgradeHudConfigFromRaw(rawCfg = {}) {
     const defaults = { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null };
-    const cfg = (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return {}; } })() || {};
-    const normalized = {
-      displayTitle: cfg.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
-      showLvlPrefix: cfg.showLvlPrefix !== undefined ? Boolean(cfg.showLvlPrefix) : defaults.showLvlPrefix,
-      showUpgradeButton: cfg.showUpgradeButton !== undefined ? Boolean(cfg.showUpgradeButton) : defaults.showUpgradeButton,
-      hudSize: Number.isFinite(Number(cfg.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
-      hudPosition: normalizeHudPosition(cfg.hudPosition, defaults.hudPosition),
+    return {
+      displayTitle: parseBooleanSetting(rawCfg.displayTitle, defaults.displayTitle),
+      showLvlPrefix: parseBooleanSetting(rawCfg.showLvlPrefix, defaults.showLvlPrefix),
+      showUpgradeButton: parseBooleanSetting(rawCfg.showUpgradeButton, defaults.showUpgradeButton),
+      hudSize: Number.isFinite(Number(rawCfg.hudSize)) ? Math.max(60, Math.min(180, Number(rawCfg.hudSize))) : defaults.hudSize,
+      hudPosition: normalizeHudPosition(rawCfg.hudPosition, defaults.hudPosition),
     };
+  }
+
+  function normalizeBuildingHudConfigFromRaw(rawCfg = {}) {
+    const defaults = { displayTitle: true, hudSize: 100, hudPosition: null };
+    return {
+      displayTitle: parseBooleanSetting(rawCfg.displayTitle, defaults.displayTitle),
+      hudSize: Number.isFinite(Number(rawCfg.hudSize)) ? Math.max(60, Math.min(180, Number(rawCfg.hudSize))) : defaults.hudSize,
+      hudPosition: normalizeHudPosition(rawCfg.hudPosition, defaults.hudPosition),
+    };
+  }
+
+  function readUpgradeHudConfig() {
+    const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
+    const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
     Object.assign(upgradeHudState.config, normalized);
     return { ...normalized };
   }
 
   function writeUpgradeHudConfigPatch(patch = {}) {
-    try {
-      const cfg = moduleCfg("Upgrade HUD");
-      if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
-      Object.assign(cfg, patch);
-      const normalized = readUpgradeHudConfig();
-      if (typeof saveSettings === "function") saveSettings();
-      return normalized;
-    } catch (_) {
-      return readUpgradeHudConfig();
-    }
+    const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
+    if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
+    Object.assign(cfg, patch);
+    markHudFallbackConfigDirty("Building HUD");
+    markHudFallbackConfigDirty("Upgrade HUD");
+    const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
+    Object.assign(cfg, normalized);
+    Object.assign(upgradeHudState.config, normalized);
+    if (typeof saveSettings === "function") saveSettings();
+    return { ...normalized };
   }
 
   function readBuildingHudConfig() {
-    const defaults = { displayTitle: true, hudSize: 100, hudPosition: null };
-    const cfg = (() => { try { return moduleCfg("Building HUD"); } catch (_) { return {}; } })() || {};
-    const normalized = {
-      displayTitle: cfg.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle,
-      hudSize: Number.isFinite(Number(cfg.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize,
-      hudPosition: normalizeHudPosition(cfg.hudPosition, defaults.hudPosition),
-    };
+    const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
+    const normalized = normalizeBuildingHudConfigFromRaw(cfg);
     Object.assign(lavaBuildingHudState.config, normalized);
     return { ...normalized };
   }
 
   function writeBuildingHudConfigPatch(patch = {}) {
-    try {
-      const cfg = moduleCfg("Building HUD");
-      if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
-      Object.assign(cfg, patch);
-      const normalized = readBuildingHudConfig();
-      if (typeof saveSettings === "function") saveSettings();
-      return normalized;
-    } catch (_) {
-      return readBuildingHudConfig();
-    }
+    const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
+    if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
+    Object.assign(cfg, patch);
+    const normalized = normalizeBuildingHudConfigFromRaw(cfg);
+    Object.assign(cfg, normalized);
+    Object.assign(lavaBuildingHudState.config, normalized);
+    if (typeof saveSettings === "function") saveSettings();
+    return { ...normalized };
   }
 
   function ensureUpgradeHudContainer() {
@@ -4140,9 +4195,9 @@
     return hud;
   }
 
-  function renderLavaBuildingHud() {
+  function renderLavaBuildingHud(configOverride = null) {
     const hud = ensureLavaBuildingHudContainer();
-    const cfg = getLavaBuildingHudConfig();
+    const cfg = { ...getLavaBuildingHudConfig(), ...(configOverride && typeof configOverride === "object" ? configOverride : {}) };
     if (!normalizeHudPosition(cfg.hudPosition, null)) {
       const livePos = readHudPositionFromElement(hud);
       if (livePos) {
@@ -7939,20 +7994,26 @@
                 }
               }
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
+                let livePos = null;
                 if (upgradeHudState.container) {
-                  const livePos = readHudPositionFromElement(upgradeHudState.container);
+                  livePos = readHudPositionFromElement(upgradeHudState.container);
                   if (livePos) writeHudPosition("Upgrade HUD", livePos);
                 }
-                writeUpgradeHudConfigPatch({ hudSize: newVal });
-                hardRefreshUpgradeHud({ hudSize: newVal });
+                const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
+                const nextCfg = writeUpgradeHudConfigPatch(patch);
+                upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
+                renderUpgradeHud(nextCfg);
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
+                let livePos = null;
                 if (lavaBuildingHudState.container) {
-                  const livePos = readHudPositionFromElement(lavaBuildingHudState.container);
+                  livePos = readHudPositionFromElement(lavaBuildingHudState.container);
                   if (livePos) writeHudPosition("Building HUD", livePos);
                 }
-                writeBuildingHudConfigPatch({ hudSize: newVal });
-                hardRefreshLavaBuildingHud({ hudSize: newVal });
+                const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
+                const nextCfg = writeBuildingHudConfigPatch(patch);
+                upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
+                renderLavaBuildingHud(nextCfg);
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
                 if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap") {
@@ -7981,20 +8042,26 @@
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
+                let livePos = null;
                 if (upgradeHudState.container) {
-                  const livePos = readHudPositionFromElement(upgradeHudState.container);
+                  livePos = readHudPositionFromElement(upgradeHudState.container);
                   if (livePos) writeHudPosition("Upgrade HUD", livePos);
                 }
-                writeUpgradeHudConfigPatch({ [setting.id]: cfg[setting.id] });
-                hardRefreshUpgradeHud({ [setting.id]: cfg[setting.id] });
+                const patch = { [setting.id]: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
+                const nextCfg = writeUpgradeHudConfigPatch(patch);
+                upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
+                renderUpgradeHud(nextCfg);
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
+                let livePos = null;
                 if (lavaBuildingHudState.container) {
-                  const livePos = readHudPositionFromElement(lavaBuildingHudState.container);
+                  livePos = readHudPositionFromElement(lavaBuildingHudState.container);
                   if (livePos) writeHudPosition("Building HUD", livePos);
                 }
-                writeBuildingHudConfigPatch({ displayTitle: cfg[setting.id] });
-                hardRefreshLavaBuildingHud({ displayTitle: cfg[setting.id] });
+                const patch = { displayTitle: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
+                const nextCfg = writeBuildingHudConfigPatch(patch);
+                upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
+                renderLavaBuildingHud(nextCfg);
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
@@ -8098,14 +8165,14 @@
       if (upgradeHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(upgradeHudState.container);
         if (pos) {
-          const cfg = moduleCfg("Upgrade HUD");
+          const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
           if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
         }
       }
       if (lavaBuildingHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(lavaBuildingHudState.container);
         if (pos) {
-          const cfg = moduleCfg("Building HUD");
+          const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
           if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
         }
       }
