@@ -4837,12 +4837,12 @@
     if (!abilityHudState.body) return;
     const entries = Array.from(abilityHudState.abilities.values());
     const cfg = getAbilityHudConfig();
-    if (cfg.abilityHudDisplayMode === "icons") {
-      renderAbilityHudIcons(entries);
-      return;
-    }
     if (!entries.length) {
       abilityHudState.body.innerHTML = `<div style="font-size:12px;color:#b3b9c7;opacity:.85;">Waiting for abilities…</div>`;
+      return;
+    }
+    if (cfg.abilityHudDisplayMode === "icons") {
+      renderAbilityHudIcons(entries);
       return;
     }
     const frag = document.createDocumentFragment();
