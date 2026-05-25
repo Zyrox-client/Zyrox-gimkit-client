@@ -4367,7 +4367,7 @@
     isDragging: false,
     dragOffsetX: 0,
     dragOffsetY: 0,
-    position: { x: 24, y: 92 },
+    position: { x: null, y: 126 },
     renderTimerId: null,
     wired: false,
     listeners: null,
@@ -4851,6 +4851,11 @@
       socketManager.addEventListener("blueboatMessage", abilityHudState.listeners.inbound);
       socketManager.addEventListener("blueboatSend", abilityHudState.listeners.outbound);
       abilityHudState.wired = true;
+    }
+    if (!Number.isFinite(abilityHudState.position.x)) {
+      const defaultWidth = 360;
+      const rightInset = 22;
+      abilityHudState.position.x = Math.max(18, window.innerWidth - defaultWidth - rightInset);
     }
     const panel = document.createElement("section");
     panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
