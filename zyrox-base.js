@@ -3577,14 +3577,25 @@
 
 
   function getHudModuleConfigObject(moduleName, defaults = {}) {
+    const cacheKey = "__zyroxHudFallbackConfig";
+    if (!window[cacheKey] || typeof window[cacheKey] !== "object") window[cacheKey] = {};
+
     try {
       if (typeof moduleCfg === "function") {
         const cfg = moduleCfg(moduleName);
-        if (cfg && typeof cfg === "object") return cfg;
+        if (cfg && typeof cfg === "object") {
+          const fallbackCfg = window[cacheKey][moduleName];
+          if (fallbackCfg && typeof fallbackCfg === "object") {
+            for (const [key, value] of Object.entries(fallbackCfg)) {
+              cfg[key] = value;
+            }
+            delete window[cacheKey][moduleName];
+          }
+          return cfg;
+        }
       }
     } catch (_) {}
-    const cacheKey = "__zyroxHudFallbackConfig";
-    if (!window[cacheKey] || typeof window[cacheKey] !== "object") window[cacheKey] = {};
+
     if (!window[cacheKey][moduleName] || typeof window[cacheKey][moduleName] !== "object") {
       window[cacheKey][moduleName] = { ...defaults };
     }
