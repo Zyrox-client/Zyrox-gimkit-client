@@ -3645,25 +3645,6 @@
         y: Math.max(0, Math.min(maxY, Number(nextY) || 0)),
       };
     };
-    const getStoredPosition = () => {
-      try {
-        const cfg = moduleCfg("Upgrade HUD");
-        const saved = cfg?.hudPosition;
-        if (!saved || typeof saved !== "object") return null;
-        if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return null;
-        return clampToViewport(saved.x, saved.y);
-      } catch (_) {
-        return null;
-      }
-    };
-    const persistPosition = (x, y) => {
-      try {
-        const cfg = moduleCfg("Upgrade HUD");
-        if (!cfg || typeof cfg !== "object") return;
-        cfg.hudPosition = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) };
-        if (typeof saveSettings === "function") saveSettings();
-      } catch (_) {}
-    };
     const handleMouseMove = (event) => {
       if (!dragState) return;
       const nextX = event.clientX - dragState.offsetX;
@@ -3676,7 +3657,7 @@
       if (!dragState) return;
       const rect = hud.getBoundingClientRect();
       const clamped = clampToViewport(rect.left, rect.top);
-      writeUpgradeHudConfigPatch({ hudPosition: { x: Math.round(clamped.x), y: Math.round(clamped.y) } });
+      writeHudPosition("Upgrade HUD", { x: Math.round(clamped.x), y: Math.round(clamped.y) });
       dragState = null;
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
@@ -3694,7 +3675,7 @@
       window.addEventListener("mouseup", handleMouseUp);
       event.preventDefault();
     });
-    const savedPos = normalizeHudPosition(readUpgradeHudConfig().hudPosition, getStoredPosition());
+    const savedPos = readHudPosition("Upgrade HUD", null);
     if (savedPos) {
       hud.style.removeProperty("right");
       hud.style.removeProperty("bottom");
@@ -3716,7 +3697,7 @@
 
   function applyUpgradeHudPosition(hud, cfg, moduleName = "Upgrade HUD") {
     const storedPos = readHudPosition(moduleName, null);
-    const sourcePos = normalizeHudPosition(cfg?.hudPosition, storedPos);
+    const sourcePos = normalizeHudPosition(storedPos, cfg?.hudPosition);
     if (sourcePos) {
       const applied = applyHudPosition(hud, sourcePos, true);
       upgradeHudLog(`Position source=${storedPos ? "moduleCfg" : "runtime"}`, { moduleName, requested: sourcePos, applied });
@@ -4051,25 +4032,6 @@
       const maxY = Math.max(0, window.innerHeight - rect.height);
       return { x: Math.max(0, Math.min(maxX, Number(nextX) || 0)), y: Math.max(0, Math.min(maxY, Number(nextY) || 0)) };
     };
-    const getStoredPosition = () => {
-      try {
-        const cfg = moduleCfg("Building HUD");
-        const saved = cfg?.hudPosition;
-        if (!saved || typeof saved !== "object") return null;
-        if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return null;
-        return clampToViewport(saved.x, saved.y);
-      } catch (_) {
-        return null;
-      }
-    };
-    const persistPosition = (x, y) => {
-      try {
-        const cfg = moduleCfg("Building HUD");
-        if (!cfg || typeof cfg !== "object") return;
-        cfg.hudPosition = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) };
-        if (typeof saveSettings === "function") saveSettings();
-      } catch (_) {}
-    };
     const handleMouseMove = (event) => {
       if (!dragState) return;
       const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
@@ -4080,7 +4042,7 @@
       if (!dragState) return;
       const rect = hud.getBoundingClientRect();
       const clamped = clampToViewport(rect.left, rect.top);
-      writeBuildingHudConfigPatch({ hudPosition: { x: Math.round(clamped.x), y: Math.round(clamped.y) } });
+      writeHudPosition("Building HUD", { x: Math.round(clamped.x), y: Math.round(clamped.y) });
       dragState = null;
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
@@ -4095,7 +4057,7 @@
       window.addEventListener("mouseup", handleMouseUp);
       event.preventDefault();
     });
-    const savedPos = normalizeHudPosition(readBuildingHudConfig().hudPosition, getStoredPosition());
+    const savedPos = readHudPosition("Building HUD", null);
     if (savedPos) {
       hud.style.removeProperty("right");
       hud.style.removeProperty("bottom");
@@ -5156,10 +5118,7 @@
     abilityHudState.position.y = clamped.y;
     abilityHudState.container.style.left = `${abilityHudState.position.x}px`;
     abilityHudState.container.style.top = `${abilityHudState.position.y}px`;
-    try {
-      const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
-      writeHudPosition(ABILITY_HUD_MODULE_NAME, { x: Math.round(clamped.x), y: Math.round(clamped.y) });
-    } catch (_) {}
+    writeHudPosition(ABILITY_HUD_MODULE_NAME, { x: Math.round(clamped.x), y: Math.round(clamped.y) });
   }
 
   function abilityHudMouseUp() {
