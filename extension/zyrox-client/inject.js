@@ -3536,6 +3536,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     hud.style.setProperty("right", "14px");
   }
 
+  function getHudTransformOrigin(cfg) {
+    if (cfg.useCustomPosition) return "top left";
+    if (cfg.hudLocation === "topLeft") return "top left";
+    if (cfg.hudLocation === "bottomRight") return "bottom right";
+    if (cfg.hudLocation === "bottomLeft") return "bottom left";
+    return "top right";
+  }
+
   function renderUpgradeHud(configOverride = null) {
     const hud = ensureUpgradeHudContainer();
     const cfg = configOverride && typeof configOverride === "object"
@@ -3546,6 +3554,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
     applyUpgradeHudPosition(hud, cfg);
+    hud.style.transformOrigin = getHudTransformOrigin(cfg);
+    hud.style.transform = `scale(${sizeScale})`;
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
@@ -3910,6 +3920,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
     applyUpgradeHudPosition(hud, cfg);
+    hud.style.transformOrigin = getHudTransformOrigin(cfg);
+    hud.style.transform = `scale(${sizeScale})`;
 
     const titleRow = cfg.displayTitle !== false
       ? `<div style="font-size:${Math.max(10, Math.round(12 * sizeScale))}px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:${Math.max(4, Math.round(6 * sizeScale))}px;">Buildings</div>`
