@@ -4732,7 +4732,7 @@
     players.forEach((player) => {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = `${player.name || "Unknown"} (${player.id})`;
+      btn.textContent = `${player.name || "Unknown"}`;
       btn.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 6px 0;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;";
       btn.addEventListener("click", () => {
         overlay.remove();
