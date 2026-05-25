@@ -3505,6 +3505,13 @@
     return true;
   }
 
+  function parseBooleanSetting(value, fallback = false) {
+    if (value === undefined || value === null) return fallback;
+    if (value === true || value === "true" || value === 1 || value === "1") return true;
+    if (value === false || value === "false" || value === 0 || value === "0") return false;
+    return Boolean(value);
+  }
+
   function ensureUpgradeHudContainer() {
     if (upgradeHudState.container?.isConnected) return upgradeHudState.container;
     if (!document.getElementById("zyrox-upgrade-hud-style")) {
@@ -4566,7 +4573,7 @@
     abilityHudState.config.abilityHudRememberPosition = isRememberHudPositionEnabled(rawCfg?.abilityHudRememberPosition, ABILITY_HUD_CONFIG_DEFAULTS.abilityHudRememberPosition);
     abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(1.25, Number(rawCfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
     abilityHudState.config.abilityHudGap = Math.max(1, Math.min(15, Number(rawCfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
-    abilityHudState.config.abilityHudShowPrices = rawCfg?.abilityHudShowPrices !== false;
+    abilityHudState.config.abilityHudShowPrices = parseBooleanSetting(rawCfg?.abilityHudShowPrices, ABILITY_HUD_CONFIG_DEFAULTS.abilityHudShowPrices);
     abilityHudState.config.abilityHudIconSize = Math.max(56, Math.min(164, Number(rawCfg?.abilityHudIconSize) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudIconSize));
     return { ...abilityHudState.config };
   }
