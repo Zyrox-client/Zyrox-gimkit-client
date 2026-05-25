@@ -3500,11 +3500,15 @@
 
   function normalizeHudPosition(pos, fallback = null) {
     const candidate = pos && typeof pos === "object" ? pos : null;
-    if (candidate && Number.isFinite(candidate.x) && Number.isFinite(candidate.y)) {
-      return { x: Number(candidate.x), y: Number(candidate.y) };
+    if (candidate) {
+      const x = Number(candidate.x);
+      const y = Number(candidate.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
     }
-    if (fallback && Number.isFinite(fallback.x) && Number.isFinite(fallback.y)) {
-      return { x: Number(fallback.x), y: Number(fallback.y) };
+    if (fallback) {
+      const x = Number(fallback.x);
+      const y = Number(fallback.y);
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
     }
     return null;
   }
@@ -3684,12 +3688,7 @@
       event.preventDefault();
     });
     const savedPos = readHudPosition("Upgrade HUD", null);
-    if (savedPos) {
-      hud.style.removeProperty("right");
-      hud.style.removeProperty("bottom");
-      hud.style.setProperty("left", `${savedPos.x}px`);
-      hud.style.setProperty("top", `${savedPos.y}px`);
-    }
+    if (savedPos) applyHudPosition(hud, savedPos, true);
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
     return hud;
@@ -3718,8 +3717,9 @@
     hud.style.removeProperty("left");
     hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
     hud.style.setProperty("right", "14px");
-    const rect = hud.getBoundingClientRect();
-    const applied = applyHudPosition(hud, { x: rect.left, y: rect.top }, true);
+    const width = Math.max(1, hud.offsetWidth || hud.getBoundingClientRect().width || 220);
+    const anchored = { x: Math.max(0, window.innerWidth - width - 14), y: UPGRADE_HUD_TOP_OFFSET_PX };
+    const applied = applyHudPosition(hud, anchored, true);
     return applied;
   }
 
@@ -4077,12 +4077,7 @@
       event.preventDefault();
     });
     const savedPos = readHudPosition("Building HUD", null);
-    if (savedPos) {
-      hud.style.removeProperty("right");
-      hud.style.removeProperty("bottom");
-      hud.style.setProperty("left", `${savedPos.x}px`);
-      hud.style.setProperty("top", `${savedPos.y}px`);
-    }
+    if (savedPos) applyHudPosition(hud, savedPos, true);
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
     return hud;
