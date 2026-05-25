@@ -6904,8 +6904,9 @@
         </div>
       </div>
     </div>
-    <div class="zyrox-settings-actions">
+      <div class="zyrox-settings-actions">
       <div class="zyrox-settings-actions-group" style="flex-direction:column;gap:5px;align-items:flex-start;">
+        <button class="zyrox-btn zyrox-settings-action-btn settings-reset-positions" type="button">Reset Positions</button>
         <button class="zyrox-btn zyrox-settings-action-btn settings-reset" type="button">Reset Appearance</button>
         <button class="zyrox-btn zyrox-settings-action-btn settings-reset-all" type="button" style="opacity:0.8;">Reset All</button>
       </div>
@@ -6985,6 +6986,7 @@
   const blurInput = settingsMenu.querySelector(".set-blur");
   const hoverShiftInput = settingsMenu.querySelector(".set-hover-shift");
   const displayModeButtons = [...settingsMenu.querySelectorAll(".set-display-mode")];
+  const settingsResetPositionsBtn = settingsMenu.querySelector(".settings-reset-positions");
   const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
   const settingsResetAllBtn = settingsMenu.querySelector(".settings-reset-all");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
@@ -8882,7 +8884,14 @@
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
   });
-  settingsResetBtn.addEventListener("click", () => {
+  function resetModuleTabPositions() {
+    state.looseInitialized = false;
+    state.loosePositions = { topbar: { x: 12, y: 12 } };
+    state.loosePanelPositions = {};
+    setDisplayMode(state.displayMode);
+  }
+
+  function resetAppearanceSettings() {
     accentInput.value = "#ff3d3d";
     shellBgStartInput.value = "#ff3d3d";
     shellBgEndInput.value = "#000000";
@@ -8924,9 +8933,6 @@
     radiusInput.value = "14";
     blurInput.value = "10";
     hoverShiftInput.value = "2";
-    state.looseInitialized = false;
-    state.loosePositions = { topbar: { x: 12, y: 12 } };
-    state.loosePanelPositions = {};
     state.collapsedPanels = {};
     for (const panelName of panelByName.keys()) {
       setPanelCollapsed(panelName, false);
@@ -8980,18 +8986,43 @@
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
+  }
+
+  settingsResetPositionsBtn.addEventListener("click", () => {
+    resetModuleTabPositions();
+    saveSettings();
+  });
+
+  settingsResetBtn.addEventListener("click", () => {
+    resetAppearanceSettings();
+    resetModuleTabPositions();
     saveSettings();
   });
 
   settingsResetAllBtn.addEventListener("click", () => {
-    // Hard reset: remove persisted state and fully reload to rebuild UI from defaults.
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem("zyrox_client_settings_v2");
-      localStorage.removeItem("zyrox_client_settings");
-    } catch (_) {}
+    resetAppearanceSettings();
+    resetModuleTabPositions();
+    state.hiddenCategories = {};
+    state.globalPreset = "default";
+    state.enabledModules = new Set();
+    for (const [moduleName, moduleInstance] of state.modules.entries()) {
+      if (!moduleInstance?.enabled) continue;
+      try { moduleInstance.disable(); } catch (_) {}
+      const item = state.moduleItems.get(moduleName);
+      item?.classList.remove("active");
+    }
+    state.moduleConfig = new Map();
+    for (const item of state.moduleItems.values()) {
+      const moduleName = item.dataset.module;
+      if (!moduleName) continue;
+      setBindLabel(item, moduleName);
+    }
+    setCurrentBindText(null);
+    state.listeningForBind = null;
+    setBindButtonText("Set keybind");
+    applySearchFilter();
+    saveSettings();
     try { closeConfig(); } catch (_) {}
-    window.location.reload();
   });
 
   function saveSettings(showFeedback = false) {
