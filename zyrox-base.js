@@ -4389,12 +4389,12 @@
     // Persist anchor + dragged position in module settings.
     abilityHudRememberPosition: true,
     // Scales the entire HUD UI (container + content).
-    abilityHudScale: 1,
+    abilityHudScale: 0.9,
     // Gap spacing between icon tiles (pixels).
-    abilityHudGap: 8,
+    abilityHudGap: 5,
     // Toggle price labels in both default + icon modes.
     abilityHudShowPrices: true,
-    // Icon tile size (pixels), only used in icon mode.
+    // Icon tile size (pixels).
     abilityHudIconSize: 96,
   };
   const abilityHudState = {
@@ -4558,8 +4558,8 @@
     abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "list";
     abilityHudState.config.abilityHudAnchor = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(anchorRaw) ? anchorRaw : ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor;
     abilityHudState.config.abilityHudRememberPosition = rawCfg?.abilityHudRememberPosition !== false;
-    abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(2, Number(rawCfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
-    abilityHudState.config.abilityHudGap = Math.max(0, Math.min(36, Number(rawCfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
+    abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(1.25, Number(rawCfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
+    abilityHudState.config.abilityHudGap = Math.max(1, Math.min(15, Number(rawCfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
     abilityHudState.config.abilityHudShowPrices = rawCfg?.abilityHudShowPrices !== false;
     abilityHudState.config.abilityHudIconSize = Math.max(56, Math.min(164, Number(rawCfg?.abilityHudIconSize) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudIconSize));
     return { ...abilityHudState.config };
@@ -5514,10 +5514,9 @@
                 { id: "abilityHudDisplayMode", label: "Display Mode", type: "select", default: "icons", options: [{ value: "icons", label: "Icons" }, { value: "list", label: "List" }] },
                 { id: "abilityHudAnchor", label: "Anchor", type: "select", default: "top-right", options: [{ value: "top-left", label: "Top Left" }, { value: "top-right", label: "Top Right" }, { value: "bottom-left", label: "Bottom Left" }, { value: "bottom-right", label: "Bottom Right" }] },
                 { id: "abilityHudRememberPosition", label: "Remember HUD Position", type: "checkbox", default: true },
-                { id: "abilityHudScale", label: "Scale", type: "slider", min: 0.75, max: 2, step: 0.05, default: 1 },
-                { id: "abilityHudGap", label: "Icon Gap", type: "slider", min: 0, max: 36, step: 1, default: 8, unit: "px" },
+                { id: "abilityHudScale", label: "Scale", type: "slider", min: 0.75, max: 1.25, step: 0.05, default: 0.9 },
+                { id: "abilityHudGap", label: "Icon Gap", type: "slider", min: 1, max: 15, step: 1, default: 5, unit: "px" },
                 { id: "abilityHudShowPrices", label: "Show Prices", type: "checkbox", default: true },
-                { id: "abilityHudIconSize", label: "Icon Size", type: "slider", min: 56, max: 164, step: 2, default: 96, unit: "px" },
               ],
             },
           ],
@@ -7854,7 +7853,6 @@
       });
     } else if (moduleLayout && Array.isArray(moduleLayout.settings)) {
       for (const setting of moduleLayout.settings) {
-        if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudIconSize" && cfg.abilityHudDisplayMode !== "icons") continue;
         const settingCard = document.createElement("div");
         settingCard.className = "zyrox-setting-card";
 
@@ -7891,7 +7889,7 @@
                 renderLavaBuildingHud();
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
-                if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap" || setting.id === "abilityHudIconSize") {
+                if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap") {
                   applyAbilityHudLiveConfig({ cfg });
                 }
               }
@@ -8879,6 +8877,13 @@
     if (!openConfigModule) return;
     const moduleName = openConfigModule;
     resetModuleConfig(moduleName);
+    if (moduleName === ABILITY_HUD_MODULE_NAME) {
+      applyAbilityHudLiveConfig({ cfg: moduleCfg(moduleName), reanchor: true, persistPosition: true });
+    } else if (moduleName === "Upgrade HUD" && upgradeHudState.enabled) {
+      renderUpgradeHud();
+    } else if (moduleName === "Building HUD" && lavaBuildingHudState.enabled) {
+      renderLavaBuildingHud();
+    }
     openConfig(moduleName);
   });
   configCloseBtn.addEventListener("click", () => closeConfig());
