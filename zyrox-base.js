@@ -3709,7 +3709,7 @@
     if (sourcePos) {
       const applied = applyHudPosition(hud, sourcePos, true);
       upgradeHudLog(`Position source=${storedPos ? "moduleCfg" : "runtime"}`, { moduleName, requested: sourcePos, applied });
-      return;
+      return applied;
     }
     upgradeHudLog("Position source=default-anchor", { moduleName });
     hud.style.removeProperty("top");
@@ -3718,6 +3718,9 @@
     hud.style.removeProperty("left");
     hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
     hud.style.setProperty("right", "14px");
+    const rect = hud.getBoundingClientRect();
+    const applied = applyHudPosition(hud, { x: rect.left, y: rect.top }, true);
+    return applied;
   }
 
   function renderUpgradeHud() {
@@ -3734,7 +3737,8 @@
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
-    applyUpgradeHudPosition(hud, cfg, "Upgrade HUD");
+    const appliedPos = applyUpgradeHudPosition(hud, cfg, "Upgrade HUD");
+    if (appliedPos) writeHudPosition("Upgrade HUD", appliedPos);
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
@@ -4098,7 +4102,8 @@
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
-    applyUpgradeHudPosition(hud, cfg, "Building HUD");
+    const appliedPos = applyUpgradeHudPosition(hud, cfg, "Building HUD");
+    if (appliedPos) writeHudPosition("Building HUD", appliedPos);
 
     const titleRow = cfg.displayTitle !== false
       ? `<div style="font-size:${Math.max(10, Math.round(12 * sizeScale))}px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:${Math.max(4, Math.round(6 * sizeScale))}px;">Buildings</div>`
@@ -5100,6 +5105,7 @@
     abilityHudState.position.y = clampedStart.y;
     panel.style.left = `${clampedStart.x}px`;
     panel.style.top = `${clampedStart.y}px`;
+    writeHudPosition(ABILITY_HUD_MODULE_NAME, clampedStart);
     applyAbilityHudLiveConfig({ cfg });
     renderAbilityHud();
     panel.addEventListener("mousedown", (event) => {
@@ -5146,6 +5152,7 @@
   function abilityHudMouseUp() {
     abilityHudState.isDragging = false;
     if (abilityHudState.container) abilityHudState.container.style.cursor = "grab";
+    writeHudPosition(ABILITY_HUD_MODULE_NAME, abilityHudState.position);
     persistAbilityHudPosition();
   }
 
