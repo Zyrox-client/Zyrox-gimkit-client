@@ -7939,12 +7939,15 @@
                 }
               }
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
+                let livePos = null;
                 if (upgradeHudState.container) {
-                  const livePos = readHudPositionFromElement(upgradeHudState.container);
+                  livePos = readHudPositionFromElement(upgradeHudState.container);
                   if (livePos) writeHudPosition("Upgrade HUD", livePos);
                 }
-                writeUpgradeHudConfigPatch({ hudSize: newVal });
-                hardRefreshUpgradeHud({ hudSize: newVal });
+                const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
+                const nextCfg = writeUpgradeHudConfigPatch(patch);
+                upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
+                hardRefreshUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
                 let livePos = null;
@@ -7955,7 +7958,7 @@
                 const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
                 const nextCfg = writeBuildingHudConfigPatch(patch);
                 upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
-                hardRefreshLavaBuildingHud({ hudSize: newVal, ...(livePos ? { hudPosition: livePos } : {}) });
+                hardRefreshLavaBuildingHud();
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
                 if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap") {
@@ -7984,12 +7987,15 @@
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
+                let livePos = null;
                 if (upgradeHudState.container) {
-                  const livePos = readHudPositionFromElement(upgradeHudState.container);
+                  livePos = readHudPositionFromElement(upgradeHudState.container);
                   if (livePos) writeHudPosition("Upgrade HUD", livePos);
                 }
-                writeUpgradeHudConfigPatch({ [setting.id]: cfg[setting.id] });
-                hardRefreshUpgradeHud({ [setting.id]: cfg[setting.id] });
+                const patch = { [setting.id]: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
+                const nextCfg = writeUpgradeHudConfigPatch(patch);
+                upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
+                hardRefreshUpgradeHud();
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
                 let livePos = null;
@@ -8000,7 +8006,7 @@
                 const patch = { displayTitle: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
                 const nextCfg = writeBuildingHudConfigPatch(patch);
                 upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
-                hardRefreshLavaBuildingHud({ displayTitle: cfg[setting.id], ...(livePos ? { hudPosition: livePos } : {}) });
+                hardRefreshLavaBuildingHud();
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
