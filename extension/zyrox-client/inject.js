@@ -3340,6 +3340,15 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     Object.assign(targetCfg, patch);
   }
 
+
+  function readHudPositionFromElement(el) {
+    if (!el) return null;
+    const left = Number.parseFloat(el.style.left || "");
+    const top = Number.parseFloat(el.style.top || "");
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return { x: Math.round(left), y: Math.round(top) };
+  }
+
   function upgradeHudLog(message, extra) {
     if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
     else console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`, extra);
@@ -3393,8 +3402,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const cfg = getUpgradeHudModuleConfig?.();
       if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
-      cfg.hudPosition = { x: clamped.x, y: clamped.y };
-      upgradeHudState.config.hudPosition = { x: clamped.x, y: clamped.y };
+      const nextPos = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+      cfg.hudPosition = nextPos;
+      upgradeHudState.config.hudPosition = nextPos;
+      patchHudModuleConfig("Upgrade HUD", { hudPosition: nextPos });
+      upgradeHudLog("Stored HUD drag position", { moduleName: "Upgrade HUD", hudPosition: nextPos });
       return clamped;
     };
     const handleMouseMove = (event) => {
@@ -3873,8 +3885,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const cfg = getLavaBuildingHudModuleConfig?.();
       if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
       const clamped = clampToViewport(nextX, nextY);
-      cfg.hudPosition = { x: clamped.x, y: clamped.y };
-      lavaBuildingHudState.config.hudPosition = { x: clamped.x, y: clamped.y };
+      const nextPos = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+      cfg.hudPosition = nextPos;
+      lavaBuildingHudState.config.hudPosition = nextPos;
+      patchHudModuleConfig("Building HUD", { hudPosition: nextPos });
+      upgradeHudLog("Stored HUD drag position", { moduleName: "Building HUD", hudPosition: nextPos });
       return clamped;
     };
     const handleMouseMove = (event) => {
@@ -6704,6 +6719,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   }
 
   function collectSettings() {
+    const syncHudPosition = (moduleName, container) => {
+      const pos = readHudPositionFromElement(container);
+      if (!pos) return;
+      patchHudModuleConfig(moduleName, { hudPosition: pos });
+      upgradeHudLog("Stored HUD position before save", { moduleName, hudPosition: pos });
+    };
+    syncHudPosition("Upgrade HUD", upgradeHudState?.container);
+    syncHudPosition("Building HUD", lavaBuildingHudState?.container);
     return {
       toggleKey: CONFIG.toggleKey,
       globalPreset: state.globalPreset,
