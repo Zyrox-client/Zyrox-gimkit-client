@@ -4362,7 +4362,7 @@
   const ABILITY_HUD_DRAG_MARGIN = 10;
   const ABILITY_HUD_CONFIG_DEFAULTS = {
     // Switch between detailed card rows and compact icon tiles.
-    abilityHudDisplayMode: "default",
+    abilityHudDisplayMode: "icons",
     // Anchor used for the first mount and reset fallback.
     abilityHudAnchor: "top-right",
     // Scales the entire HUD UI (container + content).
@@ -4473,7 +4473,8 @@
     const apply = (cfg) => {
       const mode = String(cfg?.abilityHudDisplayMode ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudDisplayMode).trim().toLowerCase();
       const anchorRaw = String(cfg?.abilityHudAnchor ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor).trim().toLowerCase();
-      abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "default";
+      // Legacy migration: treat old "default" as the new "list" mode.
+      abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "list";
       abilityHudState.config.abilityHudAnchor = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(anchorRaw) ? anchorRaw : ABILITY_HUD_CONFIG_DEFAULTS.abilityHudAnchor;
       abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(2, Number(cfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
       abilityHudState.config.abilityHudGap = Math.max(0, Math.min(36, Number(cfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
@@ -5453,7 +5454,7 @@
               name: ABILITY_HUD_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[ABILITY_HUD_MODULE_NAME],
               settings: [
-                { id: "abilityHudDisplayMode", label: "Display Mode", type: "select", default: "default", options: [{ value: "default", label: "Default" }, { value: "icons", label: "Icon Mode" }] },
+                { id: "abilityHudDisplayMode", label: "Display Mode", type: "select", default: "icons", options: [{ value: "icons", label: "Icons" }, { value: "list", label: "List" }] },
                 { id: "abilityHudAnchor", label: "Anchor", type: "select", default: "top-right", options: [{ value: "top-left", label: "Top Left" }, { value: "top-right", label: "Top Right" }, { value: "bottom-left", label: "Bottom Left" }, { value: "bottom-right", label: "Bottom Right" }] },
                 { id: "abilityHudScale", label: "Scale", type: "slider", min: 0.75, max: 2, step: 0.05, default: 1 },
                 { id: "abilityHudGap", label: "Icon Gap", type: "slider", min: 0, max: 36, step: 1, default: 8, unit: "px" },
