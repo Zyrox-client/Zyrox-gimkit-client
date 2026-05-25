@@ -3611,19 +3611,14 @@
   }
 
   function writeUpgradeHudConfigPatch(patch = {}) {
-    try {
-      const cfg = moduleCfg("Upgrade HUD");
-      if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
-      Object.assign(cfg, patch);
-      const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
-      Object.assign(cfg, normalized);
-      Object.assign(upgradeHudState.config, normalized);
-      if (typeof saveSettings === "function") saveSettings();
-      return { ...normalized };
-    } catch (error) {
-      upgradeHudLog("Failed to write Upgrade HUD config patch", { patch, error });
-      return readUpgradeHudConfig();
-    }
+    const cfg = moduleCfg("Upgrade HUD");
+    if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
+    Object.assign(cfg, patch);
+    const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
+    Object.assign(cfg, normalized);
+    Object.assign(upgradeHudState.config, normalized);
+    if (typeof saveSettings === "function") saveSettings();
+    return { ...normalized };
   }
 
   function readBuildingHudConfig() {
@@ -3634,19 +3629,14 @@
   }
 
   function writeBuildingHudConfigPatch(patch = {}) {
-    try {
-      const cfg = moduleCfg("Building HUD");
-      if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
-      Object.assign(cfg, patch);
-      const normalized = normalizeBuildingHudConfigFromRaw(cfg);
-      Object.assign(cfg, normalized);
-      Object.assign(lavaBuildingHudState.config, normalized);
-      if (typeof saveSettings === "function") saveSettings();
-      return { ...normalized };
-    } catch (error) {
-      upgradeHudLog("Failed to write Building HUD config patch", { patch, error });
-      return readBuildingHudConfig();
-    }
+    const cfg = moduleCfg("Building HUD");
+    if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
+    Object.assign(cfg, patch);
+    const normalized = normalizeBuildingHudConfigFromRaw(cfg);
+    Object.assign(cfg, normalized);
+    Object.assign(lavaBuildingHudState.config, normalized);
+    if (typeof saveSettings === "function") saveSettings();
+    return { ...normalized };
   }
 
   function ensureUpgradeHudContainer() {
@@ -7962,7 +7952,7 @@
                 const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
                 const nextCfg = writeUpgradeHudConfigPatch(patch);
                 upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
-                hardRefreshUpgradeHud();
+                renderUpgradeHud(nextCfg);
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
                 let livePos = null;
@@ -7973,7 +7963,7 @@
                 const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
                 const nextCfg = writeBuildingHudConfigPatch(patch);
                 upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
-                hardRefreshLavaBuildingHud();
+                renderLavaBuildingHud(nextCfg);
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
                 if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap") {
@@ -8010,7 +8000,7 @@
                 const patch = { [setting.id]: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
                 const nextCfg = writeUpgradeHudConfigPatch(patch);
                 upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
-                hardRefreshUpgradeHud();
+                renderUpgradeHud(nextCfg);
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
                 let livePos = null;
@@ -8021,7 +8011,7 @@
                 const patch = { displayTitle: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
                 const nextCfg = writeBuildingHudConfigPatch(patch);
                 upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
-                hardRefreshLavaBuildingHud();
+                renderLavaBuildingHud(nextCfg);
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
