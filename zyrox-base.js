@@ -4729,11 +4729,13 @@
     }
     socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
     abilityHudState.purchasedAbilities.add(ability.name);
-    if (String(ability.name || "").trim().toLowerCase() === "rebooter") {
-      console.debug(`${ABILITY_HUD_LOG} rebooter purchased; clearing used abilities set while preserving purchased abilities`);
-      abilityHudState.usedAbilities.clear();
-    }
     requestAbilityHudRender();
+  }
+
+  function isRebooterAbility(ability) {
+    const name = String(ability?.name || "").trim().toLowerCase();
+    const displayName = String(ability?.displayName || "").trim().toLowerCase();
+    return name === "repurchasepowerups" || displayName === "rebooter";
   }
 
   function abilityRequiresTargetSelection(ability) {
@@ -4829,6 +4831,15 @@
 
     if (abilityRequiresTargetSelection(ability)) {
       requestLeaderboardForAbilityTarget(ability);
+      return;
+    }
+
+    if (isRebooterAbility(ability)) {
+      console.debug(`${ABILITY_HUD_LOG} rebooter activated; resetting purchased/used ability state to require repurchase`);
+      abilityHudState.purchasedAbilities.clear();
+      abilityHudState.usedAbilities.clear();
+      abilityHudState.usedAbilities.add(ability.name);
+      requestAbilityHudRender();
       return;
     }
 
