@@ -3692,7 +3692,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       return false;
     };
     try {
-      const cfg = moduleCfg("Auto Upgrade") || {};
+      const cfg = getModuleConfigSafe("Auto Upgrade");
       const resolved = {
         multiplier: parseToggle(cfg.multiplier, defaults.multiplier),
         moneyPerQuestion: parseToggle(cfg.moneyPerQuestion, defaults.moneyPerQuestion),
@@ -5509,6 +5509,15 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     return MODULE_DESCRIPTIONS[moduleName] || "Configure this module.";
   }
 
+  function getModuleConfigSafe(name, fallback = {}) {
+    if (typeof moduleCfg !== "function") return fallback;
+    try {
+      return moduleCfg(name) || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
   function ensureModuleConfigStore() {
     if (state.moduleConfig instanceof Map) return state.moduleConfig;
 
@@ -6845,7 +6854,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   function applyPreset(presetName) {
     state.globalPreset = normalizePopupPresetName(presetName || "default");
-    const popupCfg = moduleCfg("Answer Popup");
+    const popupCfg = getModuleConfigSafe("Answer Popup");
     popupCfg.preset = state.globalPreset;
     applyAnswerPopupPreset(popupCfg, state.globalPreset);
     const preset = (() => {
