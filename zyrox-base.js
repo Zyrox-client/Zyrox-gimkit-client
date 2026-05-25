@@ -3545,6 +3545,7 @@
     const cfg = getHudModuleConfigObject(moduleName, {});
     if (!cfg || typeof cfg !== "object") return null;
     cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
+    markHudFallbackConfigDirty(moduleName);
     if (typeof saveSettings === "function") saveSettings();
     return { ...cfg.hudPosition };
   }
@@ -3576,20 +3577,30 @@
 
 
 
+  function markHudFallbackConfigDirty(moduleName) {
+    const dirtyKey = "__zyroxHudFallbackConfigDirty";
+    if (!window[dirtyKey] || typeof window[dirtyKey] !== "object") window[dirtyKey] = {};
+    window[dirtyKey][moduleName] = true;
+  }
+
   function getHudModuleConfigObject(moduleName, defaults = {}) {
     const cacheKey = "__zyroxHudFallbackConfig";
+    const dirtyKey = "__zyroxHudFallbackConfigDirty";
     if (!window[cacheKey] || typeof window[cacheKey] !== "object") window[cacheKey] = {};
+    if (!window[dirtyKey] || typeof window[dirtyKey] !== "object") window[dirtyKey] = {};
 
     try {
       if (typeof moduleCfg === "function") {
         const cfg = moduleCfg(moduleName);
         if (cfg && typeof cfg === "object") {
           const fallbackCfg = window[cacheKey][moduleName];
+          const fallbackDirty = window[dirtyKey][moduleName] === true;
           if (fallbackCfg && typeof fallbackCfg === "object") {
-            for (const [key, value] of Object.entries(fallbackCfg)) {
-              cfg[key] = value;
+            if (fallbackDirty) {
+              for (const [key, value] of Object.entries(fallbackCfg)) cfg[key] = value;
             }
             delete window[cacheKey][moduleName];
+            delete window[dirtyKey][moduleName];
           }
           return cfg;
         }
@@ -3633,6 +3644,8 @@
     const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
     if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
     Object.assign(cfg, patch);
+    markHudFallbackConfigDirty("Building HUD");
+    markHudFallbackConfigDirty("Upgrade HUD");
     const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
     Object.assign(cfg, normalized);
     Object.assign(upgradeHudState.config, normalized);
