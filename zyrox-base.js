@@ -3542,6 +3542,25 @@
         y: Math.max(0, Math.min(maxY, Number(nextY) || 0)),
       };
     };
+    const getStoredPosition = () => {
+      try {
+        const cfg = moduleCfg("Upgrade HUD");
+        const saved = cfg?.hudPosition;
+        if (!saved || typeof saved !== "object") return null;
+        if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return null;
+        return clampToViewport(saved.x, saved.y);
+      } catch (_) {
+        return null;
+      }
+    };
+    const persistPosition = (x, y) => {
+      try {
+        const cfg = moduleCfg("Upgrade HUD");
+        if (!cfg || typeof cfg !== "object") return;
+        cfg.hudPosition = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) };
+        if (typeof saveSettings === "function") saveSettings();
+      } catch (_) {}
+    };
     const handleMouseMove = (event) => {
       if (!dragState) return;
       const nextX = event.clientX - dragState.offsetX;
@@ -3554,6 +3573,9 @@
     };
     const handleMouseUp = () => {
       if (!dragState) return;
+      const rect = hud.getBoundingClientRect();
+      const clamped = clampToViewport(rect.left, rect.top);
+      persistPosition(clamped.x, clamped.y);
       dragState = null;
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
@@ -3571,6 +3593,13 @@
       window.addEventListener("mouseup", handleMouseUp);
       event.preventDefault();
     });
+    const savedPos = getStoredPosition();
+    if (savedPos) {
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${savedPos.x}px`);
+      hud.style.setProperty("top", `${savedPos.y}px`);
+    }
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
     return hud;
@@ -3617,6 +3646,8 @@
   }
 
   function applyUpgradeHudPosition(hud, cfg) {
+    const usingCustomPosition = hud.style.left && hud.style.top;
+    if (usingCustomPosition) return;
     hud.style.removeProperty("top");
     hud.style.removeProperty("right");
     hud.style.removeProperty("bottom");
@@ -3945,6 +3976,25 @@
       const maxY = Math.max(0, window.innerHeight - rect.height);
       return { x: Math.max(0, Math.min(maxX, Number(nextX) || 0)), y: Math.max(0, Math.min(maxY, Number(nextY) || 0)) };
     };
+    const getStoredPosition = () => {
+      try {
+        const cfg = moduleCfg("Building HUD");
+        const saved = cfg?.hudPosition;
+        if (!saved || typeof saved !== "object") return null;
+        if (!Number.isFinite(saved.x) || !Number.isFinite(saved.y)) return null;
+        return clampToViewport(saved.x, saved.y);
+      } catch (_) {
+        return null;
+      }
+    };
+    const persistPosition = (x, y) => {
+      try {
+        const cfg = moduleCfg("Building HUD");
+        if (!cfg || typeof cfg !== "object") return;
+        cfg.hudPosition = { x: Math.round(Number(x) || 0), y: Math.round(Number(y) || 0) };
+        if (typeof saveSettings === "function") saveSettings();
+      } catch (_) {}
+    };
     const handleMouseMove = (event) => {
       if (!dragState) return;
       const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
@@ -3955,6 +4005,9 @@
     };
     const handleMouseUp = () => {
       if (!dragState) return;
+      const rect = hud.getBoundingClientRect();
+      const clamped = clampToViewport(rect.left, rect.top);
+      persistPosition(clamped.x, clamped.y);
       dragState = null;
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
@@ -3969,6 +4022,13 @@
       window.addEventListener("mouseup", handleMouseUp);
       event.preventDefault();
     });
+    const savedPos = getStoredPosition();
+    if (savedPos) {
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${savedPos.x}px`);
+      hud.style.setProperty("top", `${savedPos.y}px`);
+    }
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
     return hud;
@@ -4430,7 +4490,15 @@
   }
 
   function persistAbilityHudPosition() {
-    return;
+    try {
+      const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+      if (!cfg || typeof cfg !== "object") return;
+      cfg.hudPosition = {
+        x: Math.round(Number(abilityHudState.position.x) || 0),
+        y: Math.round(Number(abilityHudState.position.y) || 0),
+      };
+      if (typeof saveSettings === "function") saveSettings();
+    } catch (_) {}
   }
 
   function applyAbilityHudLiveConfig(opts = {}) {
@@ -4949,6 +5017,11 @@
       abilityHudState.wired = true;
     }
     const cfg = getAbilityHudConfig();
+    const savedPos = typeof moduleCfg === "function" ? moduleCfg(ABILITY_HUD_MODULE_NAME)?.hudPosition : null;
+    if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)) {
+      abilityHudState.position.x = savedPos.x;
+      abilityHudState.position.y = savedPos.y;
+    }
     if (!Number.isFinite(abilityHudState.position.x) || !Number.isFinite(abilityHudState.position.y)) {
       const position = getAbilityHudDefaultPosition({ width: 360, height: 120 });
       abilityHudState.position.x = position.x;
@@ -4970,8 +5043,7 @@
     abilityHudState.position.y = clampedStart.y;
     panel.style.left = `${clampedStart.x}px`;
     panel.style.top = `${clampedStart.y}px`;
-    panel.style.transformOrigin = "top left";
-    panel.style.transform = `scale(${cfg.abilityHudScale})`;
+    applyAbilityHudLiveConfig({ cfg });
     panel.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       if (event.target?.closest?.("button")) return;
