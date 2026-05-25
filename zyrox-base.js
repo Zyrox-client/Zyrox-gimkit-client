@@ -9028,10 +9028,11 @@
     resetModuleConfig(moduleName);
     if (moduleName === ABILITY_HUD_MODULE_NAME) {
       applyAbilityHudLiveConfig({ cfg: moduleCfg(moduleName) });
-    } else if (moduleName === "Upgrade HUD" && upgradeHudState.enabled) {
-      renderUpgradeHud();
-    } else if (moduleName === "Building HUD" && lavaBuildingHudState.enabled) {
-      renderLavaBuildingHud();
+      requestAbilityHudRender();
+    } else if (moduleName === "Upgrade HUD") {
+      hardRefreshUpgradeHud(moduleCfg(moduleName));
+    } else if (moduleName === "Building HUD") {
+      hardRefreshLavaBuildingHud(moduleCfg(moduleName));
     }
     openConfig(moduleName);
   });
