@@ -3691,10 +3691,11 @@
       const rect = hud.getBoundingClientRect();
       const clamped = clampToViewport(rect.left, rect.top);
       writeHudPosition("Upgrade HUD", { x: Math.round(clamped.x), y: Math.round(clamped.y) });
+      if (typeof saveSettings === "function") saveSettings();
       dragState = null;
       hud.style.cursor = "grab";
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -3704,8 +3705,9 @@
         offsetY: event.clientY - rect.top,
       };
       hud.style.cursor = "grabbing";
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("blur", handleMouseUp, { once: true });
       event.preventDefault();
     });
     const savedPos = readHudPosition("Upgrade HUD", null);
@@ -4088,18 +4090,20 @@
       const rect = hud.getBoundingClientRect();
       const clamped = clampToViewport(rect.left, rect.top);
       writeHudPosition("Building HUD", { x: Math.round(clamped.x), y: Math.round(clamped.y) });
+      if (typeof saveSettings === "function") saveSettings();
       dragState = null;
       hud.style.cursor = "grab";
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       const rect = hud.getBoundingClientRect();
       dragState = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
       hud.style.cursor = "grabbing";
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("blur", handleMouseUp, { once: true });
       event.preventDefault();
     });
     const savedPos = readHudPosition("Building HUD", null);
