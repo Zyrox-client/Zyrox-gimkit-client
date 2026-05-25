@@ -3570,6 +3570,10 @@
       hud.style.removeProperty("bottom");
       hud.style.setProperty("left", `${clamped.x}px`);
       hud.style.setProperty("top", `${clamped.y}px`);
+      try {
+        const cfg = moduleCfg("Upgrade HUD");
+        if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+      } catch (_) {}
     };
     const handleMouseUp = () => {
       if (!dragState) return;
@@ -4002,6 +4006,10 @@
       hud.style.removeProperty("bottom");
       hud.style.setProperty("left", `${clamped.x}px`);
       hud.style.setProperty("top", `${clamped.y}px`);
+      try {
+        const cfg = moduleCfg("Building HUD");
+        if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+      } catch (_) {}
     };
     const handleMouseUp = () => {
       if (!dragState) return;
@@ -5044,6 +5052,7 @@
     panel.style.left = `${clampedStart.x}px`;
     panel.style.top = `${clampedStart.y}px`;
     applyAbilityHudLiveConfig({ cfg });
+    renderAbilityHud();
     panel.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       if (event.target?.closest?.("button")) return;
@@ -5082,6 +5091,10 @@
     abilityHudState.position.y = clamped.y;
     abilityHudState.container.style.left = `${abilityHudState.position.x}px`;
     abilityHudState.container.style.top = `${abilityHudState.position.y}px`;
+    try {
+      const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+      if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+    } catch (_) {}
   }
 
   function abilityHudMouseUp() {
