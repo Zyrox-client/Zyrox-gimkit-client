@@ -3759,9 +3759,9 @@
     return applied;
   }
 
-  function renderUpgradeHud() {
+  function renderUpgradeHud(configOverride = null) {
     const hud = ensureUpgradeHudContainer();
-    const cfg = getUpgradeHudConfig();
+    const cfg = { ...getUpgradeHudConfig(), ...(configOverride && typeof configOverride === "object" ? configOverride : {}) };
     if (!normalizeHudPosition(cfg.hudPosition, null)) {
       const livePos = readHudPositionFromElement(hud);
       if (livePos) {
@@ -3821,10 +3821,10 @@
     hud.style.display = upgradeHudState.enabled ? "block" : "none";
   }
 
-  function hardRefreshUpgradeHud() {
+  function hardRefreshUpgradeHud(configOverride = null) {
     if (upgradeHudState.container?.isConnected) upgradeHudState.container.remove();
     upgradeHudState.container = null;
-    renderUpgradeHud();
+    renderUpgradeHud(configOverride);
   }
 
   function extractUpgradeLevelsFromStateUpdate(stateUpdate) {
@@ -4176,10 +4176,10 @@
     hud.style.display = lavaBuildingHudState.enabled ? "block" : "none";
   }
 
-  function hardRefreshLavaBuildingHud() {
+  function hardRefreshLavaBuildingHud(configOverride = null) {
     if (lavaBuildingHudState.container?.isConnected) lavaBuildingHudState.container.remove();
     lavaBuildingHudState.container = null;
-    renderLavaBuildingHud();
+    renderLavaBuildingHud(configOverride);
   }
 
   function startLavaBuildingHud() {
@@ -7944,7 +7944,7 @@
                   if (livePos) writeHudPosition("Upgrade HUD", livePos);
                 }
                 writeUpgradeHudConfigPatch({ hudSize: newVal });
-                hardRefreshUpgradeHud();
+                hardRefreshUpgradeHud({ hudSize: newVal });
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
                 if (lavaBuildingHudState.container) {
@@ -7952,7 +7952,7 @@
                   if (livePos) writeHudPosition("Building HUD", livePos);
                 }
                 writeBuildingHudConfigPatch({ hudSize: newVal });
-                hardRefreshLavaBuildingHud();
+                hardRefreshLavaBuildingHud({ hudSize: newVal });
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
                 if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap") {
@@ -7986,7 +7986,7 @@
                   if (livePos) writeHudPosition("Upgrade HUD", livePos);
                 }
                 writeUpgradeHudConfigPatch({ [setting.id]: cfg[setting.id] });
-                hardRefreshUpgradeHud();
+                hardRefreshUpgradeHud({ [setting.id]: cfg[setting.id] });
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
                 if (lavaBuildingHudState.container) {
@@ -7994,7 +7994,7 @@
                   if (livePos) writeHudPosition("Building HUD", livePos);
                 }
                 writeBuildingHudConfigPatch({ displayTitle: cfg[setting.id] });
-                hardRefreshLavaBuildingHud();
+                hardRefreshLavaBuildingHud({ displayTitle: cfg[setting.id] });
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
