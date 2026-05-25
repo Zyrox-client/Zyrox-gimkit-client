@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox client (gimkit)
 // @namespace    https://github.com/Zyrox-client
-// @version      2.9.2
+// @version      2.9.3
 // @description  A modern userscript hacked client for gimkit
 // @author       Zyrox client
 // @match        https://www.gimkit.com/join*
@@ -599,7 +599,7 @@
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.9.2";
+    const CLIENT_VERSION = "2.9.3";
     return CLIENT_VERSION;
   }
 
@@ -4538,6 +4538,54 @@
     abilityHudState.config.abilityHudShowPrices = rawCfg?.abilityHudShowPrices !== false;
     abilityHudState.config.abilityHudIconSize = Math.max(56, Math.min(164, Number(rawCfg?.abilityHudIconSize) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudIconSize));
     return { ...abilityHudState.config };
+  }
+
+  function getAbilityHudAnchorPosition(anchor, panelRect) {
+    const inset = 18;
+    const topInset = 116;
+    const width = Math.max(100, panelRect?.width || 360);
+    const height = Math.max(44, panelRect?.height || 120);
+    if (anchor === "top-left") return { x: inset, y: topInset };
+    if (anchor === "bottom-left") return { x: inset, y: window.innerHeight - height - inset };
+    if (anchor === "bottom-right") return { x: window.innerWidth - width - inset, y: window.innerHeight - height - inset };
+    return { x: window.innerWidth - width - inset, y: topInset };
+  }
+
+  function clampAbilityHudPosition(x, y, panelRect) {
+    const width = Math.max(100, panelRect?.width || 360);
+    const height = Math.max(44, panelRect?.height || 120);
+    const minX = ABILITY_HUD_DRAG_MARGIN;
+    const minY = ABILITY_HUD_DRAG_MARGIN;
+    const maxX = Math.max(minX, window.innerWidth - width - ABILITY_HUD_DRAG_MARGIN);
+    const maxY = Math.max(minY, window.innerHeight - height - ABILITY_HUD_DRAG_MARGIN);
+    return { x: Math.max(minX, Math.min(maxX, Number(x) || minX)), y: Math.max(minY, Math.min(maxY, Number(y) || minY)) };
+  }
+
+  function persistAbilityHudPosition() {
+    if (typeof moduleCfg !== "function") return;
+    const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+    cfg.abilityHudPosition = { x: Math.round(Number(abilityHudState.position.x) || 0), y: Math.round(Number(abilityHudState.position.y) || 0) };
+    if (typeof saveSettings === "function") saveSettings();
+  }
+
+  function applyAbilityHudLiveConfig(opts = {}) {
+    if (!abilityHudState.enabled) return;
+    const cfg = getAbilityHudConfig();
+    if (!abilityHudState.container) return;
+    const panelRect = abilityHudState.container.getBoundingClientRect();
+    if (opts.reanchor === true) {
+      const anchored = getAbilityHudAnchorPosition(cfg.abilityHudAnchor, panelRect);
+      abilityHudState.position.x = anchored.x;
+      abilityHudState.position.y = anchored.y;
+    }
+    const clamped = clampAbilityHudPosition(abilityHudState.position.x, abilityHudState.position.y, panelRect);
+    abilityHudState.position.x = clamped.x;
+    abilityHudState.position.y = clamped.y;
+    abilityHudState.container.style.left = `${clamped.x}px`;
+    abilityHudState.container.style.top = `${clamped.y}px`;
+    abilityHudState.container.style.transformOrigin = "top left";
+    abilityHudState.container.style.transform = `scale(${cfg.abilityHudScale})`;
+    requestAbilityHudRender();
   }
 
   function getAbilityHudTextColor(hex) {
