@@ -7758,6 +7758,10 @@
                 cfg.customY = null;
                 renderLavaBuildingHud();
               }
+              if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudDisplayMode") {
+                abilityHudState.config.abilityHudDisplayMode = cfg[setting.id] === "icons" ? "icons" : "default";
+                if (abilityHudState.enabled) requestAbilityHudRender();
+              }
               saveSettings();
             });
           }
