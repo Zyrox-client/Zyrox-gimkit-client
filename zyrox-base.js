@@ -4516,6 +4516,26 @@
     if (typeof saveSettings === "function") saveSettings();
   }
 
+  function applyAbilityHudLiveConfig(opts = {}) {
+    if (!abilityHudState.enabled) return;
+    const cfg = getAbilityHudConfig();
+    if (!abilityHudState.container) return;
+    const panelRect = abilityHudState.container.getBoundingClientRect();
+    if (opts.reanchor === true) {
+      const anchored = getAbilityHudAnchorPosition(cfg.abilityHudAnchor, panelRect);
+      abilityHudState.position.x = anchored.x;
+      abilityHudState.position.y = anchored.y;
+    }
+    const clamped = clampAbilityHudPosition(abilityHudState.position.x, abilityHudState.position.y, panelRect);
+    abilityHudState.position.x = clamped.x;
+    abilityHudState.position.y = clamped.y;
+    abilityHudState.container.style.left = `${clamped.x}px`;
+    abilityHudState.container.style.top = `${clamped.y}px`;
+    abilityHudState.container.style.transformOrigin = "top left";
+    abilityHudState.container.style.transform = `scale(${cfg.abilityHudScale})`;
+    requestAbilityHudRender();
+  }
+
   function getAbilityHudTextColor(hex) {
     const color = String(hex || "").trim();
     const match = color.match(/^#([0-9a-f]{6})$/i);
@@ -7812,7 +7832,7 @@
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
                 if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap" || setting.id === "abilityHudIconSize") {
-                  if (abilityHudState.enabled) { getAbilityHudConfig(); requestAbilityHudRender(); if (abilityHudState.container) abilityHudState.container.style.transform = `scale(${abilityHudState.config.abilityHudScale})`; }
+                  applyAbilityHudLiveConfig();
                 }
               }
               if (moduleName === CAMERA_ZOOM_MODULE_NAME && setting.id === "zoom") {
@@ -7848,7 +7868,7 @@
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudShowPrices") {
-                if (abilityHudState.enabled) { getAbilityHudConfig(); requestAbilityHudRender(); }
+                applyAbilityHudLiveConfig();
               }
               if (moduleName === HIDE_POPUPS_MODULE_NAME) {
                 syncHidePopups();
@@ -7902,7 +7922,7 @@
               }
               if (moduleName === ABILITY_HUD_MODULE_NAME) {
                 if (setting.id === "abilityHudDisplayMode") openConfig(moduleName);
-                if (abilityHudState.enabled) { getAbilityHudConfig(); requestAbilityHudRender(); if (abilityHudState.container) abilityHudState.container.style.transform = `scale(${abilityHudState.config.abilityHudScale})`; }
+                applyAbilityHudLiveConfig({ reanchor: setting.id === "abilityHudAnchor" });
               }
               saveSettings();
             });
