@@ -8026,6 +8026,29 @@
   }
 
   function collectSettings() {
+    try {
+      if (upgradeHudState?.container?.isConnected) {
+        const pos = readHudPositionFromElement(upgradeHudState.container);
+        if (pos) {
+          const cfg = moduleCfg("Upgrade HUD");
+          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+        }
+      }
+      if (lavaBuildingHudState?.container?.isConnected) {
+        const pos = readHudPositionFromElement(lavaBuildingHudState.container);
+        if (pos) {
+          const cfg = moduleCfg("Building HUD");
+          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+        }
+      }
+      if (abilityHudState?.container?.isConnected) {
+        const pos = readHudPositionFromElement(abilityHudState.container);
+        if (pos) {
+          const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
+          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+        }
+      }
+    } catch (_) {}
     return {
       toggleKey: CONFIG.toggleKey,
       globalPreset: state.globalPreset,
