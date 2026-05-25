@@ -3545,6 +3545,7 @@
     const cfg = getHudModuleConfigObject(moduleName, {});
     if (!cfg || typeof cfg !== "object") return null;
     cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
+    console.log("[HUD Position] Stored", { moduleName, hudPosition: { ...cfg.hudPosition } });
     markHudFallbackConfigDirty(moduleName);
     if (typeof saveSettings === "function") saveSettings();
     return { ...cfg.hudPosition };
@@ -4654,6 +4655,7 @@
         x: Math.round(Number(abilityHudState.position.x) || 0),
         y: Math.round(Number(abilityHudState.position.y) || 0),
       };
+      console.log("[HUD Position] Stored", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } });
       if (typeof saveSettings === "function") saveSettings();
     } catch (_) {}
   }
@@ -8148,21 +8150,21 @@
         const pos = readHudPositionFromElement(upgradeHudState.container);
         if (pos) {
           const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
-          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: "Upgrade HUD", hudPosition: { ...cfg.hudPosition } }); }
         }
       }
       if (lavaBuildingHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(lavaBuildingHudState.container);
         if (pos) {
           const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
-          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: "Building HUD", hudPosition: { ...cfg.hudPosition } }); }
         }
       }
       if (abilityHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(abilityHudState.container);
         if (pos) {
           const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
-          if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
+          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } }); }
         }
       }
     } catch (_) {}
