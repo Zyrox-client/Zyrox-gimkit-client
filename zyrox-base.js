@@ -3583,6 +3583,22 @@
   }
 
 
+
+  function getHudModuleConfigObject(moduleName, defaults = {}) {
+    try {
+      if (typeof moduleCfg === "function") {
+        const cfg = moduleCfg(moduleName);
+        if (cfg && typeof cfg === "object") return cfg;
+      }
+    } catch (_) {}
+    const cacheKey = "__zyroxHudFallbackConfig";
+    if (!window[cacheKey] || typeof window[cacheKey] !== "object") window[cacheKey] = {};
+    if (!window[cacheKey][moduleName] || typeof window[cacheKey][moduleName] !== "object") {
+      window[cacheKey][moduleName] = { ...defaults };
+    }
+    return window[cacheKey][moduleName];
+  }
+
   function normalizeUpgradeHudConfigFromRaw(rawCfg = {}) {
     const defaults = { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null };
     return {
@@ -3604,14 +3620,14 @@
   }
 
   function readUpgradeHudConfig() {
-    const cfg = (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return {}; } })() || {};
+    const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
     const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
     Object.assign(upgradeHudState.config, normalized);
     return { ...normalized };
   }
 
   function writeUpgradeHudConfigPatch(patch = {}) {
-    const cfg = moduleCfg("Upgrade HUD");
+    const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
     if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
     Object.assign(cfg, patch);
     const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
@@ -3622,14 +3638,14 @@
   }
 
   function readBuildingHudConfig() {
-    const cfg = (() => { try { return moduleCfg("Building HUD"); } catch (_) { return {}; } })() || {};
+    const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
     const normalized = normalizeBuildingHudConfigFromRaw(cfg);
     Object.assign(lavaBuildingHudState.config, normalized);
     return { ...normalized };
   }
 
   function writeBuildingHudConfigPatch(patch = {}) {
-    const cfg = moduleCfg("Building HUD");
+    const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
     if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
     Object.assign(cfg, patch);
     const normalized = normalizeBuildingHudConfigFromRaw(cfg);
@@ -8115,14 +8131,14 @@
       if (upgradeHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(upgradeHudState.container);
         if (pos) {
-          const cfg = moduleCfg("Upgrade HUD");
+          const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
           if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
         }
       }
       if (lavaBuildingHudState?.container?.isConnected) {
         const pos = readHudPositionFromElement(lavaBuildingHudState.container);
         if (pos) {
-          const cfg = moduleCfg("Building HUD");
+          const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
           if (cfg && typeof cfg === "object") cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) };
         }
       }
