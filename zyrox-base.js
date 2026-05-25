@@ -3686,7 +3686,7 @@
       applyHudPosition(hud, clamped, false);
       writeUpgradeHudConfigPatch({ hudPosition: { x: Math.round(clamped.x), y: Math.round(clamped.y) } });
     };
-    const handleMouseUp = () => {
+    const handleDragEnd = () => {
       if (!dragState) return;
       const rect = hud.getBoundingClientRect();
       const clamped = clampToViewport(rect.left, rect.top);
@@ -3695,7 +3695,13 @@
       dragState = null;
       hud.style.cursor = "grab";
       document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", handleDragEnd);
+      window.removeEventListener("blur", handleDragEnd);
+      document.removeEventListener("mouseleave", handleDragEnd);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") handleDragEnd();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -3706,8 +3712,10 @@
       };
       hud.style.cursor = "grabbing";
       document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      window.addEventListener("blur", handleMouseUp, { once: true });
+      document.addEventListener("mouseup", handleDragEnd);
+      window.addEventListener("blur", handleDragEnd);
+      document.addEventListener("mouseleave", handleDragEnd);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
       event.preventDefault();
     });
     const savedPos = readHudPosition("Upgrade HUD", null);
@@ -4085,7 +4093,7 @@
       applyHudPosition(hud, clamped, false);
       writeBuildingHudConfigPatch({ hudPosition: { x: Math.round(clamped.x), y: Math.round(clamped.y) } });
     };
-    const handleMouseUp = () => {
+    const handleDragEnd = () => {
       if (!dragState) return;
       const rect = hud.getBoundingClientRect();
       const clamped = clampToViewport(rect.left, rect.top);
@@ -4094,7 +4102,13 @@
       dragState = null;
       hud.style.cursor = "grab";
       document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("mouseup", handleDragEnd);
+      window.removeEventListener("blur", handleDragEnd);
+      document.removeEventListener("mouseleave", handleDragEnd);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") handleDragEnd();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -4102,8 +4116,10 @@
       dragState = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
       hud.style.cursor = "grabbing";
       document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      window.addEventListener("blur", handleMouseUp, { once: true });
+      document.addEventListener("mouseup", handleDragEnd);
+      window.addEventListener("blur", handleDragEnd);
+      document.addEventListener("mouseleave", handleDragEnd);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
       event.preventDefault();
     });
     const savedPos = readHudPosition("Building HUD", null);
