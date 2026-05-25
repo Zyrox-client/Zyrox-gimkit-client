@@ -3499,24 +3499,25 @@
   }
 
   function normalizeHudPosition(pos, fallback = null) {
-    const candidate = pos && typeof pos === "object" ? pos : null;
-    if (candidate) {
-      const x = Number(candidate.x);
-      const y = Number(candidate.y);
+    const normalizePoint = (value) => {
+      if (!value || typeof value !== "object") return null;
+      const rawX = value.x ?? value.left ?? value.hudPositionX;
+      const rawY = value.y ?? value.top ?? value.hudPositionY;
+      const x = Number.parseFloat(rawX);
+      const y = Number.parseFloat(rawY);
       if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
-    }
-    if (fallback) {
-      const x = Number(fallback.x);
-      const y = Number(fallback.y);
-      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
-    }
-    return null;
+      return null;
+    };
+    return normalizePoint(pos) || normalizePoint(fallback) || null;
   }
 
   function readHudPosition(moduleName, fallback = null) {
     try {
       const cfg = moduleCfg(moduleName);
-      return normalizeHudPosition(cfg?.hudPosition, fallback);
+      const legacy = cfg && typeof cfg === "object"
+        ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
+        : null;
+      return normalizeHudPosition(cfg?.hudPosition, legacy || fallback);
     } catch (_) {
       return normalizeHudPosition(null, fallback);
     }
@@ -3692,7 +3693,7 @@
       const applied = applyHudPosition(hud, savedPos, true);
       upgradeHudLog("Restored HUD position", { moduleName: "Upgrade HUD", saved: savedPos, applied });
     } else {
-      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Upgrade HUD" });
+      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Upgrade HUD", rawCfg: (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return null; } })() });
     }
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
@@ -4086,7 +4087,7 @@
       const applied = applyHudPosition(hud, savedPos, true);
       upgradeHudLog("Restored HUD position", { moduleName: "Building HUD", saved: savedPos, applied });
     } else {
-      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Building HUD" });
+      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Building HUD", rawCfg: (() => { try { return moduleCfg("Building HUD"); } catch (_) { return null; } })() });
     }
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
