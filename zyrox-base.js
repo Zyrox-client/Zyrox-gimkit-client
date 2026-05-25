@@ -3530,31 +3530,23 @@
   }
 
   function readHudPosition(moduleName, fallback = null) {
-    try {
-      const cfg = moduleCfg(moduleName);
-      const legacy = cfg && typeof cfg === "object"
-        ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
-        : null;
-      const fromCfg = normalizeHudPosition(cfg?.hudPosition, legacy || null);
-      if (fromCfg) return fromCfg;
-      return readHudPositionFromStorage(moduleName, fallback);
-    } catch (_) {
-      return readHudPositionFromStorage(moduleName, fallback);
-    }
+    const cfg = getHudModuleConfigObject(moduleName, {});
+    const legacy = cfg && typeof cfg === "object"
+      ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
+      : null;
+    const fromCfg = normalizeHudPosition(cfg?.hudPosition, legacy || null);
+    if (fromCfg) return fromCfg;
+    return readHudPositionFromStorage(moduleName, fallback);
   }
 
   function writeHudPosition(moduleName, pos) {
     const normalized = normalizeHudPosition(pos, null);
     if (!normalized) return null;
-    try {
-      const cfg = moduleCfg(moduleName);
-      if (!cfg || typeof cfg !== "object") return null;
-      cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
-      if (typeof saveSettings === "function") saveSettings();
-      return { ...cfg.hudPosition };
-    } catch (_) {
-      return null;
-    }
+    const cfg = getHudModuleConfigObject(moduleName, {});
+    if (!cfg || typeof cfg !== "object") return null;
+    cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
+    if (typeof saveSettings === "function") saveSettings();
+    return { ...cfg.hudPosition };
   }
 
   function readHudPositionFromElement(el) {
