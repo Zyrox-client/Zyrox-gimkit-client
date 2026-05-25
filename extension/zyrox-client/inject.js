@@ -3415,13 +3415,19 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       hud.style.setProperty("left", `${clamped.x}px`);
       hud.style.setProperty("top", `${clamped.y}px`);
     };
-    const handleMouseUp = () => {
+    const endDrag = () => {
       if (!dragState) return;
       dragState = null;
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("blur", endDrag);
+      document.removeEventListener("mouseleave", endDrag);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       persistUpgradeHudSettings?.();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") endDrag();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -3432,7 +3438,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       };
       hud.style.cursor = "grabbing";
       window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("mouseup", endDrag);
+      window.addEventListener("blur", endDrag);
+      document.addEventListener("mouseleave", endDrag);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
       event.preventDefault();
     });
     document.documentElement.appendChild(hud);
@@ -3894,13 +3903,19 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       hud.style.setProperty("left", `${clamped.x}px`);
       hud.style.setProperty("top", `${clamped.y}px`);
     };
-    const handleMouseUp = () => {
+    const endDrag = () => {
       if (!dragState) return;
       dragState = null;
       hud.style.cursor = "grab";
       window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("blur", endDrag);
+      document.removeEventListener("mouseleave", endDrag);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       persistLavaBuildingHudSettings?.();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") endDrag();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -3908,7 +3923,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       dragState = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
       hud.style.cursor = "grabbing";
       window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
+      window.addEventListener("mouseup", endDrag);
+      window.addEventListener("blur", endDrag);
+      document.addEventListener("mouseleave", endDrag);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
       event.preventDefault();
     });
     document.documentElement.appendChild(hud);
