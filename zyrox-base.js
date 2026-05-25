@@ -4688,7 +4688,9 @@
   function abilityRequiresTargetSelection(ability) {
     if (!ability || !Array.isArray(ability.disabled)) return false;
     const isShield = String(ability?.name || "").trim().toLowerCase() === "shield";
-    const requires = !isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly");
+    const isGiftAbility = String(ability?.name || "").trim().toLowerCase() === "giving"
+      || String(ability?.displayName || "").trim().toLowerCase() === "gift";
+    const requires = (!isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly")) || isGiftAbility;
     console.debug(`${ABILITY_HUD_LOG} [Step 1] ability target-selection requirement`, {
       abilityName: ability?.name,
       disabledFlags: ability?.disabled,
@@ -4854,7 +4856,7 @@
     panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:2147483646;width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,.95),rgba(8,10,16,.95));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
     const head = document.createElement("header");
     head.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
-    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div><div style="font-size:12px;color:#9ab2d8;">Classic/Tycoon</div>`;
+    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div>`;
     const body = document.createElement("div");
     body.style.cssText = "display:flex;flex-direction:column;gap:5px;";
     panel.append(head, body);
