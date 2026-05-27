@@ -1064,8 +1064,18 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       });
     }
     onSend(data) {
+      const safeDecodeBlueboat = (packet) => {
+        if (!(packet instanceof ArrayBuffer) && !ArrayBuffer.isView(packet)) return null;
+        const bytes = packet instanceof ArrayBuffer ? new Uint8Array(packet) : new Uint8Array(packet.buffer, packet.byteOffset, packet.byteLength);
+        if (!bytes.length || bytes[0] !== 4) return null;
+        try {
+          return blueboat.decode(packet);
+        } catch (_) {
+          return null;
+        }
+      };
       if (this.transportType === "blueboat" && !this.blueboatRoomId) {
-        const decoded = blueboat.decode(data);
+        const decoded = safeDecodeBlueboat(data);
         if (decoded?.roomId) this.blueboatRoomId = decoded.roomId;
         if (decoded?.room) this.blueboatRoomId = decoded.room;
       }
