@@ -599,7 +599,7 @@
       let _timerId = null;
       let _running = false;
       let _baseSpeed = 1000;
-      let _pardyDelay = 750;
+      let _pardyDelay = 1500;
       const BLUEBOAT_EXTRA_DELAY_MS = 500;
 
       function getCurrentDelay() {
@@ -620,7 +620,7 @@
         const cfg = window.__zyroxAutoAnswerConfig || {};
         _baseSpeed = Math.max(200, Number(speed ?? cfg.speed) || 1000);
         const pardyDelayNumber = Number(options?.pardyDelay ?? cfg.triviaDelay);
-        _pardyDelay = Math.max(0, Math.min(4000, Number.isFinite(pardyDelayNumber) ? pardyDelayNumber : _pardyDelay));
+        _pardyDelay = Math.max(0, Math.min(8000, Number.isFinite(pardyDelayNumber) ? pardyDelayNumber : _pardyDelay));
         const wasRunning = _running;
         _running = true;
         if (_timerId) clearTimeout(_timerId);
@@ -5588,7 +5588,7 @@
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
-                { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 4000, step: 50, default: 750 },
+                { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 8000, step: 50, default: 1500 },
               ],
             },
             {
@@ -7246,7 +7246,7 @@
     const cfg = moduleCfg("Auto Answer");
     const speed = Math.max(200, Number(cfg.speed) || 1000);
     const triviaDelayNumber = Number(cfg.triviaDelay);
-    const triviaDelay = Math.max(0, Math.min(4000, Number.isFinite(triviaDelayNumber) ? triviaDelayNumber : 750));
+    const triviaDelay = Math.max(0, Math.min(8000, Number.isFinite(triviaDelayNumber) ? triviaDelayNumber : 1500));
     window.__zyroxAutoAnswer?.start(speed, { pardyDelay: triviaDelay });
   }
 
