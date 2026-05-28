@@ -398,7 +398,8 @@
         if (!state.isPardyMode) {
           state.isPardyMode = true;
           console.log(LOG, "Detected PARDY game type from", source || "game state", "- enabling PARDY auto-answer mode");
-          startAutoAnswer(_baseSpeed, "PARDY detected");
+          const cfg = window.__zyroxAutoAnswerConfig || {};
+          startAutoAnswer(cfg.speed ?? _baseSpeed, "PARDY detected", { pardyDelay: cfg.triviaDelay ?? _pardyDelay });
         }
       }
 
@@ -435,7 +436,7 @@
         const questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
         if (!questionId) { logPardySkip("questionStatus ask received before currentQuestionId"); return; }
         state.pardyAskQuestionId = questionId;
-        state.pardyAskReadyAt = Date.now() + Math.max(0, Number(_baseSpeed) || 0);
+        state.pardyAskReadyAt = Date.now() + Math.max(0, Number(_pardyDelay) || 0);
         state.lastPardySkipReason = null;
         if (state.pardyAskTimerId) clearTimeout(state.pardyAskTimerId);
         state.pardyAskTimerId = setTimeout(() => {
@@ -597,7 +598,8 @@
       // Expose start/stop so the Zyrox module toggle controls the interval
       let _timerId = null;
       let _running = false;
-      let _baseSpeed = 750;
+      let _baseSpeed = 1000;
+      let _pardyDelay = 750;
       const BLUEBOAT_EXTRA_DELAY_MS = 500;
 
       function getCurrentDelay() {
@@ -614,9 +616,11 @@
         }, delay);
       }
 
-      function startAutoAnswer(speed = 750, source = "module toggle") {
-        const speedNumber = Number(speed);
-        _baseSpeed = Math.max(0, Math.min(4000, Number.isFinite(speedNumber) ? speedNumber : 750));
+      function startAutoAnswer(speed = 1000, source = "module toggle", options = {}) {
+        const cfg = window.__zyroxAutoAnswerConfig || {};
+        _baseSpeed = Math.max(200, Number(speed ?? cfg.speed) || 1000);
+        const pardyDelayNumber = Number(options?.pardyDelay ?? cfg.triviaDelay);
+        _pardyDelay = Math.max(0, Math.min(4000, Number.isFinite(pardyDelayNumber) ? pardyDelayNumber : _pardyDelay));
         const wasRunning = _running;
         _running = true;
         if (_timerId) clearTimeout(_timerId);
@@ -625,8 +629,8 @@
       }
 
       window.__zyroxAutoAnswer = {
-        start(speed = 750) {
-          startAutoAnswer(speed);
+        start(speed = 1000, options = {}) {
+          startAutoAnswer(speed, "module toggle", options);
         },
         stop() {
           _running = false;
@@ -5583,7 +5587,8 @@
               name: "Auto Answer",
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
-                { id: "speed", label: "Answer Delay", type: "slider", min: 0, max: 4000, step: 50, default: 750 },
+                { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
+                { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 4000, step: 50, default: 750 },
               ],
             },
             {
@@ -7195,6 +7200,8 @@
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
     } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
+    } else if (name === "Auto Answer") {
+      window.__zyroxAutoAnswerConfig = { ...cfg };
     }
     return cfg;
   }
@@ -7237,9 +7244,10 @@
 
   function startAutoAnswer() {
     const cfg = moduleCfg("Auto Answer");
-    const speedNumber = Number(cfg.speed);
-    const speed = Math.max(0, Math.min(4000, Number.isFinite(speedNumber) ? speedNumber : 750));
-    window.__zyroxAutoAnswer?.start(speed);
+    const speed = Math.max(200, Number(cfg.speed) || 1000);
+    const triviaDelayNumber = Number(cfg.triviaDelay);
+    const triviaDelay = Math.max(0, Math.min(4000, Number.isFinite(triviaDelayNumber) ? triviaDelayNumber : 750));
+    window.__zyroxAutoAnswer?.start(speed, { pardyDelay: triviaDelay });
   }
 
   function refreshAutoAnswerLoopIfEnabled() {
@@ -8146,10 +8154,10 @@
               const newVal = Number(event.target.value);
               cfg[setting.id] = newVal;
               if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
-              if (moduleName === "Auto Answer" && setting.id === "speed") {
-                // Live-update the interval speed only while Auto Answer is enabled
+              if (moduleName === "Auto Answer" && (setting.id === "speed" || setting.id === "triviaDelay")) {
+                // Live-update answer delays only while Auto Answer is enabled
                 if (state.enabledModules.has("Auto Answer")) {
-                  window.__zyroxAutoAnswer?.start(newVal);
+                  startAutoAnswer();
                 }
               }
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
