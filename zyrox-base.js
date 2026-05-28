@@ -323,6 +323,8 @@
         pardyCurrentQuestionId: null,
         pardyQuestionStatus: null,
         pardyAskQuestionId: null,
+        pardyAskReadyAt: 0,
+        pardyAskTimerId: null,
         lastPardyAnsweredQuestionId: null,
         lastPardySkipReason: null,
       };
@@ -373,6 +375,8 @@
         state.sentQuestionIds.clear();
         state.lastPardyAnsweredQuestionId = null;
         state.pardyAskQuestionId = null;
+        state.pardyAskReadyAt = 0;
+        if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
       }
 
       function normalizeSpecialGameTypes(value) {
@@ -415,6 +419,8 @@
           state.currentQuestionId = questionId;
           state.pardyQuestionStatus = null;
           state.pardyAskQuestionId = null;
+          state.pardyAskReadyAt = 0;
+          if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
           state.lastPardySkipReason = null;
           console.log(LOG, "PARDY current question set", normalizedQuestionId);
         }
@@ -429,8 +435,13 @@
         const questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
         if (!questionId) { logPardySkip("questionStatus ask received before currentQuestionId"); return; }
         state.pardyAskQuestionId = questionId;
+        state.pardyAskReadyAt = Date.now() + Math.max(0, Number(_baseSpeed) || 0);
         state.lastPardySkipReason = null;
-        answerQuestion();
+        if (state.pardyAskTimerId) clearTimeout(state.pardyAskTimerId);
+        state.pardyAskTimerId = setTimeout(() => {
+          state.pardyAskTimerId = null;
+          answerQuestion();
+        }, Math.max(0, state.pardyAskReadyAt - Date.now()));
       }
 
       function getNextUnansweredQuestion() {
@@ -534,6 +545,7 @@
             questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
             if (!questionId) { logPardySkip("no PARDY currentQuestionId STATE_UPDATE yet"); return; }
             if (state.pardyQuestionStatus !== "ask" || state.pardyAskQuestionId !== questionId) { logPardySkip("waiting for PARDY questionStatus ask"); return; }
+            if (Date.now() < state.pardyAskReadyAt) { logPardySkip("waiting for PARDY answer delay"); return; }
             if (state.sentQuestionIds.has(questionId) || state.lastPardyAnsweredQuestionId === questionId) return;
             question = findQuestionById(questionId);
             if (!question) { logPardySkip(`question ${questionId} is not loaded yet`); return; }
@@ -585,7 +597,7 @@
       // Expose start/stop so the Zyrox module toggle controls the interval
       let _timerId = null;
       let _running = false;
-      let _baseSpeed = 1000;
+      let _baseSpeed = 750;
       const BLUEBOAT_EXTRA_DELAY_MS = 500;
 
       function getCurrentDelay() {
@@ -602,8 +614,9 @@
         }, delay);
       }
 
-      function startAutoAnswer(speed = 1000, source = "module toggle") {
-        _baseSpeed = Math.max(200, Number(speed) || 1000);
+      function startAutoAnswer(speed = 750, source = "module toggle") {
+        const speedNumber = Number(speed);
+        _baseSpeed = Math.max(0, Math.min(4000, Number.isFinite(speedNumber) ? speedNumber : 750));
         const wasRunning = _running;
         _running = true;
         if (_timerId) clearTimeout(_timerId);
@@ -612,12 +625,13 @@
       }
 
       window.__zyroxAutoAnswer = {
-        start(speed = 1000) {
+        start(speed = 750) {
           startAutoAnswer(speed);
         },
         stop() {
           _running = false;
           if (_timerId) { clearTimeout(_timerId); _timerId = null; }
+          if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
         },
       };
       console.log(LOG, "Page context ready, waiting for module toggle.");
@@ -5569,7 +5583,7 @@
               name: "Auto Answer",
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
-                { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
+                { id: "speed", label: "Answer Delay", type: "slider", min: 0, max: 4000, step: 50, default: 750 },
               ],
             },
             {
@@ -7223,7 +7237,8 @@
 
   function startAutoAnswer() {
     const cfg = moduleCfg("Auto Answer");
-    const speed = Math.max(200, Number(cfg.speed) || 1000);
+    const speedNumber = Number(cfg.speed);
+    const speed = Math.max(0, Math.min(4000, Number.isFinite(speedNumber) ? speedNumber : 750));
     window.__zyroxAutoAnswer?.start(speed);
   }
 
