@@ -311,6 +311,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         questionIdList: [],
         currentQuestionIndex: -1,
         sentQuestionIds: new Set(),
+        isPardyMode: false,
+        pardyCurrentQuestionId: null,
+        lastPardyAnsweredQuestionId: null,
+        lastPardySkipReason: null,
       };
 
       function setQuestions(questions) {
@@ -318,7 +322,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         const nextQuestionById = new Map();
         for (const question of state.questions) {
           const id = question?._id || question?.id;
-          if (id) nextQuestionById.set(id, question);
+          if (id) { nextQuestionById.set(id, question); nextQuestionById.set(String(id), question); }
         }
         state.questionById = nextQuestionById;
       }
@@ -330,13 +334,21 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
       function parseQuestionAnswer(question) {
         if (!question) return null;
-        if (question.type === "text") return question.answers?.[0]?.text || null;
-        return question.answers?.find((a) => a?.correct)?.id || question.answers?.find((a) => a?.correct)?._id || null;
+        const answers = Array.isArray(question.answers) ? question.answers : [];
+        if (!answers.length) return null;
+        if (question.type === "text") return answers[0]?.text || null;
+        const correct = answers.find((a) => a?.correct) || answers[0];
+        return correct?.id || correct?._id || correct?.text || null;
       }
 
       function findQuestionById(id) {
         if (id == null) return null;
         return state.questionById.get(id) || state.questionById.get(String(id)) || null;
+      }
+
+      function normalizeQuestionId(questionId) {
+        if (questionId == null) return null;
+        return String(questionId);
       }
 
       function setCurrentQuestionIndex(nextIndex) {
@@ -349,6 +361,51 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
       function resetAnsweredCache() {
         state.sentQuestionIds.clear();
+        state.lastPardyAnsweredQuestionId = null;
+      }
+
+      function normalizeSpecialGameTypes(value) {
+        return asArray(value).map((item) => String(item || "").toUpperCase());
+      }
+
+      function isPardySpecialGameType(value) {
+        return normalizeSpecialGameTypes(value).includes("PARDY");
+      }
+
+      function logPardySkip(reason) {
+        if (state.lastPardySkipReason === reason) return;
+        state.lastPardySkipReason = reason;
+        console.log(LOG, "PARDY auto-answer waiting:", reason);
+      }
+
+      function setPardyMode(enabled, source) {
+        if (!enabled) return;
+        if (!state.isPardyMode) {
+          state.isPardyMode = true;
+          console.log(LOG, "Detected PARDY game type from", source || "game state", "- enabling PARDY auto-answer mode");
+          startAutoAnswer(_baseSpeed, "PARDY detected");
+        }
+      }
+
+      function readStateUpdateValue(updateValue, wantedKey) {
+        for (const item of asArray(updateValue)) {
+          const value = item?.value;
+          if (value?.key === wantedKey) return value.value;
+          if (item?.key === wantedKey) return item.value;
+        }
+        return null;
+      }
+
+      function applyPardyQuestionId(questionId) {
+        const normalizedQuestionId = normalizeQuestionId(questionId);
+        if (!normalizedQuestionId) return;
+        if (state.pardyCurrentQuestionId !== normalizedQuestionId) {
+          state.pardyCurrentQuestionId = normalizedQuestionId;
+          state.currentQuestionId = questionId;
+          state.lastPardySkipReason = null;
+          console.log(LOG, "PARDY current question set", normalizedQuestionId);
+        }
+        answerQuestion();
       }
 
       function getNextUnansweredQuestion() {
@@ -356,18 +413,18 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         if (currentId) {
           const current = findQuestionById(currentId);
           const id = current?._id || current?.id;
-          if (current && id && !state.sentQuestionIds.has(id)) return current;
+          if (current && id && !state.sentQuestionIds.has(normalizeQuestionId(id))) return current;
         }
 
         for (const questionId of state.questionIdList) {
-          if (!questionId || state.sentQuestionIds.has(questionId)) continue;
+          if (!questionId || state.sentQuestionIds.has(normalizeQuestionId(questionId))) continue;
           const match = findQuestionById(questionId);
           if (match) return match;
         }
 
         return state.questions.find((q) => {
           const id = q?._id || q?.id;
-          return id && !state.sentQuestionIds.has(id);
+          return id && !state.sentQuestionIds.has(normalizeQuestionId(id));
         }) || null;
       }
 
@@ -376,10 +433,20 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         const data = packet?.data;
         if (typeof key !== "string") return;
 
+        if (key === "PLAYER_JOINS_STATIC_STATE") {
+          const gameOptions = data?.gameOptions || {};
+          if (isPardySpecialGameType(gameOptions.specialGameType)) setPardyMode(true, "PLAYER_JOINS_STATIC_STATE");
+        }
+
         if (key === "STATE_UPDATE") {
           const type = data?.type;
           if (type === "GAME_QUESTIONS") {
             setQuestions(data?.value);
+            console.log(LOG, "Got game questions", state.questions.length);
+          } else if (type === "PARDY_MODE_STATE") {
+            setPardyMode(true, "PARDY_MODE_STATE");
+            const questionId = readStateUpdateValue(data?.value, "currentQuestionId");
+            if (questionId != null) applyPardyQuestionId(questionId);
           } else if (type === "PLAYER_QUESTION_LIST") {
             state.questionIdList = data?.value?.questionList || [];
             if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
@@ -401,6 +468,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           if (questionId && !findQuestionById(questionId)) {
             state.questions.push(question);
             state.questionById.set(questionId, question);
+            state.questionById.set(String(questionId), question);
           }
         }
       }
@@ -426,21 +494,40 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           const question = findQuestionById(state.currentQuestionId);
           if (!question) return;
           const packet = { key: "answered", deviceId: state.answerDeviceId, data: {} };
-          if (question.type == "text") packet.data.answer = question.answers[0].text;
-          else packet.data.answer = question.answers.find((a) => a.correct)?._id;
+          packet.data.answer = parseQuestionAnswer(question);
           if (!packet.data.answer) return;
           socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
           console.log(LOG, "Answered colyseus", state.currentQuestionId);
         } else {
-          const question = getNextUnansweredQuestion();
-          if (!question) return;
-          const questionId = question?._id || question?.id;
-          if (!questionId || state.sentQuestionIds.has(questionId)) return;
+          let question;
+          let rawQuestionId;
+          let questionId;
+
+          if (state.isPardyMode) {
+            questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
+            if (!questionId) { logPardySkip("no PARDY currentQuestionId STATE_UPDATE yet"); return; }
+            if (state.sentQuestionIds.has(questionId) || state.lastPardyAnsweredQuestionId === questionId) return;
+            question = findQuestionById(questionId);
+            if (!question) { logPardySkip(`question ${questionId} is not loaded yet`); return; }
+            rawQuestionId = question?._id || question?.id || state.pardyCurrentQuestionId;
+          } else {
+            question = getNextUnansweredQuestion();
+            if (!question) return;
+            rawQuestionId = question?._id || question?.id;
+            questionId = normalizeQuestionId(rawQuestionId);
+            if (!questionId || state.sentQuestionIds.has(normalizeQuestionId(questionId))) return;
+          }
+
           const answer = parseQuestionAnswer(question);
-          if (!answer) return;
-          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId });
+          if (!answer) {
+            if (state.isPardyMode) logPardySkip(`no answer found for question ${questionId}`);
+            return;
+          }
+          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId: rawQuestionId ?? questionId });
           state.sentQuestionIds.add(questionId);
-          console.log(LOG, "Answered blueboat", questionId);
+          if (state.isPardyMode) state.lastPardyAnsweredQuestionId = questionId;
+          state.lastPardySkipReason = null;
+          console.log(LOG, state.isPardyMode ? "Answered PARDY blueboat" : "Answered blueboat", questionId);
         }
       }
 
@@ -448,7 +535,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         for (const { id, data } of event.detail || []) {
           for (const key in data || {}) {
             if (key === "GLOBAL_questions") {
-              setQuestions(JSON.parse(data[key]));
+              try { setQuestions(JSON.parse(data[key])); } catch (_) { setQuestions(data[key]); }
               state.answerDeviceId = id;
               console.log(LOG, "Got questions", state.questions.length);
             }
@@ -487,12 +574,18 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         }, delay);
       }
 
+      function startAutoAnswer(speed = 1000, source = "module toggle") {
+        _baseSpeed = Math.max(200, Number(speed) || 1000);
+        const wasRunning = _running;
+        _running = true;
+        if (_timerId) clearTimeout(_timerId);
+        scheduleNextTick();
+        console.log(LOG, wasRunning ? "Auto-answer timer refreshed by" : "Auto-answer started by", source);
+      }
+
       window.__zyroxAutoAnswer = {
         start(speed = 1000) {
-          _baseSpeed = Math.max(200, Number(speed) || 1000);
-          _running = true;
-          if (_timerId) clearTimeout(_timerId);
-          scheduleNextTick();
+          startAutoAnswer(speed);
         },
         stop() {
           _running = false;
