@@ -321,6 +321,8 @@
         sentQuestionIds: new Set(),
         isPardyMode: false,
         pardyCurrentQuestionId: null,
+        pardyQuestionStatus: null,
+        pardyAskQuestionId: null,
         lastPardyAnsweredQuestionId: null,
         lastPardySkipReason: null,
       };
@@ -370,6 +372,7 @@
       function resetAnsweredCache() {
         state.sentQuestionIds.clear();
         state.lastPardyAnsweredQuestionId = null;
+        state.pardyAskQuestionId = null;
       }
 
       function normalizeSpecialGameTypes(value) {
@@ -410,9 +413,23 @@
         if (state.pardyCurrentQuestionId !== normalizedQuestionId) {
           state.pardyCurrentQuestionId = normalizedQuestionId;
           state.currentQuestionId = questionId;
+          state.pardyQuestionStatus = null;
+          state.pardyAskQuestionId = null;
           state.lastPardySkipReason = null;
           console.log(LOG, "PARDY current question set", normalizedQuestionId);
         }
+      }
+
+      function applyPardyQuestionStatus(questionStatus) {
+        if (questionStatus == null) return;
+        const normalizedStatus = String(questionStatus).toLowerCase();
+        state.pardyQuestionStatus = normalizedStatus;
+        console.log(LOG, "PARDY question status", normalizedStatus);
+        if (normalizedStatus !== "ask") return;
+        const questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
+        if (!questionId) { logPardySkip("questionStatus ask received before currentQuestionId"); return; }
+        state.pardyAskQuestionId = questionId;
+        state.lastPardySkipReason = null;
         answerQuestion();
       }
 
@@ -455,6 +472,8 @@
             setPardyMode(true, "PARDY_MODE_STATE");
             const questionId = readStateUpdateValue(data?.value, "currentQuestionId");
             if (questionId != null) applyPardyQuestionId(questionId);
+            const questionStatus = readStateUpdateValue(data?.value, "questionStatus");
+            if (questionStatus != null) applyPardyQuestionStatus(questionStatus);
           } else if (type === "PLAYER_QUESTION_LIST") {
             state.questionIdList = data?.value?.questionList || [];
             if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
@@ -514,6 +533,7 @@
           if (state.isPardyMode) {
             questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
             if (!questionId) { logPardySkip("no PARDY currentQuestionId STATE_UPDATE yet"); return; }
+            if (state.pardyQuestionStatus !== "ask" || state.pardyAskQuestionId !== questionId) { logPardySkip("waiting for PARDY questionStatus ask"); return; }
             if (state.sentQuestionIds.has(questionId) || state.lastPardyAnsweredQuestionId === questionId) return;
             question = findQuestionById(questionId);
             if (!question) { logPardySkip(`question ${questionId} is not loaded yet`); return; }
@@ -531,7 +551,7 @@
             if (state.isPardyMode) logPardySkip(`no answer found for question ${questionId}`);
             return;
           }
-          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId: rawQuestionId ?? questionId });
+          socketManager.sendMessage("QUESTION_ANSWERED", { questionId: rawQuestionId ?? questionId, answer });
           state.sentQuestionIds.add(questionId);
           if (state.isPardyMode) state.lastPardyAnsweredQuestionId = questionId;
           state.lastPardySkipReason = null;
