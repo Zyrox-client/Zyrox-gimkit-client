@@ -319,6 +319,14 @@
         questionIdList: [],
         currentQuestionIndex: -1,
         sentQuestionIds: new Set(),
+        isPardyMode: false,
+        pardyCurrentQuestionId: null,
+        pardyQuestionStatus: null,
+        pardyAskQuestionId: null,
+        pardyAskReadyAt: 0,
+        pardyAskTimerId: null,
+        lastPardyAnsweredQuestionId: null,
+        lastPardySkipReason: null,
       };
 
       function setQuestions(questions) {
@@ -365,6 +373,76 @@
 
       function resetAnsweredCache() {
         state.sentQuestionIds.clear();
+        state.lastPardyAnsweredQuestionId = null;
+        state.pardyAskQuestionId = null;
+        state.pardyAskReadyAt = 0;
+        if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
+      }
+
+      function normalizeSpecialGameTypes(value) {
+        return asArray(value).map((item) => String(item || "").toUpperCase());
+      }
+
+      function isPardySpecialGameType(value) {
+        return normalizeSpecialGameTypes(value).includes("PARDY");
+      }
+
+      function logPardySkip(reason) {
+        if (state.lastPardySkipReason === reason) return;
+        state.lastPardySkipReason = reason;
+        console.log(LOG, "PARDY auto-answer waiting:", reason);
+      }
+
+      function setPardyMode(enabled, source) {
+        if (!enabled) return;
+        if (!state.isPardyMode) {
+          state.isPardyMode = true;
+          console.log(LOG, "Detected PARDY game type from", source || "game state", "- enabling PARDY auto-answer mode");
+          const cfg = window.__zyroxAutoAnswerConfig || {};
+          startAutoAnswer(cfg.speed ?? _baseSpeed, "PARDY detected", { pardyDelay: cfg.triviaDelay ?? _pardyDelay });
+        }
+      }
+
+      function readStateUpdateValue(updateValue, wantedKey) {
+        for (const item of asArray(updateValue)) {
+          const value = item?.value;
+          if (value?.key === wantedKey) return value.value;
+          if (item?.key === wantedKey) return item.value;
+        }
+        return null;
+      }
+
+      function applyPardyQuestionId(questionId) {
+        const normalizedQuestionId = normalizeQuestionId(questionId);
+        if (!normalizedQuestionId) return;
+        if (state.pardyCurrentQuestionId !== normalizedQuestionId) {
+          state.pardyCurrentQuestionId = normalizedQuestionId;
+          state.currentQuestionId = questionId;
+          state.pardyQuestionStatus = null;
+          state.pardyAskQuestionId = null;
+          state.pardyAskReadyAt = 0;
+          if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
+          state.lastPardySkipReason = null;
+          console.log(LOG, "PARDY current question set", normalizedQuestionId);
+        }
+      }
+
+      function applyPardyQuestionStatus(questionStatus) {
+        if (questionStatus == null) return;
+        const normalizedStatus = String(questionStatus).toLowerCase();
+        state.pardyQuestionStatus = normalizedStatus;
+        console.log(LOG, "PARDY question status", normalizedStatus);
+        if (normalizedStatus !== "ask") return;
+        const questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
+        if (!questionId) { logPardySkip("questionStatus ask received before currentQuestionId"); return; }
+        state.pardyAskQuestionId = questionId;
+        state.pardyAskReadyAt = Date.now() + Math.max(0, Number(_pardyDelay) || 0);
+        state.lastPardySkipReason = null;
+        if (state.pardyAskTimerId) clearTimeout(state.pardyAskTimerId);
+        state.pardyAskTimerId = setTimeout(() => {
+          state.pardyAskTimerId = null;
+          answerQuestion();
+        }, Math.max(0, state.pardyAskReadyAt - Date.now()));
       }
 
       function getNextUnansweredQuestion() {
@@ -392,10 +470,22 @@
         const data = packet?.data;
         if (typeof key !== "string") return;
 
+        if (key === "PLAYER_JOINS_STATIC_STATE") {
+          const gameOptions = data?.gameOptions || {};
+          if (isPardySpecialGameType(gameOptions.specialGameType)) setPardyMode(true, "PLAYER_JOINS_STATIC_STATE");
+        }
+
         if (key === "STATE_UPDATE") {
           const type = data?.type;
           if (type === "GAME_QUESTIONS") {
             setQuestions(data?.value);
+            console.log(LOG, "Got game questions", state.questions.length);
+          } else if (type === "PARDY_MODE_STATE") {
+            setPardyMode(true, "PARDY_MODE_STATE");
+            const questionId = readStateUpdateValue(data?.value, "currentQuestionId");
+            if (questionId != null) applyPardyQuestionId(questionId);
+            const questionStatus = readStateUpdateValue(data?.value, "questionStatus");
+            if (questionStatus != null) applyPardyQuestionStatus(questionStatus);
           } else if (type === "PLAYER_QUESTION_LIST") {
             state.questionIdList = data?.value?.questionList || [];
             if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
@@ -417,6 +507,7 @@
           if (questionId && !findQuestionById(questionId)) {
             state.questions.push(question);
             state.questionById.set(questionId, question);
+            state.questionById.set(String(questionId), question);
           }
         }
       }
@@ -447,16 +538,37 @@
           socketManager.sendMessage("MESSAGE_FOR_DEVICE", packet);
           console.log(LOG, "Answered colyseus", state.currentQuestionId);
         } else {
-          const question = getNextUnansweredQuestion();
-          if (!question) return;
-          const rawQuestionId = question?._id || question?.id;
-          const questionId = normalizeQuestionId(rawQuestionId);
-          if (!questionId || state.sentQuestionIds.has(normalizeQuestionId(questionId))) return;
+          let question;
+          let rawQuestionId;
+          let questionId;
+
+          if (state.isPardyMode) {
+            questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
+            if (!questionId) { logPardySkip("no PARDY currentQuestionId STATE_UPDATE yet"); return; }
+            if (state.pardyQuestionStatus !== "ask" || state.pardyAskQuestionId !== questionId) { logPardySkip("waiting for PARDY questionStatus ask"); return; }
+            if (Date.now() < state.pardyAskReadyAt) { logPardySkip("waiting for PARDY answer delay"); return; }
+            if (state.sentQuestionIds.has(questionId) || state.lastPardyAnsweredQuestionId === questionId) return;
+            question = findQuestionById(questionId);
+            if (!question) { logPardySkip(`question ${questionId} is not loaded yet`); return; }
+            rawQuestionId = question?._id || question?.id || state.pardyCurrentQuestionId;
+          } else {
+            question = getNextUnansweredQuestion();
+            if (!question) return;
+            rawQuestionId = question?._id || question?.id;
+            questionId = normalizeQuestionId(rawQuestionId);
+            if (!questionId || state.sentQuestionIds.has(normalizeQuestionId(questionId))) return;
+          }
+
           const answer = parseQuestionAnswer(question);
-          if (!answer) return;
-          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId: rawQuestionId ?? questionId });
+          if (!answer) {
+            if (state.isPardyMode) logPardySkip(`no answer found for question ${questionId}`);
+            return;
+          }
+          socketManager.sendMessage("QUESTION_ANSWERED", { questionId: rawQuestionId ?? questionId, answer });
           state.sentQuestionIds.add(questionId);
-          console.log(LOG, "Answered blueboat", questionId);
+          if (state.isPardyMode) state.lastPardyAnsweredQuestionId = questionId;
+          state.lastPardySkipReason = null;
+          console.log(LOG, state.isPardyMode ? "Answered PARDY blueboat" : "Answered blueboat", questionId);
         }
       }
 
@@ -487,6 +599,7 @@
       let _timerId = null;
       let _running = false;
       let _baseSpeed = 1000;
+      let _pardyDelay = 750;
       const BLUEBOAT_EXTRA_DELAY_MS = 500;
 
       function getCurrentDelay() {
@@ -503,16 +616,26 @@
         }, delay);
       }
 
+      function startAutoAnswer(speed = 1000, source = "module toggle", options = {}) {
+        const cfg = window.__zyroxAutoAnswerConfig || {};
+        _baseSpeed = Math.max(200, Number(speed ?? cfg.speed) || 1000);
+        const pardyDelayNumber = Number(options?.pardyDelay ?? cfg.triviaDelay);
+        _pardyDelay = Math.max(0, Math.min(4000, Number.isFinite(pardyDelayNumber) ? pardyDelayNumber : _pardyDelay));
+        const wasRunning = _running;
+        _running = true;
+        if (_timerId) clearTimeout(_timerId);
+        scheduleNextTick();
+        console.log(LOG, wasRunning ? "Auto-answer timer refreshed by" : "Auto-answer started by", source);
+      }
+
       window.__zyroxAutoAnswer = {
-        start(speed = 1000) {
-          _baseSpeed = Math.max(200, Number(speed) || 1000);
-          _running = true;
-          if (_timerId) clearTimeout(_timerId);
-          scheduleNextTick();
+        start(speed = 1000, options = {}) {
+          startAutoAnswer(speed, "module toggle", options);
         },
         stop() {
           _running = false;
           if (_timerId) { clearTimeout(_timerId); _timerId = null; }
+          if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
         },
       };
       console.log(LOG, "Page context ready, waiting for module toggle.");
@@ -5465,6 +5588,7 @@
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
+                { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 4000, step: 50, default: 750 },
               ],
             },
             {
@@ -7076,6 +7200,8 @@
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
     } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
+    } else if (name === "Auto Answer") {
+      window.__zyroxAutoAnswerConfig = { ...cfg };
     }
     return cfg;
   }
@@ -7119,7 +7245,9 @@
   function startAutoAnswer() {
     const cfg = moduleCfg("Auto Answer");
     const speed = Math.max(200, Number(cfg.speed) || 1000);
-    window.__zyroxAutoAnswer?.start(speed);
+    const triviaDelayNumber = Number(cfg.triviaDelay);
+    const triviaDelay = Math.max(0, Math.min(4000, Number.isFinite(triviaDelayNumber) ? triviaDelayNumber : 750));
+    window.__zyroxAutoAnswer?.start(speed, { pardyDelay: triviaDelay });
   }
 
   function refreshAutoAnswerLoopIfEnabled() {
@@ -8026,10 +8154,10 @@
               const newVal = Number(event.target.value);
               cfg[setting.id] = newVal;
               if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
-              if (moduleName === "Auto Answer" && setting.id === "speed") {
-                // Live-update the interval speed only while Auto Answer is enabled
+              if (moduleName === "Auto Answer" && (setting.id === "speed" || setting.id === "triviaDelay")) {
+                // Live-update answer delays only while Auto Answer is enabled
                 if (state.enabledModules.has("Auto Answer")) {
-                  window.__zyroxAutoAnswer?.start(newVal);
+                  startAutoAnswer();
                 }
               }
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
