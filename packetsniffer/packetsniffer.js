@@ -52,6 +52,7 @@
   const pinnedIds  = new Set();
   const flaggedIds = new Set();
   const wsMap      = new Map();  // ws → { id, url }
+  const resendLogQueue = new WeakMap(); // ws → [{ sourceId }] for sends triggered by Resend
   let wsSeq = 0;
 
   const filter = { query: "", direction: "ALL", type: "", flaggedOnly: false, isRegex: false, re: null };
@@ -112,6 +113,109 @@
     if (ArrayBuffer.isView(input))
       return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
     return null;
+  }
+
+  function msgpackEncode(value) {
+    const bytes = [];
+    const deferred = [];
+    const write = (input) => {
+      const type = typeof input;
+      if (type === "string") {
+        let len = 0;
+        for (let i = 0; i < input.length; i++) {
+          const code = input.charCodeAt(i);
+          if (code < 128) len++;
+          else if (code < 2048) len += 2;
+          else if (code < 55296 || code > 57343) len += 3;
+          else { i++; len += 4; }
+        }
+        if (len < 32) bytes.push(160 | len);
+        else if (len < 256) bytes.push(217, len);
+        else if (len < 65536) bytes.push(218, len >> 8, len & 255);
+        else bytes.push(219, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+        deferred.push({ type: "string", value: input, offset: bytes.length });
+        bytes.length += len;
+        return;
+      }
+      if (type === "number") {
+        if (Number.isInteger(input) && Number.isFinite(input)) {
+          if (input >= 0) {
+            if (input < 128) bytes.push(input);
+            else if (input < 256) bytes.push(204, input);
+            else if (input < 65536) bytes.push(205, input >> 8, input & 255);
+            else if (input < 4294967296) bytes.push(206, input >> 24, (input >> 16) & 255, (input >> 8) & 255, input & 255);
+            else {
+              const hi = Math.floor(input / Math.pow(2, 32));
+              const lo = input >>> 0;
+              bytes.push(207, hi >> 24, (hi >> 16) & 255, (hi >> 8) & 255, hi & 255, lo >> 24, (lo >> 16) & 255, (lo >> 8) & 255, lo & 255);
+            }
+          } else if (input >= -32) bytes.push(input);
+          else if (input >= -128) bytes.push(208, input & 255);
+          else if (input >= -32768) bytes.push(209, (input >> 8) & 255, input & 255);
+          else if (input >= -2147483648) bytes.push(210, (input >> 24) & 255, (input >> 16) & 255, (input >> 8) & 255, input & 255);
+          else {
+            const hi = Math.floor(input / Math.pow(2, 32));
+            const lo = input >>> 0;
+            bytes.push(211, hi >> 24, (hi >> 16) & 255, (hi >> 8) & 255, hi & 255, lo >> 24, (lo >> 16) & 255, (lo >> 8) & 255, lo & 255);
+          }
+          return;
+        }
+        bytes.push(203);
+        deferred.push({ type: "float64", value: input, offset: bytes.length });
+        bytes.length += 8;
+        return;
+      }
+      if (type === "boolean") { bytes.push(input ? 195 : 194); return; }
+      if (input == null) { bytes.push(192); return; }
+      if (Array.isArray(input)) {
+        const len = input.length;
+        if (len < 16) bytes.push(144 | len);
+        else if (len < 65536) bytes.push(220, len >> 8, len & 255);
+        else bytes.push(221, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+        for (const item of input) write(item);
+        return;
+      }
+      if (type === "object") {
+        const keys = Object.keys(input).filter((k) => typeof input[k] !== "function");
+        const len = keys.length;
+        if (len < 16) bytes.push(128 | len);
+        else if (len < 65536) bytes.push(222, len >> 8, len & 255);
+        else bytes.push(223, len >> 24, (len >> 16) & 255, (len >> 8) & 255, len & 255);
+        for (const key of keys) { write(key); write(input[key]); }
+        return;
+      }
+      write(null);
+    };
+
+    write(value);
+    const view = new DataView(new ArrayBuffer(bytes.length));
+    for (let i = 0; i < bytes.length; i++) view.setUint8(i, bytes[i] & 255);
+
+    for (const part of deferred) {
+      if (part.type === "float64") { view.setFloat64(part.offset, part.value); continue; }
+      let offset = part.offset;
+      const value = part.value;
+      for (let i = 0; i < value.length; i++) {
+        let code = value.charCodeAt(i);
+        if (code < 128) view.setUint8(offset++, code);
+        else if (code < 2048) {
+          view.setUint8(offset++, 192 | (code >> 6));
+          view.setUint8(offset++, 128 | (code & 63));
+        } else if (code < 55296 || code > 57343) {
+          view.setUint8(offset++, 224 | (code >> 12));
+          view.setUint8(offset++, 128 | ((code >> 6) & 63));
+          view.setUint8(offset++, 128 | (code & 63));
+        } else {
+          i++;
+          code = 65536 + (((code & 1023) << 10) | (value.charCodeAt(i) & 1023));
+          view.setUint8(offset++, 240 | (code >> 18));
+          view.setUint8(offset++, 128 | ((code >> 12) & 63));
+          view.setUint8(offset++, 128 | ((code >> 6) & 63));
+          view.setUint8(offset++, 128 | (code & 63));
+        }
+      }
+    }
+    return view.buffer;
   }
 
   // ─── MsgPack decoder ────────────────────────────────────────
@@ -517,7 +621,7 @@
 /* packet row — 5-column grid: id | dir | (type+time) | size | actions */
 .zr {
   display:grid;
-  grid-template-columns:38px 26px 1fr auto 44px;
+  grid-template-columns:38px 26px 1fr auto 72px;
   gap:0 6px; align-items:start;
   padding:5px 10px 5px 14px;
   border-bottom:1px solid var(--bdr);
@@ -1008,7 +1112,7 @@
 </div>
 <span class="zr-sz">${fmtBytes(payloadSize(p.parsed))}</span>
 <div class="zr-act">
-  ${p.resent ? '<span class="zr-resent">↩</span>' : ''}
+  ${p.resent ? '<span class="zr-resent">RESEND</span>' : ''}
   <button class="zr-flag${fl ? " on" : ""}" title="Flag (F)">★</button>
 </div>`;
 
@@ -1244,25 +1348,75 @@
     return fullBody(p.parsed);
   }
 
+  function encodeBlueboatPacket(decoded) {
+    const raw = decoded?._raw && typeof decoded._raw === "object"
+      ? decoded._raw
+      : {
+          type: 2,
+          data: [decoded?.eventName, decoded?.payload],
+          options: { compress: true },
+          nsp: "/",
+        };
+    if (!raw?.data) throw new Error("Blueboat resend needs _raw or eventName/payload data.");
+    const encoded = msgpackEncode(raw);
+    const out = new Uint8Array(1 + encoded.byteLength);
+    out[0] = 4;
+    out.set(new Uint8Array(encoded), 1);
+    return out.buffer;
+  }
+
+  function encodeColyseusPacket(decoded) {
+    if (!decoded || !("channel" in decoded)) throw new Error("Colyseus resend needs a channel.");
+    const channel = new Uint8Array(msgpackEncode(decoded.channel));
+    const body = new Uint8Array(msgpackEncode(decoded.body));
+    const out = new Uint8Array(1 + channel.length + body.length);
+    out[0] = COLYSEUS_MSG;
+    out.set(channel, 1);
+    out.set(body, 1 + channel.length);
+    return out.buffer;
+  }
+
+  function encodeStructuredResend(parsed) {
+    if (parsed?.transport === "blueboat") return encodeBlueboatPacket(parsed);
+    if (parsed?.transport === "colyseus") return encodeColyseusPacket(parsed);
+    return null;
+  }
+
   function getResendPayloadFromEditor(p, text) {
     const fallbackRaw = p?.parsed?.raw;
-    const originalEditable = getEditableResendBody(p);
 
-    // If the editor still contains the original wire-format text, send it exactly.
-    // This preserves Engine.IO control packets like PING ("2") instead of sending
-    // a JSON description of the decoded packet.
-    if (text === originalEditable) return text;
-
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === "object" && typeof parsed.raw === "string") {
-        return parsed.raw;
-      }
-      return JSON.stringify(parsed);
-    } catch (_) {
-      if (typeof fallbackRaw === "string") return text;
-      throw new Error("Enter valid JSON for decoded non-text packets.");
+    // Text packets already have an exact wire-format string (Engine.IO / Socket.IO).
+    // If the user leaves or edits that raw text, send that text directly.
+    if (typeof fallbackRaw === "string") {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === "object" && typeof parsed.raw === "string") return parsed.raw;
+      } catch (_) {}
+      return text;
     }
+
+    let parsed;
+    try { parsed = JSON.parse(text); }
+    catch (e) { throw new Error(`JSON: ${e.message}`); }
+
+    const structured = encodeStructuredResend(parsed);
+    if (structured) return structured;
+    return JSON.stringify(parsed);
+  }
+
+  function queueResendLog(ws, sourceId) {
+    const queue = resendLogQueue.get(ws) || [];
+    queue.push({ sourceId });
+    resendLogQueue.set(ws, queue);
+  }
+
+  function takeResendLog(ws) {
+    const queue = resendLogQueue.get(ws);
+    if (!queue?.length) return null;
+    const next = queue.shift();
+    if (queue.length) resendLogQueue.set(ws, queue);
+    else resendLogQueue.delete(ws);
+    return next;
   }
 
   function doResend() {
@@ -1280,9 +1434,9 @@
     }
     const ws = [...wsMap.keys()].find(w => w.readyState === 1);
     if (!ws) { errEl.textContent = "No open WebSocket."; return; }
+    queueResendLog(ws, p.id);
     ws.send(out);
-    logPacket("OUT", ws, out, { resent: true });
-    setStatus(`Sent ${fmtBytes(out.length)}`);
+    setStatus(`Resent #${p.id} · ${fmtBytes(payloadSize(typeof out === "string" ? parseText(out) : parseBinary(out)))}`);
   }
 
   function clearPackets() {
@@ -1328,6 +1482,7 @@
       flagged:   flaggedIds.has(p.id),
       pinned:    pinnedIds.has(p.id),
       resent:    Boolean(p.resent),
+      resendSourceId: p.resendSourceId ?? null,
     }));
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url  = URL.createObjectURL(blob);
@@ -1356,6 +1511,7 @@
       timestamp:  ts,
       ws,
       resent:     Boolean(opts.resent),
+      resendSourceId: opts.resendSourceId ?? null,
       generation: hooksGen,
     };
 
@@ -1437,7 +1593,8 @@
 
       const origSend = ws.send;
       ws.send = function (data) {
-        try { logPacket("OUT", ws, data); } catch (e) { console.warn("[PS] OUT err", e); }
+        const resendMeta = takeResendLog(ws);
+        try { logPacket("OUT", ws, data, resendMeta ? { resent: true, resendSourceId: resendMeta.sourceId } : {}); } catch (e) { console.warn("[PS] OUT err", e); }
         return origSend.call(this, data);
       };
 
