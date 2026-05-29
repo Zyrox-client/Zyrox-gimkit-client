@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      1.2.0
-// @description  Logs websocket packets with a split-pane inspector UI.
+// @version      2.0.0
+// @description  WebSocket packet inspector with split-pane UI, binary decoding, sparkline stats, and keyboard nav.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
@@ -13,1022 +13,1440 @@
 (() => {
   "use strict";
 
-  const PREFIX = "[PacketSniffer]";
-  const MAX_PACKETS = 500;
-  const DEFAULT_WIDTH = 880;
-  const MIN_WIDTH = 320;
-  const COLYSEUS_ROOM_DATA = 13;
-  const STATS_WINDOW_MS = 5000;
+  // ═══════════════════════════════════════════════════════════
+  //  Config
+  // ═══════════════════════════════════════════════════════════
+  const VERSION          = "2.0.0";
+  const MAX_PACKETS      = 1000;
+  const DEFAULT_WIDTH    = 900;
+  const MIN_WIDTH        = 340;
+  const COLYSEUS_MSG     = 13;
+  const SPARKLINE_SLOTS  = 30;
+  const SLOT_MS          = 2000;
+  const FILTER_DEBOUNCE  = 120;
 
-  const ENGINE_PACKET_TYPES = {
-    "0": "OPEN", "1": "CLOSE", "2": "PING", "3": "PONG",
-    "4": "MESSAGE", "5": "UPGRADE", "6": "NOOP",
-  };
-  const SOCKET_PACKET_TYPES = {
-    "0": "CONNECT", "1": "DISCONNECT", "2": "EVENT",
-    "3": "ACK", "4": "ERROR", "5": "BINARY_EVENT", "6": "BINARY_ACK",
-  };
+  const ENGINE_TYPES = { "0":"OPEN","1":"CLOSE","2":"PING","3":"PONG","4":"MESSAGE","5":"UPGRADE","6":"NOOP" };
+  const SOCKET_TYPES = { "0":"CONNECT","1":"DISCONNECT","2":"EVENT","3":"ACK","4":"ERROR","5":"BINARY_EVENT","6":"BINARY_ACK" };
 
-  function tryJson(input) {
-    if (typeof input !== "string") return null;
-    try { return JSON.parse(input); } catch { return null; }
+  // ═══════════════════════════════════════════════════════════
+  //  State
+  // ═══════════════════════════════════════════════════════════
+  let packets = [], packetId = 0, pendingPackets = [];
+  let selectedId = null, selectedForDiffId = null;
+  let sidebarOpen = true, decodeEnabled = true;
+  let isPaused = false, autoScroll = true, showTimestamps = true;
+  let initialized = false, wsHooksInstalled = false;
+  let hooksGen = 0;
+  let currentWidth = DEFAULT_WIDTH;
+  let viewerWidthPx = Math.round(DEFAULT_WIDTH * 0.62);
+  let renderScheduled = false;
+  let filterDebounceTimer = null;
+  let inCount = 0, outCount = 0;
+  let firstPacketTs = null;
+
+  // Sparkline: ring-buffer of per-slot packet counts + byte counts
+  const sparklinePkt  = new Array(SPARKLINE_SLOTS).fill(0);
+  const sparklineB    = new Array(SPARKLINE_SLOTS).fill(0);
+  let slotIdx = 0, lastSlotTs = Date.now();
+
+  const pinnedIds  = new Set();
+  const flaggedIds = new Set();
+  const wsMap      = new Map();  // ws → { id, url }
+  let wsSeq = 0;
+
+  const filter = { query: "", direction: "ALL", type: "", flaggedOnly: false, isRegex: false, re: null };
+
+  // Cached DOM refs
+  let sidebar, listEl, countEl, filterInput, viewerPanel, bodyEl, dividerEl;
+  let statsLineEl, statusEl, pauseBtnEl, autoscrollBtnEl;
+  let clearConfirmEl, resetConfirmEl, sparklineSvgEl, connBadgeEl, contextMenuEl;
+
+  // ═══════════════════════════════════════════════════════════
+  //  Utilities
+  // ═══════════════════════════════════════════════════════════
+
+  const esc  = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const pad  = (n, w = 2) => String(n).padStart(w, "0");
+
+  function fmtTime(ts) {
+    const d = new Date(ts);
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
   }
 
-  function parseTextPacket(text) {
-    if (!text || typeof text !== "string") return { raw: text };
-    const engineType = text[0];
-    const engineName = ENGINE_PACKET_TYPES[engineType] || "UNKNOWN";
-    const payload = text.slice(1);
-    if (engineType !== "4") return { engineType, engineName, payload, raw: text };
-    const socketType = payload[0];
-    const socketName = SOCKET_PACKET_TYPES[socketType] || "UNKNOWN";
-    const body = payload.slice(1);
-    return { engineType, engineName, socketType, socketName, body, json: tryJson(body), raw: text };
+  function fmtRel(ts) {
+    const ms = ts - (firstPacketTs ?? ts);
+    const s  = Math.floor(ms / 1000);
+    const m  = Math.floor(s / 60);
+    return m > 0 ? `+${m}m${pad(s % 60)}s` : `+${s}.${pad(ms % 1000, 3)}s`;
   }
 
-  function toHex(bytes) {
-    const parts = [];
-    for (let i = 0; i < bytes.length; i++) {
-      if (i > 0 && i % 16 === 0) parts.push("\n");
-      else if (i > 0 && i % 8 === 0) parts.push("  ");
-      else if (i > 0) parts.push(" ");
-      parts.push(bytes[i].toString(16).padStart(2, "0"));
+  function fmtBytes(n) {
+    if (n < 1024)    return `${n}B`;
+    if (n < 1048576) return `${(n / 1024).toFixed(1)}KB`;
+    return `${(n / 1048576).toFixed(1)}MB`;
+  }
+
+  function tryJson(s) {
+    if (typeof s !== "string") return null;
+    try { return JSON.parse(s); } catch { return null; }
+  }
+
+  // Proper xxd-style hex dump: offset | hex (8+8) | ASCII
+  function hexDump(buf) {
+    const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    if (!b.length) return "(empty)";
+    const lines = [];
+    for (let i = 0; i < b.length; i += 16) {
+      const row  = b.slice(i, i + 16);
+      const off  = i.toString(16).padStart(5, "0");
+      const hex  = Array.from(row).map((x, j) => (j === 8 ? " " : "") + x.toString(16).padStart(2, "0")).join(" ");
+      const asc  = Array.from(row).map(x => (x >= 32 && x < 127) ? String.fromCharCode(x) : ".").join("");
+      lines.push(`${off}  ${hex.padEnd(50)}  ${esc(asc)}`);
     }
-    return parts.join("");
+    return lines.join("\n");
   }
 
-  function msgpackDecode(buffer, startOffset = 0) {
-    const view = new DataView(buffer);
-    let offset = startOffset;
-
-    const readString = (len) => {
-      let out = "";
-      const end = offset + len;
-      while (offset < end) {
-        const byte = view.getUint8(offset++);
-        if ((byte & 0x80) === 0) out += String.fromCharCode(byte);
-        else if ((byte & 0xe0) === 0xc0) out += String.fromCharCode(((byte & 0x1f) << 6) | (view.getUint8(offset++) & 0x3f));
-        else if ((byte & 0xf0) === 0xe0) out += String.fromCharCode(((byte & 0x0f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f));
-        else {
-          const codePoint = ((byte & 0x07) << 18) | ((view.getUint8(offset++) & 0x3f) << 12) | ((view.getUint8(offset++) & 0x3f) << 6) | (view.getUint8(offset++) & 0x3f);
-          const cp = codePoint - 0x10000;
-          out += String.fromCharCode((cp >> 10) + 0xd800, (cp & 1023) + 0xdc00);
-        }
-      }
-      return out;
-    };
-
-    const read = () => {
-      const token = view.getUint8(offset++);
-      if (token < 0x80) return token;
-      if (token < 0x90) {
-        const size = token & 0x0f;
-        const map = {};
-        for (let i = 0; i < size; i++) map[read()] = read();
-        return map;
-      }
-      if (token < 0xa0) {
-        const size = token & 0x0f;
-        const arr = [];
-        for (let i = 0; i < size; i++) arr.push(read());
-        return arr;
-      }
-      if (token < 0xc0) return readString(token & 0x1f);
-      if (token > 0xdf) return token - 256;
-      switch (token) {
-        case 192: return null;
-        case 194: return false;
-        case 195: return true;
-        case 196: { const n = view.getUint8(offset); offset += 1; const out = buffer.slice(offset, offset + n); offset += n; return out; }
-        case 197: { const n = view.getUint16(offset); offset += 2; const out = buffer.slice(offset, offset + n); offset += n; return out; }
-        case 198: { const n = view.getUint32(offset); offset += 4; const out = buffer.slice(offset, offset + n); offset += n; return out; }
-        case 202: { const v = view.getFloat32(offset); offset += 4; return v; }
-        case 203: { const v = view.getFloat64(offset); offset += 8; return v; }
-        case 204: { const v = view.getUint8(offset); offset += 1; return v; }
-        case 205: { const v = view.getUint16(offset); offset += 2; return v; }
-        case 206: { const v = view.getUint32(offset); offset += 4; return v; }
-        case 208: { const v = view.getInt8(offset); offset += 1; return v; }
-        case 209: { const v = view.getInt16(offset); offset += 2; return v; }
-        case 210: { const v = view.getInt32(offset); offset += 4; return v; }
-        case 217: { const n = view.getUint8(offset); offset += 1; return readString(n); }
-        case 218: { const n = view.getUint16(offset); offset += 2; return readString(n); }
-        case 219: { const n = view.getUint32(offset); offset += 4; return readString(n); }
-        case 220: { const n = view.getUint16(offset); offset += 2; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
-        case 221: { const n = view.getUint32(offset); offset += 4; const arr = []; for (let i = 0; i < n; i++) arr.push(read()); return arr; }
-        case 222: { const n = view.getUint16(offset); offset += 2; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
-        case 223: { const n = view.getUint32(offset); offset += 4; const map = {}; for (let i = 0; i < n; i++) map[read()] = read(); return map; }
-        default: return null;
-      }
-    };
-
-    return { value: read(), offset };
-  }
-
-  function decodeStructuredBinary(buffer) {
-    const bytes = new Uint8Array(buffer);
-    if (bytes[0] === COLYSEUS_ROOM_DATA) {
-      const first = msgpackDecode(buffer, 1);
-      if (!first) return null;
-      let message = null;
-      if (bytes.byteLength > first.offset) message = msgpackDecode(buffer, first.offset)?.value;
-      return { transport: "colyseus", channel: first.value, body: message };
-    }
-    if (bytes.byteLength && bytes[0] === 4) {
-      const decoded = msgpackDecode(buffer.slice(1), 0)?.value;
-      if (!decoded || typeof decoded !== "object") return null;
-      const data = decoded.data;
-      const eventName = Array.isArray(data) ? data[0] : null;
-      const eventPayload = Array.isArray(data) ? data[1] : data;
-      return { transport: "blueboat-binary", eventName, payload: eventPayload, raw: decoded };
-    }
+  // ─── ArrayBuffer coercion ───────────────────────────────────
+  function toAB(input) {
+    if (input instanceof ArrayBuffer) return input;
+    if (ArrayBuffer.isView(input))
+      return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
     return null;
   }
 
-  function parseBinaryPacket(value) {
-    let bytes = null;
-    if (value instanceof ArrayBuffer) bytes = new Uint8Array(value);
-    else if (ArrayBuffer.isView(value)) bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-    else if (value instanceof Blob) {
-      const meta = { kind: "Blob", bytes: value.size, text: null, json: null, hex: null, _loading: true };
-      value.arrayBuffer().then((buf) => {
-        const u8 = new Uint8Array(buf);
-        meta.hex = toHex(u8);
-        if (decodeStructuredBinaryEnabled) {
-          const decoded = decodeStructuredBinary(buf);
-          if (decoded) {
-            meta.protocol = decoded.transport;
-            meta.json = decoded;
-            meta.text = JSON.stringify(decoded);
-          }
+  // ─── MsgPack decoder ────────────────────────────────────────
+  // Always takes a plain ArrayBuffer.
+  function msgpackDecode(ab, startOffset = 0) {
+    if (!(ab instanceof ArrayBuffer)) return null;
+    const v = new DataView(ab);
+    let o = startOffset;
+
+    const rStr = n => {
+      let s = "", end = o + n;
+      while (o < end) {
+        const b = v.getUint8(o++);
+        if (b < 0x80) {
+          s += String.fromCharCode(b);
+        } else if (b < 0xe0) {
+          s += String.fromCharCode(((b & 0x1f) << 6) | (v.getUint8(o++) & 0x3f));
+        } else if (b < 0xf0) {
+          s += String.fromCharCode(((b & 0x0f) << 12) | ((v.getUint8(o++) & 0x3f) << 6) | (v.getUint8(o++) & 0x3f));
+        } else {
+          const cp = ((b & 7) << 18) | ((v.getUint8(o++) & 0x3f) << 12) | ((v.getUint8(o++) & 0x3f) << 6) | (v.getUint8(o++) & 0x3f);
+          const hi = cp - 0x10000;
+          s += String.fromCharCode((hi >> 10) + 0xd800, (hi & 0x3ff) + 0xdc00);
         }
+      }
+      return s;
+    };
+
+    const rBin = n => { const b = ab.slice(o, o + n); o += n; return b; };
+
+    const read = () => {
+      const t = v.getUint8(o++);
+      if (t <= 0x7f) return t;
+      if (t <= 0x8f) { const n = t & 0xf, m = {}; for (let i = 0; i < n; i++) m[read()] = read(); return m; }
+      if (t <= 0x9f) { const n = t & 0xf, a = []; for (let i = 0; i < n; i++) a.push(read()); return a; }
+      if (t <= 0xbf) return rStr(t & 0x1f);
+      if (t >= 0xe0) return t - 256;
+      switch (t) {
+        case 0xc0: return null; case 0xc2: return false; case 0xc3: return true;
+        case 0xc4: return rBin(v.getUint8(o++));
+        case 0xc5: { const n = v.getUint16(o); o += 2; return rBin(n); }
+        case 0xc6: { const n = v.getUint32(o); o += 4; return rBin(n); }
+        case 0xca: { const r = v.getFloat32(o); o += 4; return r; }
+        case 0xcb: { const r = v.getFloat64(o); o += 8; return r; }
+        case 0xcc: return v.getUint8(o++);
+        case 0xcd: { const r = v.getUint16(o); o += 2; return r; }
+        case 0xce: { const r = v.getUint32(o); o += 4; return r; }
+        case 0xd0: return v.getInt8(o++);
+        case 0xd1: { const r = v.getInt16(o); o += 2; return r; }
+        case 0xd2: { const r = v.getInt32(o); o += 4; return r; }
+        case 0xd9: return rStr(v.getUint8(o++));
+        case 0xda: { const n = v.getUint16(o); o += 2; return rStr(n); }
+        case 0xdb: { const n = v.getUint32(o); o += 4; return rStr(n); }
+        case 0xdc: { const n = v.getUint16(o); o += 2; const a = []; for (let i = 0; i < n; i++) a.push(read()); return a; }
+        case 0xdd: { const n = v.getUint32(o); o += 4; const a = []; for (let i = 0; i < n; i++) a.push(read()); return a; }
+        case 0xde: { const n = v.getUint16(o); o += 2; const m = {}; for (let i = 0; i < n; i++) m[read()] = read(); return m; }
+        case 0xdf: { const n = v.getUint32(o); o += 4; const m = {}; for (let i = 0; i < n; i++) m[read()] = read(); return m; }
+        default: return `<ext:0x${t.toString(16)}>`;
+      }
+    };
+
+    try { return { value: read(), offset: o }; } catch { return null; }
+  }
+
+  // ─── Protocol detection ────────────────────────────────────
+  function decodeStructuredBinary(input) {
+    const ab = toAB(input);
+    if (!ab) return null;
+    const b = new Uint8Array(ab);
+    if (!b.length) return null;
+
+    if (b[0] === COLYSEUS_MSG) {
+      const ch = msgpackDecode(ab, 1);
+      if (!ch) return null;
+      const body = (b.byteLength > ch.offset) ? msgpackDecode(ab, ch.offset)?.value ?? null : null;
+      return { transport: "colyseus", channel: ch.value, body };
+    }
+
+    if (b[0] === 4) {
+      const dec = msgpackDecode(ab.slice(1), 0)?.value;
+      if (!dec || typeof dec !== "object") return null;
+      const d = dec.data;
+      return {
+        transport: "blueboat",
+        eventName: Array.isArray(d) ? d[0] : null,
+        payload:   Array.isArray(d) ? d[1] : d,
+        _raw: dec,
+      };
+    }
+
+    return null;
+  }
+
+  // ─── Packet parsers ─────────────────────────────────────────
+  function parseText(text) {
+    if (typeof text !== "string") return { raw: text };
+    const et = text[0];
+    const en = ENGINE_TYPES[et] ?? "UNKNOWN";
+    const payload = text.slice(1);
+    if (et !== "4") return { engineType: et, engineName: en, payload, raw: text };
+    const st = payload[0];
+    const sn = SOCKET_TYPES[st] ?? "UNKNOWN";
+    const body = payload.slice(1);
+    return { engineType: et, engineName: en, socketType: st, socketName: sn, body, json: tryJson(body), raw: text };
+  }
+
+  function parseBinary(value) {
+    // Blob: decode asynchronously, return a mutable meta object
+    if (value instanceof Blob) {
+      const meta = { kind: "Blob", bytes: value.size, text: null, json: null, hex: null, _loading: true };
+      value.arrayBuffer().then(ab => {
+        const u8 = new Uint8Array(ab);
+        meta.hex = hexDump(u8);
+        if (decodeEnabled) {
+          const d = decodeStructuredBinary(ab);
+          if (d) { meta.transport = d.transport; meta.json = d; meta.text = JSON.stringify(d); }
+        }
+        if (!meta.text) { try { meta.text = new TextDecoder("utf-8", { fatal: true }).decode(u8); } catch {} }
+        if (!meta.json && meta.text) meta.json = tryJson(meta.text);
         meta._loading = false;
-        try {
-          if (!meta.text) meta.text = new TextDecoder("utf-8", { fatal: true }).decode(u8);
-          if (!meta.json) meta.json = tryJson(meta.text);
-        } catch { /**/ }
-        const p = packets.find((x) => x.parsed === meta);
-        if (p && p.id === selectedId) openViewer(p);
-        rerenderList();
+        const p = packets.find(x => x.parsed === meta);
+        if (p) { if (p.id === selectedId) openViewer(p); scheduleRender(); }
       }).catch(() => { meta._loading = false; });
       return meta;
     }
 
-    if (!bytes) return { kind: typeof value, bytes: 0, hex: null, text: null, json: null };
+    const ab = toAB(value);
+    if (!ab) return { kind: typeof value, bytes: 0, hex: null, text: null, json: null };
 
-    const hex = toHex(bytes);
-    let text = null;
-    let json = null;
-    let protocol = null;
+    const u8 = new Uint8Array(ab);
+    const hex = hexDump(u8);
+    let text = null, json = null, transport = null;
 
-    if (decodeStructuredBinaryEnabled) {
-      const rawBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-      const decoded = decodeStructuredBinary(rawBuffer);
-      if (decoded) {
-        protocol = decoded.transport;
-        json = decoded;
-        text = JSON.stringify(decoded);
-      }
+    if (decodeEnabled) {
+      const d = decodeStructuredBinary(ab);
+      if (d) { transport = d.transport; json = d; text = JSON.stringify(d); }
     }
+    if (!text) { try { text = new TextDecoder("utf-8", { fatal: true }).decode(u8); } catch {} }
+    if (!json && text) json = tryJson(text);
 
-    try {
-      if (!text) text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      if (!json) json = tryJson(text);
-    } catch { /**/ }
-
-    return { kind: "Binary", bytes: bytes.length, text, json, hex, protocol };
+    return { kind: "Binary", bytes: u8.length, text, json, hex, transport };
   }
 
-  let packets = [];
-  let packetId = 0;
-  let sidebarOpen = true;
-  let decodeStructuredBinaryEnabled = true;
-  let selectedId = null;
-  let currentWidth = DEFAULT_WIDTH;
-  let viewerWidthPercent = 68.75;
-  let initialized = false;
-  let isPaused = false;
-  let autoScroll = true;
-  let pendingPackets = [];
-  let statsCollapsed = false;
-  let pinnedIds = new Set();
-  let flaggedIds = new Set();
-  let selectedForDiffId = null;
-  let hooksGeneration = 0;
-
-  const filterState = { query: "", direction: "ALL", type: "", flaggedOnly: false };
-
-  let sidebar, listEl, countEl, filterInput, viewerPanel, bodyEl, dividerEl;
-  let statsLineEl, statusEl, pauseBtnEl, autoscrollBtnEl, clearConfirmEl, resetConfirmEl, legendEl, contextMenuEl;
-  let wsHooksInstalled = false;
-
-  const statsTimestamps = [];
-  const websocketRegistry = new Set();
-
-  function applyPageMargin() {
-    document.body.style.marginRight = sidebarOpen ? `${currentWidth}px` : "0";
-    document.body.style.transition = "margin-right 0.25s cubic-bezier(0.4,0,0.2,1)";
-    document.body.style.boxSizing = "border-box";
+  // ─── Type tag ───────────────────────────────────────────────
+  function typeTag(parsed) {
+    if (parsed._tag) return parsed._tag;
+    let t;
+    const tr = parsed.transport;
+    if      (tr === "colyseus") t = `colyseus/${String(parsed.channel ?? "?")}`;
+    else if (tr === "blueboat") t = parsed.eventName ? `blueboat/${parsed.eventName}` : "blueboat";
+    else if (parsed.socketName && parsed.socketName !== "UNKNOWN") t = parsed.socketName;
+    else if (parsed.engineName && parsed.engineName !== "UNKNOWN") t = parsed.engineName;
+    else if (parsed.kind)  t = `${parsed.kind}:${parsed.bytes ?? "?"}B`;
+    else t = "RAW";
+    return (parsed._tag = t);
   }
 
-  function injectStyles() {
-    const style = document.createElement("style");
-    style.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
-      #zyrox-sidebar { position: fixed; top: 0; right: 0; width: ${DEFAULT_WIDTH}px; height: 100vh; z-index: 999999; display: flex; flex-direction: column; font-family: 'JetBrains Mono', monospace; font-size: 15px; background: rgba(8,10,18,0.98); border-left: 1px solid rgba(0,255,136,0.15); box-shadow: -12px 0 50px rgba(0,0,0,0.7), inset 1px 0 0 rgba(0,255,136,0.05); transform: translateX(0); transition: transform 0.25s cubic-bezier(0.4,0,0.2,1); backdrop-filter: blur(12px); user-select: none; }
-      #zyrox-sidebar.hidden { transform: translateX(100%); }
-      #zyrox-resize-handle { position: absolute; left: 0; top: 0; width: 5px; height: 100%; cursor: ew-resize; z-index: 10; }
-      #zyrox-resize-handle:hover, #zyrox-resize-handle.dragging { background: rgba(0,255,136,0.18); }
-      #zyrox-header { position: relative; display:flex; align-items:center; gap:8px; padding: 12px 16px 12px 20px; background: rgba(0,255,136,0.04); border-bottom: 1px solid rgba(0,255,136,0.12); flex-shrink:0; }
-      #zyrox-title { color:#00ff88; font-weight:700; font-size:18px; letter-spacing:0.1em; text-transform:uppercase; flex:1; }
-      #zyrox-count { color: rgba(0,255,136,0.5); font-size: 12px; }
-      .zyrox-toolbar-btn { background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.12); color:rgba(255,255,255,0.45); border-radius:4px; cursor:pointer; font-family:inherit; font-size:13px; padding: 4px 8px; }
-      .zyrox-toolbar-btn:hover { color:#fff; border-color: rgba(255,255,255,0.3); }
-      .zyrox-toolbar-btn.active { border-color: rgba(0,255,136,0.5); color:#00ff88; background: rgba(0,255,136,0.1); }
-      #zyrox-controls { display:flex; gap:6px; padding:8px 14px; border-bottom:1px solid rgba(255,255,255,0.06); align-items:center; flex-shrink:0; }
-      #zyrox-filter-input { flex:1; min-width: 0; background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:4px; color:#ddd; font-family:inherit; font-size:13px; padding: 6px 8px; }
-      #zyrox-stats { border-bottom:1px solid rgba(255,255,255,0.06); padding: 4px 14px; font-size:12px; color:rgba(255,255,255,0.5); }
-      #zyrox-stats-line { display:flex; gap:16px; white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
-      #zyrox-stats.expanded #zyrox-stats-line { white-space: normal; }
-      #zyrox-inline-confirm { display:none; padding: 4px 14px; font-size:12px; color: rgba(255,160,160,0.85); border-bottom:1px solid rgba(255,100,100,0.18); }
-      #zyrox-reset-confirm { display:none; padding: 4px 14px; font-size:12px; color: rgba(255,210,130,0.85); border-bottom:1px solid rgba(255,180,0,0.2); }
-      .zyrox-confirm-action { color:#fff; cursor:pointer; margin-left:8px; }
-      #zyrox-body { flex:1; display:flex; min-height:0; overflow:hidden; }
-      #zyrox-list-panel { flex:1; display:flex; flex-direction:column; min-width:180px; overflow:hidden; }
-      #zyrox-list-meta { display:flex; justify-content: space-between; align-items:center; padding: 6px 12px; font-size:12px; color: rgba(255,255,255,0.35); border-bottom:1px solid rgba(255,255,255,0.05); }
-      #zyrox-list { flex:1; overflow-y:auto; }
-      .zyrox-section-title { padding: 5px 10px; font-size:11px; letter-spacing:0.1em; color: rgba(255,255,255,0.35); border-top:1px solid rgba(255,255,255,0.1); border-bottom:1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.02); }
-      .zyrox-packet { display:grid; grid-template-columns: 26px 42px minmax(110px,1fr) auto auto auto; gap:0 8px; align-items:center; padding: 6px 10px; border-bottom:1px solid rgba(255,255,255,0.03); cursor:pointer; min-width:0; }
-      .zyrox-packet:hover { background: rgba(255,255,255,0.04); }
-      .zyrox-packet.active { border-left:2px solid rgba(0,255,136,0.6); padding-left:8px; }
-      .zyrox-pin-btn,.zyrox-flag-btn { opacity:0; background:none; border:none; cursor:pointer; color: rgba(255,255,255,0.4); }
-      .zyrox-packet:hover .zyrox-pin-btn,.zyrox-packet:hover .zyrox-flag-btn,.zyrox-pin-btn.active,.zyrox-flag-btn.active { opacity:1; }
-      .zyrox-dir-badge.IN { color:#00c8ff; font-weight:700; }
-      .zyrox-dir-badge.OUT { color:#ffb400; font-weight:700; }
-      .zyrox-type-tag { color: rgba(255,255,255,0.75); white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
-      .zyrox-len-tag, .zyrox-time, .zyrox-badge { font-size:11px; color: rgba(255,255,255,0.45); }
-      .zyrox-badge { color:#ffcf75; border:1px solid rgba(255,207,117,0.3); border-radius:3px; padding:1px 3px; }
-      #zyrox-divider { width:6px; display:none; cursor: col-resize; background: rgba(255,255,255,0.07); }
-      #zyrox-divider.visible { display:block; }
-      #zyrox-viewer { width:${viewerWidthPercent}%; display:none; flex-direction:column; min-width:220px; overflow:hidden; background: rgba(4,6,14,0.65); }
-      #zyrox-viewer.visible { display:flex; }
-      #zyrox-viewer-header { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid rgba(255,255,255,0.08); }
-      #zyrox-viewer-meta { flex:1; min-width:0; }
-      #zyrox-viewer-type { color: rgba(255,255,255,0.8); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      #zyrox-viewer-time { color: rgba(255,255,255,0.35); font-size:11px; }
-      .zyrox-viewer-action { background: rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.45); border-radius:3px; cursor:pointer; font-family:inherit; font-size:12px; padding:3px 8px; }
-      .zyrox-viewer-action:hover { color:#fff; }
-      #zyrox-viewer-tabs { display:flex; border-bottom:1px solid rgba(255,255,255,0.06); }
-      .zyrox-tab { background:none; border:none; color: rgba(255,255,255,0.45); font-family:inherit; padding: 6px 10px; cursor:pointer; border-bottom:2px solid transparent; }
-      .zyrox-tab.active { color:#00ff88; border-bottom-color:#00ff88; }
-      #zyrox-viewer-body { flex:1; position:relative; min-height:0; }
-      .zyrox-view-pane { position:absolute; inset:0; overflow:auto; display:none; padding:10px; user-select:text; }
-      .zyrox-view-pane.active { display:block; }
-      .zyrox-json-node { font-size:13px; line-height:1.5; color:rgba(255,255,255,0.85); }
-      .zyrox-json-row { white-space:pre; }
-      .zyrox-json-toggle { display:inline-block; width:14px; cursor:pointer; color: rgba(255,255,255,0.5); }
-      .zyrox-json-key { color:#7ec8e3; }
-      .zyrox-json-str { color:#a8e6a3; cursor:text; }
-      .zyrox-json-num { color:#f0c080; }
-      .zyrox-json-bool { color:#e07070; }
-      .zyrox-json-null { color:rgba(255,255,255,0.35); }
-      .zyrox-json-children { margin-left: 18px; }
-      .zyrox-hidden { display:none; }
-      #zyrox-resend-editor { width:100%; min-height:180px; background: rgba(0,0,0,0.35); color:#e4e4e4; border:1px solid rgba(255,255,255,0.15); border-radius:4px; font-family:inherit; font-size:12px; padding:8px; }
-      #zyrox-resend-error { color:#ff8888; font-size:12px; margin-top:6px; }
-      #zyrox-context-menu { position:fixed; display:none; background:rgba(8,10,18,0.98); border:1px solid rgba(255,255,255,0.14); z-index:1000001; padding:4px; border-radius:4px; }
-      .zyrox-context-item { padding: 4px 8px; color: rgba(255,255,255,0.75); cursor:pointer; font-size:12px; }
-      .zyrox-context-item:hover { background: rgba(255,255,255,0.08); }
-      #zyrox-diff-pane pre { margin:0; font-size:12px; white-space:pre-wrap; color: rgba(255,255,255,0.86); }
-      #zyrox-legend { display:none; padding: 4px 12px; font-size:11px; color: rgba(255,255,255,0.45); border-bottom:1px solid rgba(255,255,255,0.05); }
-
-      #zyrox-list, .zyrox-view-pane, #zyrox-resend-editor {
-        scrollbar-width: thin;
-        scrollbar-color: rgba(0,255,136,0.55) rgba(0,0,0,0.8);
-      }
-      #zyrox-list::-webkit-scrollbar, .zyrox-view-pane::-webkit-scrollbar, #zyrox-resend-editor::-webkit-scrollbar {
-        width: 4px;
-        height: 4px;
-      }
-      #zyrox-list::-webkit-scrollbar-track, .zyrox-view-pane::-webkit-scrollbar-track, #zyrox-resend-editor::-webkit-scrollbar-track {
-        background: rgba(0,0,0,0.85);
-      }
-      #zyrox-list::-webkit-scrollbar-thumb, .zyrox-view-pane::-webkit-scrollbar-thumb, #zyrox-resend-editor::-webkit-scrollbar-thumb {
-        background: linear-gradient(180deg, rgba(0,255,136,0.7), rgba(0,190,102,0.7));
-        border-radius: 6px;
-        border: 1px solid rgba(0,0,0,0.65);
-      }
-      #zyrox-list::-webkit-scrollbar-thumb:hover, .zyrox-view-pane::-webkit-scrollbar-thumb:hover, #zyrox-resend-editor::-webkit-scrollbar-thumb:hover {
-        background: linear-gradient(180deg, rgba(0,255,136,0.95), rgba(0,220,120,0.95));
-      }
-      #zyrox-footer { padding: 6px 12px; font-size:11px; color: rgba(255,255,255,0.35); border-top:1px solid rgba(255,255,255,0.06); }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function buildSidebar() {
-    sidebar = document.createElement("div");
-    sidebar.id = "zyrox-sidebar";
-    sidebar.innerHTML = `
-      <div id="zyrox-resize-handle"></div>
-      <div id="zyrox-header">
-        <span id="zyrox-title">PacketSniffer</span>
-        <span id="zyrox-count">Showing 0 / 0</span>
-        <button id="zyrox-pause-btn" class="zyrox-toolbar-btn">⏸</button>
-        <button id="zyrox-autoscroll-btn" class="zyrox-toolbar-btn active">🔓</button>
-        <button id="zyrox-export-btn" class="zyrox-toolbar-btn">⬇</button>
-        <button id="zyrox-legend-btn" class="zyrox-toolbar-btn">Legend</button>
-        <button id="zyrox-stats-toggle" class="zyrox-toolbar-btn">Stats</button>
-        <button id="zyrox-reset-btn" class="zyrox-toolbar-btn">Reset</button>
-        <button id="zyrox-toggle-btn" class="zyrox-toolbar-btn">HIDE</button>
-      </div>
-      <div id="zyrox-controls">
-        <input id="zyrox-filter-input" type="text" placeholder="filter… dir:in type:xyz flagged:true" />
-        <button class="zyrox-toolbar-btn active" data-dir="ALL">ALL</button>
-        <button class="zyrox-toolbar-btn" data-dir="IN">IN</button>
-        <button class="zyrox-toolbar-btn" data-dir="OUT">OUT</button>
-        <button id="zyrox-decode-btn" class="zyrox-toolbar-btn active">DEC</button>
-        <button id="zyrox-flag-filter-btn" class="zyrox-toolbar-btn">⭐</button>
-        <button id="zyrox-clear-btn" class="zyrox-toolbar-btn">🗑</button>
-      </div>
-      <div id="zyrox-stats"><div id="zyrox-stats-line"></div></div>
-      <div id="zyrox-inline-confirm">Clear? <span class="zyrox-confirm-action" data-clear="yes">Yes</span> / <span class="zyrox-confirm-action" data-clear="no">No</span></div>
-      <div id="zyrox-reset-confirm">Reset session? <span class="zyrox-confirm-action" data-reset="yes">Yes</span> / <span class="zyrox-confirm-action" data-reset="no">No</span></div>
-      <div id="zyrox-legend">IN = blue tint, OUT = amber tint, unique type hue stripe on each row.</div>
-      <div id="zyrox-body">
-        <div id="zyrox-list-panel">
-          <div id="zyrox-list-meta"><span id="zyrox-filter-summary">Showing 0 / 0 packets</span><span id="zyrox-pause-note"></span></div>
-          <div id="zyrox-list"></div>
-        </div>
-        <div id="zyrox-divider"></div>
-        <div id="zyrox-viewer">
-          <div id="zyrox-viewer-header">
-            <span id="zyrox-viewer-dir">IN</span>
-            <div id="zyrox-viewer-meta"><div id="zyrox-viewer-type">—</div><div id="zyrox-viewer-time">—</div></div>
-            <button id="zyrox-copy-btn" class="zyrox-viewer-action">Copy JSON</button>
-            <button id="zyrox-edit-btn" class="zyrox-viewer-action">Edit & Resend</button>
-            <button id="zyrox-viewer-close" class="zyrox-viewer-action">✕</button>
-          </div>
-          <div id="zyrox-viewer-tabs">
-            <button class="zyrox-tab active" data-tab="json">JSON</button>
-            <button class="zyrox-tab" data-tab="raw">RAW</button>
-            <button class="zyrox-tab" data-tab="hex">HEX</button>
-            <button class="zyrox-tab" data-tab="diff">DIFF</button>
-            <button class="zyrox-tab" data-tab="resend">RESEND</button>
-          </div>
-          <div id="zyrox-viewer-body">
-            <div class="zyrox-view-pane active" id="zyrox-json-pane"><div id="zyrox-json-tree"></div></div>
-            <div class="zyrox-view-pane" id="zyrox-raw-pane"><pre id="zyrox-raw-content"></pre></div>
-            <div class="zyrox-view-pane" id="zyrox-hex-pane"><div id="zyrox-hex-content"></div></div>
-            <div class="zyrox-view-pane" id="zyrox-diff-pane"><pre id="zyrox-diff-content">Pin first packet, then right-click another packet and choose "Diff with selected".</pre></div>
-            <div class="zyrox-view-pane" id="zyrox-resend-pane">
-              <textarea id="zyrox-resend-editor" spellcheck="false"></textarea>
-              <div><button id="zyrox-send-btn" class="zyrox-viewer-action">Send</button></div>
-              <div id="zyrox-resend-error"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div id="zyrox-footer"><span id="zyrox-status">CONNECTED</span></div>
-    `;
-    document.body.appendChild(sidebar);
-
-    listEl = sidebar.querySelector("#zyrox-list");
-    countEl = sidebar.querySelector("#zyrox-count");
-    filterInput = sidebar.querySelector("#zyrox-filter-input");
-    viewerPanel = sidebar.querySelector("#zyrox-viewer");
-    bodyEl = sidebar.querySelector("#zyrox-body");
-    dividerEl = sidebar.querySelector("#zyrox-divider");
-    statsLineEl = sidebar.querySelector("#zyrox-stats-line");
-    statusEl = sidebar.querySelector("#zyrox-status");
-    pauseBtnEl = sidebar.querySelector("#zyrox-pause-btn");
-    autoscrollBtnEl = sidebar.querySelector("#zyrox-autoscroll-btn");
-    clearConfirmEl = sidebar.querySelector("#zyrox-inline-confirm");
-    resetConfirmEl = sidebar.querySelector("#zyrox-reset-confirm");
-    legendEl = sidebar.querySelector("#zyrox-legend");
-
-    contextMenuEl = document.createElement("div");
-    contextMenuEl.id = "zyrox-context-menu";
-    contextMenuEl.innerHTML = `<div class="zyrox-context-item" data-action="pin">Pin for diff</div><div class="zyrox-context-item" data-action="diff">Diff with selected</div>`;
-    document.body.appendChild(contextMenuEl);
-
-    wireEvents();
-    applyPageMargin();
-    setInterval(updateStats, 1000);
-  }
-
-  function wireEvents() {
-    sidebar.querySelector("#zyrox-toggle-btn").addEventListener("click", toggleSidebar);
-    pauseBtnEl.addEventListener("click", togglePause);
-    autoscrollBtnEl.addEventListener("click", () => setAutoScroll(!autoScroll, true));
-
-    listEl.addEventListener("scroll", () => {
-      if (!autoScroll) return;
-      const nearBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 12;
-      if (!nearBottom) setAutoScroll(false, false);
-    });
-
-    filterInput.addEventListener("input", () => {
-      parseFilter(filterInput.value);
-      rerenderList();
-    });
-
-    sidebar.querySelectorAll("[data-dir]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        filterState.direction = btn.dataset.dir;
-        sidebar.querySelectorAll("[data-dir]").forEach((b) => b.classList.toggle("active", b.dataset.dir === filterState.direction));
-        rerenderList();
-      });
-    });
-
-    sidebar.querySelector("#zyrox-decode-btn").addEventListener("click", (e) => {
-      decodeStructuredBinaryEnabled = !decodeStructuredBinaryEnabled;
-      e.currentTarget.classList.toggle("active", decodeStructuredBinaryEnabled);
-    });
-
-    sidebar.querySelector("#zyrox-flag-filter-btn").addEventListener("click", (e) => {
-      filterState.flaggedOnly = !filterState.flaggedOnly;
-      e.currentTarget.classList.toggle("active", filterState.flaggedOnly);
-      rerenderList();
-    });
-
-    sidebar.querySelector("#zyrox-clear-btn").addEventListener("click", () => {
-      resetConfirmEl.style.display = "none";
-      clearConfirmEl.style.display = "block";
-      clearConfirmEl.firstChild.textContent = `Clear ${packets.length} packets? `;
-    });
-
-    clearConfirmEl.addEventListener("click", (e) => {
-      const choice = e.target.dataset.clear;
-      if (!choice) return;
-      clearConfirmEl.style.display = "none";
-      if (choice === "yes") clearPackets();
-    });
-
-    sidebar.querySelector("#zyrox-reset-btn").addEventListener("click", () => {
-      clearConfirmEl.style.display = "none";
-      resetConfirmEl.style.display = "block";
-    });
-
-    resetConfirmEl.addEventListener("click", (e) => {
-      const choice = e.target.dataset.reset;
-      if (!choice) return;
-      resetConfirmEl.style.display = "none";
-      if (choice === "yes") resetSession();
-    });
-
-    sidebar.querySelector("#zyrox-export-btn").addEventListener("click", exportPackets);
-
-    sidebar.querySelector("#zyrox-legend-btn").addEventListener("click", () => {
-      legendEl.style.display = legendEl.style.display === "block" ? "none" : "block";
-    });
-
-    sidebar.querySelector("#zyrox-stats-toggle").addEventListener("click", () => {
-      statsCollapsed = !statsCollapsed;
-      sidebar.querySelector("#zyrox-stats").classList.toggle("expanded", !statsCollapsed);
-      updateStats();
-    });
-
-    sidebar.querySelector("#zyrox-viewer-close").addEventListener("click", closeViewer);
-
-    sidebar.querySelectorAll(".zyrox-tab").forEach((tab) => tab.addEventListener("click", () => setActiveTab(tab.dataset.tab)));
-
-    sidebar.querySelector("#zyrox-copy-btn").addEventListener("click", async () => {
-      const p = packets.find((x) => x.id === selectedId);
-      if (!p) return;
-      await navigator.clipboard.writeText(JSON.stringify(p.parsed.json ?? p.parsed, null, 2));
-    });
-
-    sidebar.querySelector("#zyrox-edit-btn").addEventListener("click", () => {
-      setActiveTab("resend");
-      const p = packets.find((x) => x.id === selectedId);
-      if (!p) return;
-      sidebar.querySelector("#zyrox-resend-editor").value = JSON.stringify(p.parsed.json ?? p.parsed, null, 2);
-      sidebar.querySelector("#zyrox-resend-error").textContent = "";
-    });
-
-    sidebar.querySelector("#zyrox-send-btn").addEventListener("click", resendEdited);
-
-    contextMenuEl.addEventListener("click", (e) => {
-      const action = e.target.dataset.action;
-      const rowId = Number(contextMenuEl.dataset.rowId);
-      const p = packets.find((x) => x.id === rowId);
-      if (!p) return;
-      if (action === "pin") {
-        selectedForDiffId = p.id;
-        statusEl.textContent = `Pinned packet #${p.id} for diff`;
-      } else if (action === "diff") {
-        showDiff(selectedForDiffId, p.id);
-      }
-      contextMenuEl.style.display = "none";
-    });
-
-    document.addEventListener("click", () => { contextMenuEl.style.display = "none"; });
-
-    const handle = sidebar.querySelector("#zyrox-resize-handle");
-    let resizing = false; let resizeStartX = 0; let resizeStartW = 0;
-    handle.addEventListener("mousedown", (e) => {
-      resizing = true;
-      resizeStartX = e.clientX;
-      resizeStartW = sidebar.offsetWidth;
-      handle.classList.add("dragging");
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
-      e.preventDefault();
-    });
-    document.addEventListener("mousemove", (e) => {
-      if (!resizing) return;
-      const delta = resizeStartX - e.clientX;
-      const newW = Math.min(Math.max(resizeStartW + delta, MIN_WIDTH), window.innerWidth * 0.95);
-      currentWidth = newW;
-      sidebar.style.width = `${newW}px`;
-      if (sidebarOpen) document.body.style.marginRight = `${newW}px`;
-    });
-    document.addEventListener("mouseup", () => {
-      if (!resizing) return;
-      resizing = false;
-      handle.classList.remove("dragging");
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    });
-
-    let splitDragging = false;
-    dividerEl.addEventListener("mousedown", (e) => {
-      splitDragging = viewerPanel.classList.contains("visible");
-      if (!splitDragging) return;
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      e.preventDefault();
-    });
-    document.addEventListener("mousemove", (e) => {
-      if (!splitDragging) return;
-      const rect = bodyEl.getBoundingClientRect();
-      const viewerPx = rect.right - e.clientX;
-      const clampedPx = Math.max(220, Math.min(rect.width - 180, viewerPx));
-      viewerWidthPercent = (clampedPx / rect.width) * 100;
-      viewerPanel.style.width = `${viewerWidthPercent}%`;
-    });
-    document.addEventListener("mouseup", () => {
-      if (!splitDragging) return;
-      splitDragging = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    });
-
-    window.addEventListener("keydown", (e) => {
-      if ((e.key === "k" || e.key === "K") && !["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName)) toggleSidebar();
-    });
-  }
-
-  function setActiveTab(name) {
-    sidebar.querySelectorAll(".zyrox-tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
-    sidebar.querySelectorAll(".zyrox-view-pane").forEach((p) => p.classList.toggle("active", p.id === `zyrox-${name}-pane`));
-  }
-
-  function pad(n, len = 2) { return String(n).padStart(len, "0"); }
-  function formatTime(ts) { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`; }
-  function getTypeTag(parsed) {
-    if (parsed.protocol === "colyseus") return "COLYSEUS";
-    if (parsed.protocol === "blueboat-binary") return "BLUEBOAT_BINARY";
-    if (parsed.transport === "colyseus") return `COLYSEUS/${String(parsed.channel)}`;
-    if (parsed.transport === "blueboat-binary") return parsed.eventName ? `BLUEBOAT_BINARY/${parsed.eventName}` : "BLUEBOAT_BINARY";
-    if (parsed.socketName) return parsed.socketName;
-    if (parsed.engineName) return parsed.engineName;
-    if (parsed.kind) return `${parsed.kind} (${parsed.bytes ?? "?"} B)`;
-    return "RAW";
-  }
-  function getFullBody(parsed) {
-    if (parsed.json) { try { return JSON.stringify(parsed.json, null, 2); } catch { /**/ } }
-    if (parsed.text) return parsed.text;
-    if (parsed.raw != null) return String(parsed.raw);
-    if (parsed.hex) return parsed.hex;
+  function fullBody(parsed) {
+    if (parsed.json) { try { return JSON.stringify(parsed.json, null, 2); } catch {} }
+    if (parsed.text)         return parsed.text;
+    if (parsed.raw != null)  return String(parsed.raw);
+    if (parsed.hex)          return parsed.hex;
     return JSON.stringify(parsed, null, 2);
   }
-  function getPacketLength(parsed) { return getFullBody(parsed).length; }
-  function escapeHtml(str) { return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
+  function payloadSize(parsed) {
+    if (parsed._sz != null)  return parsed._sz;
+    if (parsed.bytes != null) return (parsed._sz = parsed.bytes);
+    return (parsed._sz = fullBody(parsed).length);
+  }
+
+  // Deterministic hue from type name — djb2 variant, skips 0-30° (red)
+  function hueForType(type) {
+    let h = 5381;
+    for (let i = 0; i < type.length; i++) h = ((h << 5) ^ h ^ type.charCodeAt(i)) >>> 0;
+    return (h % 300 + 30) % 360;
+  }
+
+  // ─── Filter ─────────────────────────────────────────────────
   function parseFilter(raw) {
-    filterState.query = "";
-    filterState.type = "";
-    filterState.flaggedOnly = false;
+    filter.query = ""; filter.type = ""; filter.flaggedOnly = false;
+    filter.isRegex = false; filter.re = null;
+
     const tokens = raw.trim().split(/\s+/).filter(Boolean);
     const free = [];
     for (const t of tokens) {
       if (t.startsWith("dir:")) {
         const v = t.slice(4).toUpperCase();
-        if (v === "IN" || v === "OUT") filterState.direction = v;
-      } else if (t.startsWith("type:")) filterState.type = t.slice(5).toLowerCase();
-      else if (t === "flagged:true" || t === "flagged") filterState.flaggedOnly = true;
-      else free.push(t);
+        if ("ALL IN OUT".includes(v)) filter.direction = v;
+      } else if (t.startsWith("type:")) {
+        filter.type = t.slice(5).toLowerCase();
+      } else if (t === "flagged" || t === "flagged:true") {
+        filter.flaggedOnly = true;
+      } else {
+        free.push(t);
+      }
     }
-    filterState.query = free.join(" ").toLowerCase();
-    const flagBtn = sidebar?.querySelector("#zyrox-flag-filter-btn");
-    if (flagBtn) flagBtn.classList.toggle("active", filterState.flaggedOnly);
+
+    const q = free.join(" ");
+    if (q.startsWith("/") && q.length > 1) {
+      const li = q.lastIndexOf("/");
+      const [pat, flags] = li > 0 ? [q.slice(1, li), q.slice(li + 1)] : [q.slice(1), "i"];
+      try { filter.re = new RegExp(pat, flags); filter.isRegex = true; filter.query = q; }
+      catch  { filter.query = q.toLowerCase(); }
+    } else {
+      filter.query = q.toLowerCase();
+    }
   }
 
-  function packetMatchesFilter(p) {
-    if (filterState.direction !== "ALL" && p.direction !== filterState.direction) return false;
-    if (filterState.flaggedOnly && !flaggedIds.has(p.id)) return false;
-    const type = getTypeTag(p.parsed).toLowerCase();
-    if (filterState.type && !type.includes(filterState.type)) return false;
-    if (filterState.query) {
-      const hay = `${type} ${getFullBody(p.parsed).toLowerCase()}`;
-      if (!hay.includes(filterState.query)) return false;
+  function matchesFilter(p) {
+    if (filter.direction !== "ALL" && p.direction !== filter.direction) return false;
+    if (filter.flaggedOnly && !flaggedIds.has(p.id)) return false;
+    const tag = typeTag(p.parsed).toLowerCase();
+    if (filter.type && !tag.includes(filter.type)) return false;
+    if (filter.query) {
+      const hay = `${tag} ${fullBody(p.parsed)}`;
+      return filter.isRegex ? filter.re.test(hay) : hay.toLowerCase().includes(filter.query);
     }
     return true;
   }
 
-  function colorForType(type) {
-    let h = 0;
-    for (let i = 0; i < type.length; i++) h = (h * 31 + type.charCodeAt(i)) % 360;
-    return `hsl(${h} 70% 55%)`;
-  }
+  const filteredPackets = () => packets.filter(matchesFilter);
 
-  function createPacketEl(p) {
-    const el = document.createElement("div");
-    const type = getTypeTag(p.parsed);
-    const tint = p.direction === "IN" ? "rgba(0,200,255,0.07)" : "rgba(255,180,0,0.07)";
-    el.className = "zyrox-packet";
-    el.dataset.id = p.id;
-    el.style.backgroundImage = `linear-gradient(90deg, ${colorForType(type)}33 0 3px, transparent 3px), linear-gradient(90deg, ${tint}, ${tint})`;
-    if (p.id === selectedId) el.classList.add("active");
-    el.innerHTML = `
-      <button class="zyrox-pin-btn ${p.pinned ? "active" : ""}" title="Pin">📌</button>
-      <span class="zyrox-dir-badge ${p.direction}">${p.direction}</span>
-      <span class="zyrox-type-tag">${escapeHtml(type)}</span>
-      ${p.resent ? '<span class="zyrox-badge">resent</span>' : '<span></span>'}
-      <span class="zyrox-len-tag">${getPacketLength(p.parsed)}</span>
-      <button class="zyrox-flag-btn ${p.flagged ? "active" : ""}" title="Flag">⭐</button>
-    `;
+  // ═══════════════════════════════════════════════════════════
+  //  Stats & Sparkline
+  // ═══════════════════════════════════════════════════════════
 
-    el.querySelector(".zyrox-pin-btn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      p.pinned = !p.pinned;
-      if (p.pinned) pinnedIds.add(p.id); else pinnedIds.delete(p.id);
-      rerenderList();
-    });
-
-    el.querySelector(".zyrox-flag-btn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      p.flagged = !p.flagged;
-      if (p.flagged) flaggedIds.add(p.id); else flaggedIds.delete(p.id);
-      rerenderList();
-    });
-
-    el.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      contextMenuEl.dataset.rowId = String(p.id);
-      contextMenuEl.style.left = `${e.clientX}px`;
-      contextMenuEl.style.top = `${e.clientY}px`;
-      contextMenuEl.style.display = "block";
-    });
-
-    el.addEventListener("click", () => {
-      if (selectedId === p.id) return closeViewer();
-      openViewer(p);
-    });
-    return el;
-  }
-
-  function renderListSection(rows, title) {
-    const frag = document.createDocumentFragment();
-    if (!rows.length) return frag;
-    if (title) {
-      const section = document.createElement("div");
-      section.className = "zyrox-section-title";
-      section.textContent = title;
-      frag.appendChild(section);
+  function advanceSlot() {
+    const now = Date.now();
+    const n = Math.min(SPARKLINE_SLOTS, Math.floor((now - lastSlotTs) / SLOT_MS));
+    for (let i = 0; i < n; i++) {
+      slotIdx = (slotIdx + 1) % SPARKLINE_SLOTS;
+      sparklinePkt[slotIdx] = 0;
+      sparklineB[slotIdx]   = 0;
     }
-    rows.forEach((p) => frag.appendChild(createPacketEl(p)));
-    return frag;
+    if (n > 0) lastSlotTs = now - (now - lastSlotTs) % SLOT_MS;
   }
 
-  function rerenderList() {
-    listEl.innerHTML = "";
-    const filtered = packets.filter(packetMatchesFilter);
-    const pinned = filtered.filter((p) => p.pinned);
-    const regular = filtered.filter((p) => !p.pinned);
-    listEl.appendChild(renderListSection(pinned, pinned.length ? "Pinned" : ""));
-    listEl.appendChild(renderListSection(regular, pinned.length ? "Packets" : ""));
-    sidebar.querySelector("#zyrox-filter-summary").textContent = `Showing ${filtered.length} / ${packets.length} packets`;
-    countEl.textContent = `Showing ${filtered.length} / ${packets.length}`;
-    if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+  function recordInSlot(bytes) {
+    advanceSlot();
+    sparklinePkt[slotIdx]++;
+    sparklineB[slotIdx] += bytes;
+  }
+
+  function recentPPS() {
+    advanceSlot();
+    let t = 0;
+    for (let i = 0; i < 5; i++) t += sparklinePkt[(slotIdx - i + SPARKLINE_SLOTS) % SPARKLINE_SLOTS];
+    return (t / (5 * SLOT_MS / 1000)).toFixed(1);
+  }
+
+  function recentBPS() {
+    advanceSlot();
+    let t = 0;
+    for (let i = 0; i < 5; i++) t += sparklineB[(slotIdx - i + SPARKLINE_SLOTS) % SPARKLINE_SLOTS];
+    return t / (5 * SLOT_MS / 1000);
+  }
+
+  function sparklineData() {
+    advanceSlot();
+    const d = [];
+    for (let i = 1; i <= SPARKLINE_SLOTS; i++) d.push(sparklinePkt[(slotIdx + i) % SPARKLINE_SLOTS]);
+    return d;
+  }
+
+  function renderSparkline() {
+    if (!sparklineSvgEl) return;
+    const d = sparklineData();
+    const max = Math.max(...d, 1);
+    const W = 90, H = 20, bw = W / SPARKLINE_SLOTS;
+    sparklineSvgEl.innerHTML = d.map((v, i) => {
+      const h = Math.max(1, (v / max) * H);
+      const a = (0.2 + (v / max) * 0.8).toFixed(2);
+      return `<rect x="${(i * bw).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${(bw - 0.5).toFixed(1)}" height="${h.toFixed(1)}" rx="0.5" fill="var(--acc)" opacity="${a}"/>`;
+    }).join("");
   }
 
   function updateStats() {
-    const now = Date.now();
-    while (statsTimestamps.length && now - statsTimestamps[0] > STATS_WINDOW_MS) statsTimestamps.shift();
-    const inCount = packets.filter((p) => p.direction === "IN").length;
-    const outCount = packets.filter((p) => p.direction === "OUT").length;
-    const pps = (statsTimestamps.length / (STATS_WINDOW_MS / 1000)).toFixed(2);
-    statsLineEl.textContent = `Total ${packets.length} | ${pps} pkt/s (5s) | In: ${inCount} / Out: ${outCount}`;
-    if (statsCollapsed) statsLineEl.textContent = `Total ${packets.length} | ${pps} pkt/s`;
-  }
-
-  function togglePause() {
-    isPaused = !isPaused;
-    pauseBtnEl.textContent = isPaused ? "▶" : "⏸";
-    pauseBtnEl.classList.toggle("active", isPaused);
-    sidebar.querySelector("#zyrox-pause-note").textContent = isPaused ? `Paused (${pendingPackets.length} buffered)` : "";
-    if (!isPaused) flushPausedPackets();
-  }
-
-  function flushPausedPackets() {
-    if (!pendingPackets.length) return;
-    pendingPackets.forEach((p) => packets.push(p));
-    pendingPackets = [];
-    trimPackets();
-    rerenderList();
-    updateStats();
-    if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
-    sidebar.querySelector("#zyrox-pause-note").textContent = "";
-  }
-
-  function setAutoScroll(enabled, snap) {
-    autoScroll = enabled;
-    autoscrollBtnEl.textContent = autoScroll ? "🔓" : "🔒";
-    autoscrollBtnEl.classList.toggle("active", autoScroll);
-    if (enabled && snap) listEl.scrollTop = listEl.scrollHeight;
-  }
-
-  function trimPackets() {
-    if (packets.length > MAX_PACKETS * 2) packets = packets.slice(-MAX_PACKETS);
-  }
-
-  function clearPackets() {
-    packets = packets.filter((p) => p.pinned);
-    flaggedIds.clear();
-    packets.forEach((p) => { p.flagged = false; });
-    pendingPackets = [];
-    selectedId = null;
-    closeViewer();
-    rerenderList();
-    updateStats();
-  }
-
-  function resetSession() {
-    packets = packets.filter((p) => p.pinned).map((p) => ({ ...p, flagged: false }));
-    pendingPackets = [];
-    flaggedIds.clear();
-    statsTimestamps.length = 0;
-    selectedForDiffId = null;
-    filterState.query = "";
-    filterState.type = "";
-    filterState.direction = "ALL";
-    filterState.flaggedOnly = false;
-    filterInput.value = "";
-    sidebar.querySelectorAll("[data-dir]").forEach((b) => b.classList.toggle("active", b.dataset.dir === "ALL"));
-    hooksGeneration += 1;
-    statusEl.textContent = `SESSION RESET @ ${formatTime(Date.now())}`;
-    closeViewer();
-    rerenderList();
-    updateStats();
-  }
-
-  function exportPackets() {
-    const filtered = packets.filter(packetMatchesFilter).map((p, index) => ({
-      index,
-      id: p.id,
-      direction: p.direction,
-      timestamp: new Date(p.timestamp).toISOString(),
-      type: getTypeTag(p.parsed),
-      payload: p.parsed.json ?? p.parsed,
-      flagged: Boolean(p.flagged),
-      pinned: Boolean(p.pinned),
-      resent: Boolean(p.resent),
-    }));
-    const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `packets-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function renderJsonTree(value, depth = 0, key = null, isRootArray = false) {
-    const node = document.createElement("div");
-    node.className = "zyrox-json-node";
-
-    const row = document.createElement("div");
-    row.className = "zyrox-json-row";
-    node.appendChild(row);
-
-    const keyPrefix = key !== null ? `"${key}": ` : "";
-
-    if (value === null || typeof value !== "object") {
-      let cls = "zyrox-json-null";
-      if (typeof value === "string") cls = "zyrox-json-str";
-      if (typeof value === "number") cls = "zyrox-json-num";
-      if (typeof value === "boolean") cls = "zyrox-json-bool";
-      row.innerHTML = `${" ".repeat(depth * 2)}${keyPrefix}<span class="${cls}">${escapeHtml(JSON.stringify(value))}</span>`;
-      return node;
+    if (!statsLineEl) return;
+    const open = [...wsMap.keys()].filter(ws => ws.readyState === 1).length;
+    statsLineEl.textContent = `${packets.length} packets  ·  ${recentPPS()} pkt/s  ·  ${fmtBytes(recentBPS())}/s  ·  ↓${inCount}  ↑${outCount}`;
+    if (connBadgeEl) {
+      connBadgeEl.textContent = `${open} conn`;
+      connBadgeEl.style.color = open ? "var(--grn)" : "var(--txt2)";
     }
+    renderSparkline();
+  }
 
-    const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
-    const open = Array.isArray(value) ? "[" : "{";
-    const close = Array.isArray(value) ? "]" : "}";
-    const collapseDefault = Array.isArray(value) && value.length > 20 && !isRootArray;
+  // ═══════════════════════════════════════════════════════════
+  //  Styles
+  // ═══════════════════════════════════════════════════════════
 
-    const toggle = document.createElement("span");
-    toggle.className = "zyrox-json-toggle";
-    toggle.textContent = collapseDefault ? "▶" : "▼";
-    row.appendChild(document.createTextNode(" ".repeat(depth * 2)));
-    row.appendChild(toggle);
-    row.appendChild(document.createTextNode(`${keyPrefix}${open} ${entries.length}`));
+  function injectStyles() {
+    const s = document.createElement("style");
+    s.textContent = `
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-    const children = document.createElement("div");
-    children.className = "zyrox-json-children";
-    if (collapseDefault) children.classList.add("zyrox-hidden");
+#zs {
+  --bg:    #111215;
+  --bg1:   #16181d;
+  --bg2:   #1c1e25;
+  --bg3:   #23252e;
+  --bdr:   #252830;
+  --bdr2:  #30333f;
+  --txt:   #bfc2cc;
+  --txt2:  #676c7a;
+  --txt3:  #383c47;
+  --acc:   #6a8fff;
+  --acc-b: rgba(106,143,255,.28);
+  --acc-g: rgba(106,143,255,.07);
+  --in:    #42baff;
+  --in-b:  rgba(66,186,255,.22);
+  --in-g:  rgba(66,186,255,.07);
+  --out:   #ff9f4a;
+  --out-b: rgba(255,159,74,.22);
+  --out-g: rgba(255,159,74,.07);
+  --grn:   #50d48a;
+  --red:   #f06060;
+  --yel:   #ffc94a;
+  --r:     4px;
+  --font:  'JetBrains Mono','Cascadia Code',ui-monospace,monospace;
+}
+#zs *, #zs *::before, #zs *::after { box-sizing:border-box; margin:0; padding:0; }
+#zs {
+  position:fixed; top:0; right:0; width:${DEFAULT_WIDTH}px; height:100vh;
+  z-index:999999; display:flex; flex-direction:column;
+  font-family:var(--font); font-size:12px;
+  background:var(--bg); border-left:1px solid var(--bdr2);
+  box-shadow:-6px 0 28px rgba(0,0,0,.55);
+  transform:translateX(0); transition:transform .2s ease;
+  user-select:none; color:var(--txt);
+}
+#zs.hidden { transform:translateX(100%); }
 
-    const visibleEntries = collapseDefault ? entries.slice(0, 20) : entries;
-    visibleEntries.forEach(([k, v]) => children.appendChild(renderJsonTree(v, depth + 1, k)));
-    if (collapseDefault && entries.length > 20) {
-      const showAll = document.createElement("div");
-      showAll.className = "zyrox-json-row";
-      showAll.innerHTML = `${" ".repeat((depth + 1) * 2)}<span class="zyrox-json-str" style="cursor:pointer">show all (${entries.length})</span>`;
-      showAll.addEventListener("click", () => {
-        children.innerHTML = "";
-        entries.forEach(([k, v]) => children.appendChild(renderJsonTree(v, depth + 1, k)));
-      });
-      children.appendChild(showAll);
-    }
+/* resize handle */
+#zs-rh { position:absolute; left:0; top:0; width:4px; height:100%; cursor:ew-resize; z-index:10; }
+#zs-rh:hover, #zs-rh.drag { background:var(--acc-b); }
 
-    const end = document.createElement("div");
-    end.className = "zyrox-json-row";
-    end.textContent = `${" ".repeat(depth * 2)}${close}`;
-    children.appendChild(end);
+/* header */
+#zs-hdr {
+  display:flex; align-items:center; gap:5px; flex-wrap:nowrap;
+  padding:9px 12px; background:var(--bg1);
+  border-bottom:1px solid var(--bdr); flex-shrink:0;
+}
+#zs-logo { color:var(--acc); font-weight:700; font-size:13px; letter-spacing:.04em; flex-shrink:0; margin-right:2px; }
+#zs-spark { flex-shrink:0; display:block; opacity:.85; }
+#zs-sp { flex:1; }
+#zs-conn { font-size:10px; color:var(--txt2); border:1px solid var(--bdr2); border-radius:var(--r); padding:2px 6px; flex-shrink:0; }
 
-    toggle.addEventListener("click", () => {
-      children.classList.toggle("zyrox-hidden");
-      toggle.textContent = children.classList.contains("zyrox-hidden") ? "▶" : "▼";
+/* generic button */
+.zb {
+  background:transparent; border:1px solid var(--bdr2); color:var(--txt2);
+  border-radius:var(--r); cursor:pointer; font-family:var(--font); font-size:11px;
+  padding:3px 7px; white-space:nowrap; flex-shrink:0;
+  transition:color .1s, border-color .1s, background .1s;
+}
+.zb:hover { color:var(--txt); }
+.zb.on { color:var(--acc); border-color:var(--acc-b); background:var(--acc-g); }
+.zb.warn { color:var(--red); border-color:rgba(240,96,96,.25); }
+.zb.warn:hover { background:rgba(240,96,96,.07); }
+
+/* controls bar */
+#zs-ctl {
+  display:flex; gap:5px; padding:7px 10px; align-items:center;
+  border-bottom:1px solid var(--bdr); background:var(--bg1); flex-shrink:0;
+}
+#zs-fi {
+  flex:1; min-width:0;
+  background:var(--bg2); border:1px solid var(--bdr2); border-radius:var(--r);
+  color:var(--txt); font-family:var(--font); font-size:12px; padding:4px 8px; outline:none;
+}
+#zs-fi:focus { border-color:var(--acc-b); background:var(--bg3); }
+#zs-fi.rx { border-color:rgba(255,201,74,.35); color:var(--yel); }
+#zs-fi::placeholder { color:var(--txt3); }
+
+/* stats bar */
+#zs-st { padding:5px 10px; font-size:11px; color:var(--txt2); border-bottom:1px solid var(--bdr); flex-shrink:0; }
+
+/* confirm banners */
+.zs-cfm { display:none; padding:5px 10px; font-size:11px; border-bottom:1px solid var(--bdr); flex-shrink:0; }
+#zs-clr-cfm { color:var(--red); background:rgba(240,96,96,.04); }
+#zs-rst-cfm { color:var(--yel); background:rgba(255,201,74,.04); }
+.zy { color:var(--txt); cursor:pointer; margin-left:6px; text-decoration:underline; }
+.zn { color:var(--txt2); cursor:pointer; margin-left:5px; text-decoration:underline; }
+
+/* body */
+#zs-body { flex:1; display:flex; min-height:0; overflow:hidden; }
+#zs-lp { flex:1; display:flex; flex-direction:column; min-width:200px; overflow:hidden; }
+#zs-lm {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:4px 10px; font-size:10px; color:var(--txt2);
+  border-bottom:1px solid var(--bdr); background:var(--bg1); flex-shrink:0;
+}
+#zs-list { flex:1; overflow-y:auto; overflow-x:hidden; }
+
+/* section label */
+.zs-sec {
+  padding:3px 10px; font-size:9px; color:var(--txt3);
+  letter-spacing:.1em; text-transform:uppercase;
+  border-bottom:1px solid var(--bdr); background:var(--bg1);
+}
+
+/* packet row — 5-column grid: id | dir | (type+time) | size | actions */
+.zr {
+  display:grid;
+  grid-template-columns:38px 26px 1fr auto 44px;
+  gap:0 6px; align-items:start;
+  padding:5px 10px 5px 14px;
+  border-bottom:1px solid var(--bdr);
+  cursor:pointer; min-width:0; position:relative;
+}
+.zr::before { content:''; position:absolute; left:0; top:0; bottom:0; width:2px; }
+.zr.zin::before  { background:var(--in);  opacity:.4; }
+.zr.zout::before { background:var(--out); opacity:.4; }
+.zr:hover         { background:var(--bg2); }
+.zr:hover::before { opacity:1; }
+.zr.sel           { background:var(--bg2); }
+.zr.sel::before   { opacity:1; }
+
+.zr-id  { font-size:10px; color:var(--txt3); text-align:right; padding-top:2px; }
+.zr-dir { font-size:9px; font-weight:700; padding:2px 3px; border-radius:2px; text-align:center; margin-top:2px; }
+.zr-dir.zin  { color:var(--in);  background:var(--in-g);  }
+.zr-dir.zout { color:var(--out); background:var(--out-g); }
+.zr-cell { min-width:0; }
+.zr-type { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.zr-ts   { font-size:9px; color:var(--txt3); margin-top:2px; display:none; }
+#zs-list.tson .zr-ts { display:block; }
+.zr-sz  { font-size:10px; color:var(--txt3); text-align:right; padding-top:2px; white-space:nowrap; }
+.zr-act { display:flex; align-items:center; justify-content:flex-end; gap:3px; padding-top:1px; opacity:0; }
+.zr:hover .zr-act   { opacity:1; }
+.zr.has-flag .zr-act { opacity:1; }
+.zr-flag { background:none; border:none; cursor:pointer; color:var(--txt3); font-size:13px; line-height:1; padding:0 1px; }
+.zr-flag:hover, .zr-flag.on { color:var(--yel); }
+.zr-resent { font-size:9px; color:var(--yel); border:1px solid rgba(255,201,74,.3); border-radius:2px; padding:1px 3px; }
+
+/* divider */
+#zs-dvd { width:4px; flex-shrink:0; cursor:col-resize; display:none; background:var(--bdr); }
+#zs-dvd.vis { display:block; }
+#zs-dvd:hover, #zs-dvd.drag { background:var(--acc-b); }
+
+/* viewer panel */
+#zs-vwr { display:none; flex-direction:column; min-width:240px; overflow:hidden; }
+#zs-vwr.vis { display:flex; }
+#zs-vhdr {
+  display:flex; gap:5px; align-items:flex-start;
+  padding:8px 10px; border-bottom:1px solid var(--bdr); background:var(--bg1); flex-shrink:0;
+}
+.zs-vdir { font-size:9px; font-weight:700; padding:2px 5px; border-radius:2px; flex-shrink:0; margin-top:2px; }
+.zs-vdir.zin  { color:var(--in);  background:var(--in-g);  border:1px solid var(--in-b);  }
+.zs-vdir.zout { color:var(--out); background:var(--out-g); border:1px solid var(--out-b); }
+#zs-vmeta { flex:1; min-width:0; }
+#zs-vtype { color:var(--txt); font-size:12px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#zs-vinfo { color:var(--txt2); font-size:10px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.zvb {
+  background:transparent; border:1px solid var(--bdr2); color:var(--txt2);
+  border-radius:var(--r); cursor:pointer; font-family:var(--font); font-size:11px;
+  padding:2px 7px; flex-shrink:0;
+}
+.zvb:hover { color:var(--txt); }
+
+/* viewer tabs */
+#zs-tabs { display:flex; align-items:stretch; border-bottom:1px solid var(--bdr); background:var(--bg1); flex-shrink:0; }
+.zt-sep { flex:1; }
+.zt {
+  background:none; border:none; border-bottom:2px solid transparent;
+  color:var(--txt2); font-family:var(--font); font-size:11px;
+  padding:6px 14px; cursor:pointer; margin-bottom:-1px; white-space:nowrap;
+}
+.zt:hover { color:var(--txt); }
+.zt.on { color:var(--acc); border-bottom-color:var(--acc); }
+
+/* viewer panes */
+#zs-vbody { flex:1; position:relative; min-height:0; }
+.zp { position:absolute; inset:0; overflow:auto; display:none; padding:10px; user-select:text; }
+.zp.on { display:block; }
+
+/* JSON tree */
+.zjn  { font-size:12px; line-height:1.65; }
+.zjr  { white-space:pre; }
+.zjt  { display:inline-block; width:12px; cursor:pointer; color:var(--txt3); }
+.zjt:hover { color:var(--txt2); }
+.zjk  { color:#7eb3f5; }
+.zjs  { color:#92c97a; }
+.zjn2 { color:#d09e5a; }
+.zjb  { color:#d06060; }
+.zjz  { color:var(--txt3); }
+.zjch { margin-left:16px; }
+.zjhide { display:none; }
+.zjsm { cursor:pointer; color:var(--txt3); font-size:10px; }
+.zjsm:hover { color:var(--txt2); text-decoration:underline; }
+
+/* raw / hex panes */
+#zs-raw, #zs-hex { white-space:pre; font-size:11px; color:var(--txt); line-height:1.7; font-family:var(--font); }
+
+/* diff pane */
+#zs-diff { white-space:pre-wrap; font-size:11px; line-height:1.7; font-family:var(--font); }
+.da { color:var(--grn); background:rgba(80,212,138,.06); display:block; }
+.dd { color:var(--red); background:rgba(240,96,96,.06); display:block; }
+.ds { color:var(--txt2); display:block; }
+
+/* resend pane */
+#zs-re-ed {
+  width:100%; background:var(--bg2); color:var(--txt);
+  border:1px solid var(--bdr2); border-radius:var(--r);
+  font-family:var(--font); font-size:12px; padding:8px; outline:none;
+  resize:none; flex:1; min-height:0;
+}
+#zs-re-ed:focus { border-color:var(--acc-b); }
+#zs-re-ft { display:flex; align-items:center; gap:8px; flex-shrink:0; margin-top:6px; }
+#zs-re-err { font-size:11px; color:var(--red); flex:1; }
+#zs-resend-p.on { display:flex !important; flex-direction:column; }
+
+/* context menu */
+#zs-ctx {
+  position:fixed; display:none;
+  background:var(--bg2); border:1px solid var(--bdr2);
+  z-index:1000001; padding:3px; border-radius:var(--r);
+  box-shadow:0 6px 24px rgba(0,0,0,.55); min-width:170px;
+}
+.zci { padding:5px 10px; color:var(--txt2); cursor:pointer; font-size:12px; border-radius:2px; }
+.zci:hover { background:var(--bg3); color:var(--txt); }
+.zcs { height:1px; background:var(--bdr); margin:3px 6px; }
+
+/* footer */
+#zs-ftr {
+  padding:4px 10px; font-size:10px; color:var(--txt3);
+  border-top:1px solid var(--bdr); display:flex; justify-content:space-between;
+  background:var(--bg1); flex-shrink:0;
+}
+
+/* scrollbars */
+#zs-list, .zp, #zs-re-ed { scrollbar-width:thin; scrollbar-color:var(--bdr2) transparent; }
+#zs-list::-webkit-scrollbar, .zp::-webkit-scrollbar, #zs-re-ed::-webkit-scrollbar { width:5px; height:5px; }
+#zs-list::-webkit-scrollbar-thumb, .zp::-webkit-scrollbar-thumb, #zs-re-ed::-webkit-scrollbar-thumb {
+  background:var(--bdr2); border-radius:3px;
+}
+#zs-list::-webkit-scrollbar-thumb:hover, .zp::-webkit-scrollbar-thumb:hover { background:var(--txt3); }
+    `.trim();
+    document.head.appendChild(s);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Build sidebar DOM
+  // ═══════════════════════════════════════════════════════════
+
+  function buildSidebar() {
+    sidebar = document.createElement("div");
+    sidebar.id = "zs";
+    sidebar.innerHTML = `
+<div id="zs-rh"></div>
+<div id="zs-hdr">
+  <span id="zs-logo">PacketSniff</span>
+  <svg id="zs-spark" width="90" height="20" viewBox="0 0 90 20"></svg>
+  <div id="zs-sp"></div>
+  <span id="zs-conn">0 conn</span>
+  <button id="zs-pause" class="zb">Pause</button>
+  <button id="zs-as"    class="zb on" title="Auto-scroll">↓</button>
+  <button id="zs-ts"    class="zb on" title="Timestamps">⏱</button>
+  <button id="zs-dec"   class="zb on" title="Decode binary">Decode</button>
+  <button id="zs-exp"   class="zb">Export</button>
+  <button id="zs-rst"   class="zb">Reset</button>
+  <button id="zs-tog"   class="zb">Hide [K]</button>
+</div>
+<div id="zs-ctl">
+  <input id="zs-fi" type="text"
+    placeholder="filter…  dir:in  type:event  /regex/  flagged"
+    autocomplete="off" spellcheck="false" />
+  <button class="zb zd on" data-dir="ALL">All</button>
+  <button class="zb zd"    data-dir="IN">In</button>
+  <button class="zb zd"    data-dir="OUT">Out</button>
+  <button id="zs-ff"  class="zb" title="Flagged only">★</button>
+  <button id="zs-clr" class="zb warn">Clear</button>
+</div>
+<div id="zs-st"><span id="zs-stl">ready</span></div>
+<div id="zs-clr-cfm" class="zs-cfm"></div>
+<div id="zs-rst-cfm" class="zs-cfm"></div>
+<div id="zs-body">
+  <div id="zs-lp">
+    <div id="zs-lm">
+      <span id="zs-cnt">0 / 0</span>
+      <span id="zs-pn"></span>
+    </div>
+    <div id="zs-list"></div>
+  </div>
+  <div id="zs-dvd"></div>
+  <div id="zs-vwr">
+    <div id="zs-vhdr">
+      <span id="zs-vd" class="zs-vdir zin">IN</span>
+      <div id="zs-vmeta">
+        <div id="zs-vtype">—</div>
+        <div id="zs-vinfo">—</div>
+      </div>
+      <button id="zs-cpj" class="zvb">Copy JSON</button>
+      <button id="zs-cpc" class="zvb">Copy Code</button>
+      <button id="zs-edt" class="zvb">Edit + Send</button>
+      <button id="zs-vcl" class="zvb">✕</button>
+    </div>
+    <div id="zs-tabs">
+      <button class="zt on" data-tab="json">JSON</button>
+      <button class="zt"    data-tab="raw">Raw</button>
+      <button class="zt"    data-tab="hex">Hex</button>
+      <div class="zt-sep"></div>
+      <button class="zt"    data-tab="diff">Diff</button>
+      <button class="zt"    data-tab="resend">Resend</button>
+    </div>
+    <div id="zs-vbody">
+      <div class="zp on" id="zs-json-p"><div id="zs-jtree"></div></div>
+      <div class="zp"    id="zs-raw-p"><pre id="zs-raw"></pre></div>
+      <div class="zp"    id="zs-hex-p"><pre id="zs-hex"></pre></div>
+      <div class="zp"    id="zs-diff-p">
+        <pre id="zs-diff">Right-click a packet → "Pin for diff", right-click another → "Diff with pinned".</pre>
+      </div>
+      <div class="zp"    id="zs-resend-p">
+        <textarea id="zs-re-ed" spellcheck="false"></textarea>
+        <div id="zs-re-ft">
+          <button id="zs-send" class="zvb">Send</button>
+          <span   id="zs-re-err"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="zs-ftr">
+  <span id="zs-status">ready</span>
+  <span>v${VERSION} · [K] toggle · [/] filter · [↑↓] navigate · [Esc] close</span>
+</div>`;
+    document.body.appendChild(sidebar);
+
+    // Cache refs
+    listEl          = sidebar.querySelector("#zs-list");
+    countEl         = sidebar.querySelector("#zs-cnt");
+    filterInput     = sidebar.querySelector("#zs-fi");
+    viewerPanel     = sidebar.querySelector("#zs-vwr");
+    bodyEl          = sidebar.querySelector("#zs-body");
+    dividerEl       = sidebar.querySelector("#zs-dvd");
+    statsLineEl     = sidebar.querySelector("#zs-stl");
+    statusEl        = sidebar.querySelector("#zs-status");
+    pauseBtnEl      = sidebar.querySelector("#zs-pause");
+    autoscrollBtnEl = sidebar.querySelector("#zs-as");
+    clearConfirmEl  = sidebar.querySelector("#zs-clr-cfm");
+    resetConfirmEl  = sidebar.querySelector("#zs-rst-cfm");
+    sparklineSvgEl  = sidebar.querySelector("#zs-spark");
+    connBadgeEl     = sidebar.querySelector("#zs-conn");
+
+    // Context menu (appended to body so it can overflow the sidebar)
+    contextMenuEl = document.createElement("div");
+    contextMenuEl.id = "zs-ctx";
+    contextMenuEl.innerHTML = `
+<div class="zci" data-a="pin">📌  Pin for diff</div>
+<div class="zci" data-a="pin-top">⬆  Toggle pin to top</div>
+<div class="zci" data-a="diff">⬛  Diff with pinned</div>
+<div class="zcs"></div>
+<div class="zci" data-a="flag">★  Toggle flag</div>
+<div class="zci" data-a="copy">⎘  Copy JSON</div>
+<div class="zci" data-a="code">⌗  Copy as code</div>`;
+    document.body.appendChild(contextMenuEl);
+
+    // Start with timestamps enabled
+    listEl.classList.add("tson");
+
+    wireEvents();
+    applyMargin();
+    setInterval(updateStats, 800);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Wire events
+  // ═══════════════════════════════════════════════════════════
+
+  function wireEvents() {
+    // ── Header ──────────────────────────────────────────────
+    sidebar.querySelector("#zs-tog").addEventListener("click", toggleSidebar);
+    pauseBtnEl.addEventListener("click", togglePause);
+    autoscrollBtnEl.addEventListener("click", () => setAS(!autoScroll, true));
+
+    sidebar.querySelector("#zs-ts").addEventListener("click", e => {
+      showTimestamps = !showTimestamps;
+      e.currentTarget.classList.toggle("on", showTimestamps);
+      listEl.classList.toggle("tson", showTimestamps);
     });
 
-    node.appendChild(children);
-    return node;
+    sidebar.querySelector("#zs-dec").addEventListener("click", e => {
+      decodeEnabled = !decodeEnabled;
+      e.currentTarget.classList.toggle("on", decodeEnabled);
+    });
+
+    sidebar.querySelector("#zs-exp").addEventListener("click", exportPackets);
+
+    sidebar.querySelector("#zs-rst").addEventListener("click", () => {
+      clearConfirmEl.style.display = "none";
+      resetConfirmEl.style.display = "block";
+      resetConfirmEl.innerHTML = `Reset session? <span class="zy" data-r="yes">Yes</span><span class="zn" data-r="no">No</span>`;
+    });
+
+    // ── Controls ────────────────────────────────────────────
+    filterInput.addEventListener("input", () => {
+      clearTimeout(filterDebounceTimer);
+      filterDebounceTimer = setTimeout(() => {
+        parseFilter(filterInput.value);
+        filterInput.classList.toggle("rx", filter.isRegex);
+        scheduleRender();
+      }, FILTER_DEBOUNCE);
+    });
+
+    sidebar.querySelectorAll(".zd").forEach(b => b.addEventListener("click", () => {
+      filter.direction = b.dataset.dir;
+      sidebar.querySelectorAll(".zd").forEach(x => x.classList.toggle("on", x.dataset.dir === filter.direction));
+      scheduleRender();
+    }));
+
+    sidebar.querySelector("#zs-ff").addEventListener("click", e => {
+      filter.flaggedOnly = !filter.flaggedOnly;
+      e.currentTarget.classList.toggle("on", filter.flaggedOnly);
+      scheduleRender();
+    });
+
+    sidebar.querySelector("#zs-clr").addEventListener("click", () => {
+      resetConfirmEl.style.display = "none";
+      clearConfirmEl.style.display = "block";
+      clearConfirmEl.innerHTML = `Clear ${packets.length} packets? <span class="zy" data-c="yes">Yes</span><span class="zn" data-c="no">No</span>`;
+    });
+
+    clearConfirmEl.addEventListener("click", e => {
+      const c = e.target.dataset.c;
+      if (!c) return;
+      clearConfirmEl.style.display = "none";
+      if (c === "yes") clearPackets();
+    });
+
+    resetConfirmEl.addEventListener("click", e => {
+      const r = e.target.dataset.r;
+      if (!r) return;
+      resetConfirmEl.style.display = "none";
+      if (r === "yes") resetSession();
+    });
+
+    // Detect manual scroll to disable auto-scroll
+    listEl.addEventListener("scroll", () => {
+      if (!autoScroll) return;
+      if (listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight > 40) setAS(false, false);
+    });
+
+    // ── Viewer ──────────────────────────────────────────────
+    sidebar.querySelector("#zs-vcl").addEventListener("click", closeViewer);
+
+    sidebar.querySelectorAll(".zt").forEach(t =>
+      t.addEventListener("click", () => setTab(t.dataset.tab)));
+
+    sidebar.querySelector("#zs-cpj").addEventListener("click", async () => {
+      const p = packets.find(x => x.id === selectedId);
+      if (p) { await navigator.clipboard.writeText(JSON.stringify(p.parsed.json ?? p.parsed, null, 2)); setStatus("Copied to clipboard"); }
+    });
+
+    sidebar.querySelector("#zs-cpc").addEventListener("click", () => {
+      const p = packets.find(x => x.id === selectedId);
+      if (p) copyAsCode(p);
+    });
+
+    sidebar.querySelector("#zs-edt").addEventListener("click", () => {
+      setTab("resend");
+      const p = packets.find(x => x.id === selectedId);
+      if (!p) return;
+      // Use the raw wire-format string so the resend reconstructs the exact original payload.
+      // For binary packets fall back to the decoded body (best we can do without re-encoding).
+      const raw = p.parsed.raw;
+      sidebar.querySelector("#zs-re-ed").value = raw != null ? String(raw) : fullBody(p.parsed);
+      sidebar.querySelector("#zs-re-err").textContent = "";
+    });
+
+    sidebar.querySelector("#zs-send").addEventListener("click", doResend);
+
+    // ── Context menu ────────────────────────────────────────
+    contextMenuEl.addEventListener("click", async e => {
+      const a  = e.target.closest("[data-a]")?.dataset.a;
+      const id = Number(contextMenuEl.dataset.id);
+      const p  = packets.find(x => x.id === id);
+      contextMenuEl.style.display = "none";
+      if (!p || !a) return;
+      if      (a === "pin")     { selectedForDiffId = p.id; setStatus(`Pinned #${p.id} for diff`); }
+      else if (a === "pin-top") { pinnedIds.has(p.id) ? pinnedIds.delete(p.id) : pinnedIds.add(p.id); scheduleRender(); }
+      else if (a === "diff")    { showDiff(selectedForDiffId, p.id); }
+      else if (a === "flag")    { toggleFlag(p); }
+      else if (a === "copy")    { await navigator.clipboard.writeText(JSON.stringify(p.parsed.json ?? p.parsed, null, 2)); setStatus("Copied"); }
+      else if (a === "code")    { copyAsCode(p); }
+    });
+
+    document.addEventListener("click", e => {
+      if (!contextMenuEl.contains(e.target)) contextMenuEl.style.display = "none";
+    });
+
+    // ── Keyboard shortcuts ──────────────────────────────────
+    document.addEventListener("keydown", e => {
+      const inInput = ["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
+
+      // [K] – toggle sidebar (always)
+      if (e.key === "k" && !inInput && !e.ctrlKey && !e.metaKey) { toggleSidebar(); return; }
+
+      if (!sidebarOpen) return;
+
+      // [/] – focus filter
+      if (e.key === "/" && !inInput) { filterInput.focus(); e.preventDefault(); return; }
+
+      if (inInput) return;
+
+      // [Esc] – close viewer
+      if (e.key === "Escape") { closeViewer(); return; }
+
+      // [↑] / [↓] – navigate packets
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const vis  = filteredPackets();
+        const i    = vis.findIndex(p => p.id === selectedId);
+        const next = e.key === "ArrowDown"
+          ? (vis[i + 1] ?? (selectedId == null ? vis[0] : null))
+          : vis[i - 1];
+        if (next) {
+          openViewer(next);
+          listEl.querySelector(`[data-id="${next.id}"]`)?.scrollIntoView({ block: "nearest" });
+        }
+        e.preventDefault();
+      }
+    });
+
+    // ── Sidebar resize ──────────────────────────────────────
+    const rh = sidebar.querySelector("#zs-rh");
+    let rsDrag = false, rsX = 0, rsW = 0;
+    rh.addEventListener("mousedown", e => {
+      rsDrag = true; rsX = e.clientX; rsW = sidebar.offsetWidth;
+      rh.classList.add("drag");
+      document.body.style.cursor = "ew-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", e => {
+      if (!rsDrag) return;
+      const w = Math.max(MIN_WIDTH, Math.min(rsW + rsX - e.clientX, window.innerWidth * 0.95));
+      currentWidth = w; sidebar.style.width = `${w}px`;
+      if (sidebarOpen) document.body.style.marginRight = `${w}px`;
+    });
+    document.addEventListener("mouseup", () => {
+      if (!rsDrag) return;
+      rsDrag = false; rh.classList.remove("drag");
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
+
+    // ── Viewer split drag ───────────────────────────────────
+    let vDrag = false;
+    dividerEl.addEventListener("mousedown", e => {
+      if (!viewerPanel.classList.contains("vis")) return;
+      vDrag = true;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+    document.addEventListener("mousemove", e => {
+      if (!vDrag) return;
+      const r = bodyEl.getBoundingClientRect();
+      const w = Math.max(240, Math.min(r.width - 200, r.right - e.clientX));
+      viewerWidthPx = w; viewerPanel.style.width = `${w}px`;
+    });
+    document.addEventListener("mouseup", () => {
+      if (!vDrag) return;
+      vDrag = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Rendering — rAF-batched to avoid multi-rebuild per frame
+  // ═══════════════════════════════════════════════════════════
+
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => { renderScheduled = false; rerenderList(); });
+  }
+
+  function createRow(p) {
+    const el  = document.createElement("div");
+    const dir = p.direction === "IN" ? "zin" : "zout";
+    const tag = typeTag(p.parsed);
+    const hue = hueForType(tag);
+    const fl  = flaggedIds.has(p.id);
+
+    el.className = `zr ${dir}${selectedId === p.id ? " sel" : ""}${fl ? " has-flag" : ""}`;
+    el.dataset.id = p.id;
+    el.innerHTML = `
+<span class="zr-id">#${p.id}</span>
+<span class="zr-dir ${dir}">${p.direction}</span>
+<div class="zr-cell">
+  <div class="zr-type" style="color:hsl(${hue},52%,62%)" title="${esc(tag)}">${esc(tag)}</div>
+  <div class="zr-ts">${fmtRel(p.timestamp)}</div>
+</div>
+<span class="zr-sz">${fmtBytes(payloadSize(p.parsed))}</span>
+<div class="zr-act">
+  ${p.resent ? '<span class="zr-resent">↩</span>' : ''}
+  <button class="zr-flag${fl ? " on" : ""}" title="Flag (F)">★</button>
+</div>`;
+
+    el.querySelector(".zr-flag").addEventListener("click", e => { e.stopPropagation(); toggleFlag(p); });
+
+    el.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      contextMenuEl.dataset.id = p.id;
+      const x = Math.min(e.clientX, window.innerWidth  - 190);
+      const y = Math.min(e.clientY, window.innerHeight - 180);
+      contextMenuEl.style.left    = `${x}px`;
+      contextMenuEl.style.top     = `${y}px`;
+      contextMenuEl.style.display = "block";
+      e.stopPropagation();
+    });
+
+    el.addEventListener("click", () => selectedId === p.id ? closeViewer() : openViewer(p));
+    return el;
+  }
+
+  function rerenderList() {
+    const vis    = filteredPackets();
+    const pinned = vis.filter(p => pinnedIds.has(p.id));
+    const rest   = vis.filter(p => !pinnedIds.has(p.id));
+
+    listEl.innerHTML = "";
+    const frag = document.createDocumentFragment();
+
+    if (pinned.length) {
+      const s = document.createElement("div");
+      s.className = "zs-sec"; s.textContent = "Pinned";
+      frag.appendChild(s);
+      pinned.forEach(p => frag.appendChild(createRow(p)));
+    }
+
+    if (rest.length) {
+      if (pinned.length) {
+        const s = document.createElement("div");
+        s.className = "zs-sec"; s.textContent = "All";
+        frag.appendChild(s);
+      }
+      rest.forEach(p => frag.appendChild(createRow(p)));
+    }
+
+    listEl.appendChild(frag);
+    countEl.textContent = `${vis.length} / ${packets.length}`;
+    if (autoScroll) listEl.scrollTop = listEl.scrollHeight;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Viewer
+  // ═══════════════════════════════════════════════════════════
+
+  function setTab(name) {
+    sidebar.querySelectorAll(".zt").forEach(t => t.classList.toggle("on", t.dataset.tab === name));
+    sidebar.querySelectorAll(".zp").forEach(p => p.classList.toggle("on", p.id === `zs-${name}-p`));
   }
 
   function openViewer(p) {
     selectedId = p.id;
-    viewerPanel.classList.add("visible");
-    dividerEl.classList.add("visible");
-    viewerPanel.style.width = `${viewerWidthPercent}%`;
+    viewerPanel.classList.add("vis");
+    dividerEl.classList.add("vis");
+    viewerPanel.style.width = `${viewerWidthPx}px`;
+    viewerPanel.style.flex  = "0 0 auto";
 
-    const dirEl = sidebar.querySelector("#zyrox-viewer-dir");
-    dirEl.textContent = p.direction;
-    dirEl.className = p.direction;
-    dirEl.id = "zyrox-viewer-dir";
-    sidebar.querySelector("#zyrox-viewer-type").textContent = getTypeTag(p.parsed);
-    sidebar.querySelector("#zyrox-viewer-time").textContent = formatTime(p.timestamp);
+    const dir     = p.direction === "IN" ? "zin" : "zout";
+    const vd      = sidebar.querySelector("#zs-vd");
+    vd.textContent = p.direction;
+    vd.className   = `zs-vdir ${dir}`;
 
-    const tree = sidebar.querySelector("#zyrox-json-tree");
+    sidebar.querySelector("#zs-vtype").textContent = typeTag(p.parsed);
+
+    const conn    = wsMap.get(p.ws);
+    const urlPart = conn ? ` · ${conn.url.replace(/^wss?:\/\//, "").slice(0, 50)}` : "";
+    sidebar.querySelector("#zs-vinfo").textContent =
+      `${fmtTime(p.timestamp)} · ${fmtBytes(payloadSize(p.parsed))}${urlPart}`;
+
+    // JSON pane
+    const tree = sidebar.querySelector("#zs-jtree");
     tree.innerHTML = "";
-    if (p.parsed._loading) tree.textContent = "Decoding...";
-    else tree.appendChild(renderJsonTree(p.parsed.json ?? p.parsed, 0, null, true));
+    if (p.parsed._loading) {
+      const loading = document.createElement("span");
+      loading.style.color = "var(--txt2)";
+      loading.textContent = "Decoding…";
+      tree.appendChild(loading);
+    } else {
+      tree.appendChild(renderJsonNode(p.parsed.json ?? p.parsed, 0, null));
+    }
 
-    sidebar.querySelector("#zyrox-raw-content").textContent = getFullBody(p.parsed);
-    sidebar.querySelector("#zyrox-resend-editor").value = JSON.stringify(p.parsed.json ?? p.parsed, null, 2);
+    // Raw / Hex / Resend panes
+    sidebar.querySelector("#zs-raw").textContent    = fullBody(p.parsed);
+    sidebar.querySelector("#zs-hex").innerHTML      = p.parsed.hex ?? "(no binary data)";
+    sidebar.querySelector("#zs-re-ed").value        = JSON.stringify(p.parsed.json ?? p.parsed, null, 2);
 
-    const hexEl = sidebar.querySelector("#zyrox-hex-content");
-    hexEl.textContent = p.parsed.hex || "No binary data";
-
-    listEl.querySelectorAll(".zyrox-packet").forEach((el) => el.classList.toggle("active", Number(el.dataset.id) === p.id));
+    // Sync selection in list
+    listEl.querySelectorAll(".zr").forEach(el =>
+      el.classList.toggle("sel", Number(el.dataset.id) === p.id));
   }
 
   function closeViewer() {
     selectedId = null;
-    viewerPanel.classList.remove("visible");
-    dividerEl.classList.remove("visible");
-    listEl.querySelectorAll(".zyrox-packet.active").forEach((el) => el.classList.remove("active"));
+    viewerPanel.classList.remove("vis");
+    dividerEl.classList.remove("vis");
+    listEl.querySelectorAll(".zr.sel").forEach(el => el.classList.remove("sel"));
   }
 
-  function simpleLineDiff(a, b) {
-    const aa = a.split("\n");
-    const bb = b.split("\n");
-    const max = Math.max(aa.length, bb.length);
-    const out = [];
-    for (let i = 0; i < max; i++) {
-      const left = aa[i] ?? "";
-      const right = bb[i] ?? "";
-      if (left === right) out.push(`  ${left}`);
-      else {
-        if (left) out.push(`- ${left}`);
-        if (right) out.push(`+ ${right}`);
-      }
+  // ═══════════════════════════════════════════════════════════
+  //  JSON tree renderer
+  // ═══════════════════════════════════════════════════════════
+
+  function renderJsonNode(val, depth, key) {
+    const node = document.createElement("div");
+    node.className = "zjn";
+    const row  = document.createElement("div");
+    row.className = "zjr";
+    node.appendChild(row);
+
+    const indent  = "  ".repeat(depth);
+    const keyHtml = key !== null ? `<span class="zjk">"${esc(String(key))}"</span>: ` : "";
+
+    if (val === null) {
+      row.innerHTML = `${indent}${keyHtml}<span class="zjz">null</span>`;
+      return node;
     }
-    return out.join("\n");
+
+    if (typeof val !== "object") {
+      let cls = "zjz";
+      if (typeof val === "string")  cls = "zjs";
+      else if (typeof val === "number")  cls = "zjn2";
+      else if (typeof val === "boolean") cls = "zjb";
+
+      const raw = esc(JSON.stringify(val));
+
+      // Truncate very long strings with a "show all" link
+      if (typeof val === "string" && val.length > 200) {
+        const short = esc(JSON.stringify(val.slice(0, 200)));
+        row.innerHTML = `${indent}${keyHtml}<span class="${cls}">${short}<span class="zjsm"> … show all</span></span>`;
+        row.querySelector(".zjsm").addEventListener("click", e => {
+          e.stopPropagation();
+          row.innerHTML = `${indent}${keyHtml}<span class="${cls}">${raw}</span>`;
+        });
+      } else {
+        row.innerHTML = `${indent}${keyHtml}<span class="${cls}">${raw}</span>`;
+      }
+      return node;
+    }
+
+    const isArr  = Array.isArray(val);
+    const entries = isArr ? val.map((v, i) => [i, v]) : Object.entries(val);
+    const open   = isArr ? "[" : "{";
+    const close  = isArr ? "]" : "}";
+    const collapsed = entries.length > 12;
+
+    row.innerHTML = `${indent}<span class="zjt">${collapsed ? "▶" : "▼"}</span>${keyHtml}<span style="color:var(--txt2)">${open}</span> <span style="color:var(--txt3);font-size:10px">${entries.length}</span>`;
+
+    const toggle = row.querySelector(".zjt");
+    const ch     = document.createElement("div");
+    ch.className = "zjch";
+    if (collapsed) ch.classList.add("zjhide");
+
+    entries.forEach(([k, v]) => ch.appendChild(renderJsonNode(v, depth + 1, k)));
+
+    const endRow = document.createElement("div");
+    endRow.className = "zjr";
+    endRow.textContent = `${indent}${close}`;
+    ch.appendChild(endRow);
+
+    toggle.addEventListener("click", e => {
+      e.stopPropagation();
+      ch.classList.toggle("zjhide");
+      toggle.textContent = ch.classList.contains("zjhide") ? "▶" : "▼";
+    });
+
+    node.appendChild(ch);
+    return node;
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Diff — coloured line-level diff
+  // ═══════════════════════════════════════════════════════════
 
   function showDiff(leftId, rightId) {
-    const a = packets.find((p) => p.id === leftId);
-    const b = packets.find((p) => p.id === rightId);
-    if (!a || !b) return;
-    setActiveTab("diff");
-    const diff = simpleLineDiff(getFullBody(a.parsed), getFullBody(b.parsed));
-    sidebar.querySelector("#zyrox-diff-content").textContent = `#${a.id} vs #${b.id}\n\n${diff}`;
+    const a = packets.find(p => p.id === leftId);
+    const b = packets.find(p => p.id === rightId);
+    if (!a || !b) { setStatus("Diff: pin a packet first (right-click → Pin for diff)"); return; }
+
+    setTab("diff");
+    const la  = fullBody(a.parsed).split("\n");
+    const lb  = fullBody(b.parsed).split("\n");
+    const el  = sidebar.querySelector("#zs-diff");
+    el.innerHTML = "";
+
+    const hdr = document.createElement("span");
+    hdr.className = "ds";
+    hdr.textContent = `--- #${a.id}  ${typeTag(a.parsed)}\n+++ #${b.id}  ${typeTag(b.parsed)}\n\n`;
+    el.appendChild(hdr);
+
+    const max = Math.max(la.length, lb.length);
+    for (let i = 0; i < max; i++) {
+      const l = la[i] ?? "", r = lb[i] ?? "";
+      if (l === r) {
+        const s = document.createElement("span"); s.className = "ds"; s.textContent = `  ${l}\n`; el.appendChild(s);
+      } else {
+        if (l) { const s = document.createElement("span"); s.className = "dd"; s.textContent = `- ${l}\n`; el.appendChild(s); }
+        if (r) { const s = document.createElement("span"); s.className = "da"; s.textContent = `+ ${r}\n`; el.appendChild(s); }
+      }
+    }
   }
 
-  function resendEdited() {
-    const p = packets.find((x) => x.id === selectedId);
+  // ═══════════════════════════════════════════════════════════
+  //  Actions
+  // ═══════════════════════════════════════════════════════════
+
+  function toggleFlag(p) {
+    p.flagged = !p.flagged;
+    p.flagged ? flaggedIds.add(p.id) : flaggedIds.delete(p.id);
+    scheduleRender();
+  }
+
+  // Generate a ready-to-run JS snippet to replay this packet
+  function copyAsCode(p) {
+    const openWs = [...wsMap.keys()].find(w => w.readyState === 1);
+    const url    = wsMap.get(openWs ?? p.ws)?.url ?? "wss://...";
+    const json   = JSON.stringify(p.parsed.json ?? p.parsed, null, 2);
+    const code   = `// Resend packet #${p.id}  (${typeTag(p.parsed)})\nconst ws = new WebSocket(${JSON.stringify(url)});\nws.addEventListener("open", () => ws.send(JSON.stringify(\n${json.replace(/^/gm, "  ")}\n)));`;
+    navigator.clipboard.writeText(code).then(() => setStatus("Code snippet copied"));
+  }
+
+  function doResend() {
+    const p = packets.find(x => x.id === selectedId);
     if (!p) return;
-    const text = sidebar.querySelector("#zyrox-resend-editor").value;
-    const err = sidebar.querySelector("#zyrox-resend-error");
+    const errEl = sidebar.querySelector("#zs-re-err");
     let parsed;
     try {
-      parsed = JSON.parse(text);
-      err.textContent = "";
+      parsed = JSON.parse(sidebar.querySelector("#zs-re-ed").value);
+      errEl.textContent = "";
     } catch (e) {
-      err.textContent = `Invalid JSON: ${e.message}`;
+      errEl.textContent = `JSON: ${e.message}`;
       return;
     }
-
-    const ws = getActiveSocket();
-    if (!ws) {
-      err.textContent = "No active WebSocket connection.";
-      return;
-    }
-    ws.send(JSON.stringify(parsed));
-    logPacket("OUT", ws, JSON.stringify(parsed), { resent: true });
+    const ws = [...wsMap.keys()].find(w => w.readyState === 1);
+    if (!ws) { errEl.textContent = "No open WebSocket."; return; }
+    const out = JSON.stringify(parsed);
+    ws.send(out);
+    logPacket("OUT", ws, out, { resent: true });
+    setStatus(`Sent ${fmtBytes(out.length)}`);
   }
 
-  function getActiveSocket() {
-    return [...websocketRegistry].find((x) => x.readyState === WebSocket.OPEN) || null;
+  function clearPackets() {
+    // Keep only pinned packets; reset counts
+    packets  = packets.filter(p => pinnedIds.has(p.id));
+    inCount  = packets.filter(p => p.direction === "IN").length;
+    outCount = packets.filter(p => p.direction === "OUT").length;
+    flaggedIds.clear();
+    packets.forEach(p => { p.flagged = false; });
+    pendingPackets = [];
+    selectedId = null;
+    closeViewer();
+    scheduleRender();
+    updateStats();
   }
 
-  function logPacket(direction, socket, payload, opts = {}) {
-    const parsed = typeof payload === "string" ? parseTextPacket(payload) : parseBinaryPacket(payload);
+  function resetSession() {
+    packets = []; pendingPackets = [];
+    inCount = 0; outCount = 0; firstPacketTs = null;
+    pinnedIds.clear(); flaggedIds.clear();
+    sparklinePkt.fill(0); sparklineB.fill(0);
+    filter.query = ""; filter.type = ""; filter.direction = "ALL"; filter.flaggedOnly = false;
+    filterInput.value = "";
+    filterInput.classList.remove("rx");
+    sidebar.querySelectorAll(".zd").forEach(b => b.classList.toggle("on", b.dataset.dir === "ALL"));
+    selectedForDiffId = null;
+    hooksGen++;
+    closeViewer();
+    scheduleRender();
+    updateStats();
+    setStatus("session reset");
+  }
+
+  function exportPackets() {
+    const data = filteredPackets().map((p, i) => ({
+      index:     i,
+      id:        p.id,
+      direction: p.direction,
+      timestamp: new Date(p.timestamp).toISOString(),
+      type:      typeTag(p.parsed),
+      wsUrl:     wsMap.get(p.ws)?.url ?? null,
+      payload:   p.parsed.json ?? p.parsed,
+      flagged:   flaggedIds.has(p.id),
+      pinned:    pinnedIds.has(p.id),
+      resent:    Boolean(p.resent),
+    }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = `packets-${Date.now()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    setStatus(`Exported ${data.length} packets`);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Packet logging
+  // ═══════════════════════════════════════════════════════════
+
+  function logPacket(direction, ws, payload, opts = {}) {
+    const parsed = typeof payload === "string" ? parseText(payload) : parseBinary(payload);
+    const ts     = Date.now();
+    if (!firstPacketTs) firstPacketTs = ts;
+
+    direction === "IN" ? inCount++ : outCount++;
+    recordInSlot(payloadSize(parsed));
+
     const p = {
-      id: packetId++,
+      id:         packetId++,
       direction,
       parsed,
-      timestamp: Date.now(),
-      flagged: false,
-      pinned: false,
-      resent: Boolean(opts.resent),
-      generation: hooksGeneration,
+      timestamp:  ts,
+      ws,
+      resent:     Boolean(opts.resent),
+      generation: hooksGen,
     };
 
-    statsTimestamps.push(Date.now());
     if (isPaused) {
       pendingPackets.push(p);
-      sidebar.querySelector("#zyrox-pause-note").textContent = `Paused (${pendingPackets.length} buffered)`;
+      sidebar.querySelector("#zs-pn").textContent = `${pendingPackets.length} buffered`;
       return;
     }
 
     packets.push(p);
-    trimPackets();
-    rerenderList();
-    updateStats();
 
-    if (selectedId === p.id) openViewer(p);
+    // Trim old packets, preserving pinned ones
+    if (packets.length > MAX_PACKETS * 1.25) {
+      const pinned = packets.filter(x => pinnedIds.has(x.id));
+      const rest   = packets.filter(x => !pinnedIds.has(x.id)).slice(-MAX_PACKETS);
+      packets      = [...pinned, ...rest].sort((a, b) => a.id - b.id);
+    }
 
-    console.log(PREFIX, direction, { parsed, timestamp: new Date().toISOString() });
+    scheduleRender();
+    console.debug("[PS]", direction, typeTag(parsed), parsed);
   }
+
+  // ═══════════════════════════════════════════════════════════
+  //  Sidebar helpers
+  // ═══════════════════════════════════════════════════════════
+
+  function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+    sidebar.classList.toggle("hidden", !sidebarOpen);
+    applyMargin();
+  }
+
+  function togglePause() {
+    isPaused = !isPaused;
+    pauseBtnEl.textContent = isPaused ? "Resume" : "Pause";
+    pauseBtnEl.classList.toggle("on", isPaused);
+    if (!isPaused) {
+      pendingPackets.forEach(p => packets.push(p));
+      pendingPackets = [];
+      sidebar.querySelector("#zs-pn").textContent = "";
+      scheduleRender();
+      updateStats();
+    }
+  }
+
+  function setAS(enabled, snap) {
+    autoScroll = enabled;
+    autoscrollBtnEl.classList.toggle("on", autoScroll);
+    if (enabled && snap) listEl.scrollTop = listEl.scrollHeight;
+  }
+
+  function setStatus(msg) { if (statusEl) statusEl.textContent = msg; }
+
+  function applyMargin() {
+    document.body.style.marginRight  = sidebarOpen ? `${currentWidth}px` : "0";
+    document.body.style.transition   = "margin-right .2s ease";
+    document.body.style.boxSizing    = "border-box";
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  WebSocket hooks
+  // ═══════════════════════════════════════════════════════════
 
   function installHooks() {
     if (wsHooksInstalled) return;
     wsHooksInstalled = true;
 
-    const OriginalWebSocket = window.WebSocket;
-    window.WebSocket = function PatchedWebSocket(...args) {
-      const ws = new OriginalWebSocket(...args);
-      websocketRegistry.add(ws);
-      ws.addEventListener("close", () => websocketRegistry.delete(ws));
+    const OrigWS = window.WebSocket;
+
+    function PatchedWS(...args) {
+      const ws   = new OrigWS(...args);
+      const url  = String(args[0] ?? "");
+      const info = { id: ++wsSeq, url };
+      wsMap.set(ws, info);
+
+      ws.addEventListener("open",  ()  => { setStatus(`WS #${info.id} open · ${url}`);          updateStats(); });
+      ws.addEventListener("close", e   => { setStatus(`WS #${info.id} closed (${e.code})`);      updateStats(); });
+      ws.addEventListener("error", ()  => { setStatus(`WS #${info.id} error`); });
 
       const origSend = ws.send;
-      ws.send = function patchedSend(data) {
-        try { logPacket("OUT", ws, data); } catch (e) { console.warn(PREFIX, "OUT fail", e); }
+      ws.send = function (data) {
+        try { logPacket("OUT", ws, data); } catch (e) { console.warn("[PS] OUT err", e); }
         return origSend.call(this, data);
       };
 
-      ws.addEventListener("message", (event) => {
-        try { logPacket("IN", ws, event.data); } catch (e) { console.warn(PREFIX, "IN fail", e); }
+      ws.addEventListener("message", e => {
+        try { logPacket("IN", ws, e.data); } catch (e) { console.warn("[PS] IN err", e); }
       });
 
       return ws;
-    };
-    window.WebSocket.prototype = OriginalWebSocket.prototype;
-    Object.setPrototypeOf(window.WebSocket, OriginalWebSocket);
+    }
+
+    // Preserve prototype chain so instanceof checks keep working.
+    // setPrototypeOf(PatchedWS, OrigWS) also makes the static constants
+    // (OPEN, CLOSED, etc.) accessible via prototype lookup — no need to copy them
+    // (they're non-writable on the native constructor and would throw).
+    PatchedWS.prototype = OrigWS.prototype;
+    Object.setPrototypeOf(PatchedWS, OrigWS);
+
+    Object.defineProperty(window, "WebSocket", { value: PatchedWS, writable: true, configurable: true });
   }
 
-  function toggleSidebar() {
-    sidebarOpen = !sidebarOpen;
-    sidebar.classList.toggle("hidden", !sidebarOpen);
-    applyPageMargin();
-  }
+  // ═══════════════════════════════════════════════════════════
+  //  Init
+  // ═══════════════════════════════════════════════════════════
 
   function init() {
-    if (initialized) return;
-    if (!document.body) return;
+    if (initialized || !document.body) return;
     initialized = true;
     injectStyles();
     buildSidebar();
     installHooks();
     updateStats();
-    console.log(PREFIX, "v1.1.0 installed — press [K] to toggle");
+    console.log(`[PacketSniffer] v${VERSION} installed · [K] toggle · [/] filter · [↑↓] navigate`);
   }
 
-  if (document.body) init();
-  else {
+  if (document.body) {
+    init();
+  } else {
     document.addEventListener("DOMContentLoaded", init);
     const obs = new MutationObserver(() => {
       if (document.body) { obs.disconnect(); init(); }
