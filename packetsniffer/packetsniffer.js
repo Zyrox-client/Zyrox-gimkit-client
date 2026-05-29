@@ -573,12 +573,15 @@
 .zvb:hover { color:var(--txt); }
 
 /* viewer tabs */
-#zs-tabs { display:flex; align-items:stretch; border-bottom:1px solid var(--bdr); background:var(--bg1); flex-shrink:0; }
-.zt-sep { flex:1; }
+#zs-tabs {
+  display:flex; align-items:stretch; gap:10px; padding:0 10px;
+  border-bottom:1px solid var(--bdr); background:var(--bg1); flex-shrink:0;
+}
+.zt-sep { flex:1; min-width:18px; }
 .zt {
   background:none; border:none; border-bottom:2px solid transparent;
   color:var(--txt2); font-family:var(--font); font-size:11px;
-  padding:6px 14px; cursor:pointer; margin-bottom:-1px; white-space:nowrap;
+  padding:6px 16px; cursor:pointer; margin-bottom:-1px; white-space:nowrap;
 }
 .zt:hover { color:var(--txt); }
 .zt.on { color:var(--acc); border-bottom-color:var(--acc); }
@@ -874,10 +877,7 @@
       setTab("resend");
       const p = packets.find(x => x.id === selectedId);
       if (!p) return;
-      // Use the raw wire-format string so the resend reconstructs the exact original payload.
-      // For binary packets fall back to the decoded body (best we can do without re-encoding).
-      const raw = p.parsed.raw;
-      sidebar.querySelector("#zs-re-ed").value = raw != null ? String(raw) : fullBody(p.parsed);
+      sidebar.querySelector("#zs-re-ed").value = getEditableResendBody(p);
       sidebar.querySelector("#zs-re-err").textContent = "";
     });
 
@@ -1101,7 +1101,7 @@
     // Raw / Hex / Resend panes
     sidebar.querySelector("#zs-raw").textContent    = fullBody(p.parsed);
     sidebar.querySelector("#zs-hex").innerHTML      = p.parsed.hex ?? "(no binary data)";
-    sidebar.querySelector("#zs-re-ed").value        = JSON.stringify(p.parsed.json ?? p.parsed, null, 2);
+    sidebar.querySelector("#zs-re-ed").value        = getEditableResendBody(p);
 
     // Sync selection in list
     listEl.querySelectorAll(".zr").forEach(el =>
@@ -1237,21 +1237,49 @@
     navigator.clipboard.writeText(code).then(() => setStatus("Code snippet copied"));
   }
 
+  function getEditableResendBody(p) {
+    const raw = p?.parsed?.raw;
+    if (typeof raw === "string") return raw;
+    if (raw != null && typeof raw !== "object") return String(raw);
+    return fullBody(p.parsed);
+  }
+
+  function getResendPayloadFromEditor(p, text) {
+    const fallbackRaw = p?.parsed?.raw;
+    const originalEditable = getEditableResendBody(p);
+
+    // If the editor still contains the original wire-format text, send it exactly.
+    // This preserves Engine.IO control packets like PING ("2") instead of sending
+    // a JSON description of the decoded packet.
+    if (text === originalEditable) return text;
+
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && typeof parsed.raw === "string") {
+        return parsed.raw;
+      }
+      return JSON.stringify(parsed);
+    } catch (_) {
+      if (typeof fallbackRaw === "string") return text;
+      throw new Error("Enter valid JSON for decoded non-text packets.");
+    }
+  }
+
   function doResend() {
     const p = packets.find(x => x.id === selectedId);
     if (!p) return;
     const errEl = sidebar.querySelector("#zs-re-err");
-    let parsed;
+    const editorText = sidebar.querySelector("#zs-re-ed").value;
+    let out;
     try {
-      parsed = JSON.parse(sidebar.querySelector("#zs-re-ed").value);
+      out = getResendPayloadFromEditor(p, editorText);
       errEl.textContent = "";
     } catch (e) {
-      errEl.textContent = `JSON: ${e.message}`;
+      errEl.textContent = e.message;
       return;
     }
     const ws = [...wsMap.keys()].find(w => w.readyState === 1);
     if (!ws) { errEl.textContent = "No open WebSocket."; return; }
-    const out = JSON.stringify(parsed);
     ws.send(out);
     logPacket("OUT", ws, out, { resent: true });
     setStatus(`Sent ${fmtBytes(out.length)}`);
