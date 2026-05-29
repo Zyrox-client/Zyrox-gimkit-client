@@ -397,9 +397,7 @@
         if (!enabled) return;
         if (!state.isPardyMode) {
           state.isPardyMode = true;
-          console.log(LOG, "Detected PARDY game type from", source || "game state", "- enabling PARDY auto-answer mode");
-          const cfg = window.__zyroxAutoAnswerConfig || {};
-          startAutoAnswer(cfg.speed ?? _baseSpeed, "PARDY detected", { pardyDelay: cfg.triviaDelay ?? _pardyDelay });
+          console.log(LOG, "Detected PARDY game type from", source || "game state", "- using PARDY answer flow when Auto Answer is enabled");
         }
       }
 
@@ -439,10 +437,14 @@
         state.pardyAskReadyAt = Date.now() + Math.max(0, Number(_pardyDelay) || 0);
         state.lastPardySkipReason = null;
         if (state.pardyAskTimerId) clearTimeout(state.pardyAskTimerId);
-        state.pardyAskTimerId = setTimeout(() => {
+        if (_running) {
+          state.pardyAskTimerId = setTimeout(() => {
+            state.pardyAskTimerId = null;
+            answerQuestion();
+          }, Math.max(0, state.pardyAskReadyAt - Date.now()));
+        } else {
           state.pardyAskTimerId = null;
-          answerQuestion();
-        }, Math.max(0, state.pardyAskReadyAt - Date.now()));
+        }
       }
 
       function getNextUnansweredQuestion() {
@@ -528,6 +530,7 @@
       }
 
       function answerQuestion() {
+        if (!_running) return;
         if (socketManager.transportType === "colyseus") {
           if (state.currentQuestionId == null || state.answerDeviceId == null) return;
           const question = findQuestionById(state.currentQuestionId);
