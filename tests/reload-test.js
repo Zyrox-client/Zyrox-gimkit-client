@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Zyrox reload/projectile test
+// @name         Zyrox zero reload test
 // @namespace    https://github.com/zyrox
-// @version      0.1.0
-// @description  Test whether projectile weapons can fire continuously by zeroing reload-like fields and spamming FIRE packets.
+// @version      0.2.0
+// @description  Test projectile weapons with client-side reload/cooldown duration fields forced to 0.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
@@ -13,227 +13,164 @@
   "use strict";
 
   const LOG = "[ZyroxReloadTest]";
-  const ROOM_DATA = 13;
-  const DEFAULT_INTERVAL_MS = 25;
-  const ZERO_RELOAD_INTERVAL_MS = 100;
-  const MAX_SCAN_DEPTH = 6;
-  const RELOAD_KEY_PATTERN = /(reload|cooldown|fireRate|fireDelay|shotDelay|shootDelay|attackDelay|lastFire|lastShot|nextFire|nextShot|chargeTime|windup|ammo|magazine)/i;
-  const ZERO_KEYS_PATTERN = /(reload|cooldown|delay|fireRate|lastFire|lastShot|nextFire|nextShot|chargeTime|windup)/i;
+  const SCAN_INTERVAL_MS = 50;
+  const DEEP_SCAN_INTERVAL_MS = 750;
+  const MAX_SCAN_DEPTH = 9;
+  const MAX_NODES_PER_SCAN = 8000;
+  const SAMPLE_LIMIT = 12;
+
+  const ZERO_NUMBER_KEY_PATTERN = /(?:^|_|-|\b)(reload|reloadtime|reloadtimer|reloadcooldown|cooldown|cooldowntime|cooldowntimer|firerate|fire_rate|firedelay|fire_delay|shotdelay|shot_delay|shootdelay|shoot_delay|attackdelay|attack_delay|refire|refiredelay|rateoffire|windup|winduptime|chargetime|charge_time|nextfire|nextshot|lastfire|lastshot)(?:$|_|-|\b)/i;
+  const FALSE_BOOLEAN_KEY_PATTERN = /(?:^|_|-|\b)(isreloading|reloading|onreload|oncooldown|coolingdown|isincooldown)(?:$|_|-|\b)/i;
+  const TRUE_BOOLEAN_KEY_PATTERN = /(?:^|_|-|\b)(canfire|readytofire|can shoot|canshoot|isready|weaponready)(?:$|_|-|\b)/i;
+  const FOLLOW_KEY_PATTERN = /weapon|gun|projectile|bullet|combat|attack|character|player|ability|item|inventory|controller|manager|phaser|scene|state|store|config|data|stats|equipment|gadget/i;
+  const SKIP_KEY_PATTERN = /^(?:parent|parentContainer|children|displayList|events|textures|cache|anims|sound|renderer|plugins|sys|game|canvas|context|socket|connection|xhr|document|window)$/i;
 
   if (window.__zyroxReloadTest?.destroy) {
     window.__zyroxReloadTest.destroy();
   }
 
   const state = {
-    enabled: false,
-    zeroReload: true,
-    fireWhileMouseDownOnly: true,
-    intervalMs: DEFAULT_INTERVAL_MS,
-    socket: null,
-    fireTimer: null,
-    zeroTimer: null,
-    packetsSent: 0,
-    zeroedFields: 0,
+    enabled: true,
+    shallowIntervalId: null,
+    deepIntervalId: null,
+    totalWrites: 0,
+    scanCount: 0,
+    patchedJsonParses: 0,
+    patchedAssigns: 0,
+    patchedDefineProperties: 0,
+    lastScanMs: 0,
     lastError: "",
-    lastFireAt: 0,
+    samples: [],
   };
 
-  function utf8ByteLength(input) {
-    let len = 0;
-    for (let i = 0; i < input.length; i += 1) {
-      const code = input.charCodeAt(i);
-      if (code < 0x80) len += 1;
-      else if (code < 0x800) len += 2;
-      else if (code < 0xd800 || code > 0xdfff) len += 3;
-      else {
-        i += 1;
-        len += 4;
-      }
+  const original = {
+    jsonParse: JSON.parse,
+    objectAssign: Object.assign,
+    defineProperty: Object.defineProperty,
+    defineProperties: Object.defineProperties,
+  };
+
+  function getUnsafeWindow() {
+    return window.wrappedJSObject || window;
+  }
+
+  function displayKey(key) {
+    return typeof key === "symbol" ? key.toString() : String(key);
+  }
+
+  function compactKey(key) {
+    return displayKey(key).replace(/[\s_-]+/g, "").toLowerCase();
+  }
+
+  function recordWrite(path, before, after) {
+    state.totalWrites += 1;
+    if (state.samples.length >= SAMPLE_LIMIT) state.samples.shift();
+    state.samples.push(`${path}: ${String(before)} -> ${String(after)}`);
+  }
+
+  function wantedValueForKey(key, value) {
+    const normalized = compactKey(key);
+    if (typeof value === "number" && Number.isFinite(value) && value !== 0 && ZERO_NUMBER_KEY_PATTERN.test(normalized)) return 0;
+    if (typeof value === "boolean" && value && FALSE_BOOLEAN_KEY_PATTERN.test(normalized)) return false;
+    if (typeof value === "boolean" && !value && TRUE_BOOLEAN_KEY_PATTERN.test(normalized)) return true;
+    return undefined;
+  }
+
+  function setReloadValue(target, key, nextValue, path) {
+    let before;
+    try {
+      before = target[key];
+    } catch (_) {
+      return 0;
     }
-    return len;
-  }
-
-  function writeUtf8(target, input, offset) {
-    let cursor = offset;
-    for (let i = 0; i < input.length; i += 1) {
-      let code = input.charCodeAt(i);
-      if (code < 0x80) target[cursor++] = code;
-      else if (code < 0x800) {
-        target[cursor++] = 0xc0 | (code >> 6);
-        target[cursor++] = 0x80 | (code & 0x3f);
-      } else if (code < 0xd800 || code > 0xdfff) {
-        target[cursor++] = 0xe0 | (code >> 12);
-        target[cursor++] = 0x80 | ((code >> 6) & 0x3f);
-        target[cursor++] = 0x80 | (code & 0x3f);
-      } else {
-        const next = input.charCodeAt(++i);
-        code = 0x10000 + (((code & 0x3ff) << 10) | (next & 0x3ff));
-        target[cursor++] = 0xf0 | (code >> 18);
-        target[cursor++] = 0x80 | ((code >> 12) & 0x3f);
-        target[cursor++] = 0x80 | ((code >> 6) & 0x3f);
-        target[cursor++] = 0x80 | (code & 0x3f);
-      }
-    }
-  }
-
-  function msgpackEncode(value) {
-    const bytes = [];
-    const deferred = [];
-
-    const write = (input) => {
-      const type = typeof input;
-      if (input == null) {
-        bytes.push(0xc0);
-        return;
-      }
-      if (type === "boolean") {
-        bytes.push(input ? 0xc3 : 0xc2);
-        return;
-      }
-      if (type === "number") {
-        if (Number.isInteger(input) && input >= 0 && input < 0x80) {
-          bytes.push(input);
-          return;
-        }
-        if (Number.isInteger(input) && input >= 0 && input < 0x100) {
-          bytes.push(0xcc, input);
-          return;
-        }
-        if (Number.isInteger(input) && input >= 0 && input < 0x10000) {
-          bytes.push(0xcd, input >> 8, input & 0xff);
-          return;
-        }
-        if (Number.isInteger(input) && input >= -0x20 && input < 0) {
-          bytes.push(0x100 + input);
-          return;
-        }
-        bytes.push(0xcb);
-        deferred.push({ type: "float64", value: input, offset: bytes.length });
-        bytes.length += 8;
-        return;
-      }
-      if (type === "string") {
-        const len = utf8ByteLength(input);
-        if (len < 32) bytes.push(0xa0 | len);
-        else if (len < 0x100) bytes.push(0xd9, len);
-        else bytes.push(0xda, len >> 8, len & 0xff);
-        deferred.push({ type: "string", value: input, offset: bytes.length });
-        bytes.length += len;
-        return;
-      }
-      if (Array.isArray(input)) {
-        if (input.length < 16) bytes.push(0x90 | input.length);
-        else bytes.push(0xdc, input.length >> 8, input.length & 0xff);
-        input.forEach(write);
-        return;
-      }
-      const keys = Object.keys(input).filter((key) => typeof input[key] !== "function");
-      if (keys.length < 16) bytes.push(0x80 | keys.length);
-      else bytes.push(0xde, keys.length >> 8, keys.length & 0xff);
-      keys.forEach((key) => {
-        write(key);
-        write(input[key]);
-      });
-    };
-
-    write(value);
-    const output = new Uint8Array(bytes.length);
-    bytes.forEach((byte, index) => {
-      output[index] = byte || 0;
-    });
-    deferred.forEach((part) => {
-      if (part.type === "float64") {
-        new DataView(output.buffer).setFloat64(part.offset, part.value);
-      } else {
-        writeUtf8(output, part.value, part.offset);
-      }
-    });
-    return output;
-  }
-
-  function encodeRoomData(channel, data) {
-    const channelBytes = msgpackEncode(channel);
-    const dataBytes = msgpackEncode(data);
-    const packet = new Uint8Array(1 + channelBytes.byteLength + dataBytes.byteLength);
-    packet[0] = ROOM_DATA;
-    packet.set(channelBytes, 1);
-    packet.set(dataBytes, 1 + channelBytes.byteLength);
-    return packet;
-  }
-
-  function getMainCharacterBody() {
-    const unsafe = window.wrappedJSObject || window;
-    return unsafe.stores?.phaser?.mainCharacter?.body || null;
-  }
-
-  function getPointer() {
-    const unsafe = window.wrappedJSObject || window;
-    return unsafe.stores?.phaser?.scene?.input?.mousePointer || null;
-  }
-
-  function getFirePayload() {
-    const body = getMainCharacterBody();
-    const pointer = getPointer();
-    const x = Number.isFinite(body?.x) ? body.x : 0;
-    const y = Number.isFinite(body?.y) ? body.y : 0;
-    const worldX = Number.isFinite(pointer?.worldX) ? pointer.worldX : x + 1;
-    const worldY = Number.isFinite(pointer?.worldY) ? pointer.worldY : y;
-    return {
-      angle: Math.atan2(worldY - (y - 3), worldX - x),
-      x,
-      y,
-    };
-  }
-
-  function sendFire() {
-    if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return false;
-    const pointer = getPointer();
-    if (state.fireWhileMouseDownOnly && !pointer?.isDown) return false;
+    if (Object.is(before, nextValue)) return 0;
 
     try {
-      state.socket.send(encodeRoomData("FIRE", getFirePayload()));
-      state.packetsSent += 1;
-      state.lastFireAt = Date.now();
-      updateHud();
-      return true;
-    } catch (error) {
-      state.lastError = error?.message || String(error);
-      console.warn(LOG, "FIRE send failed", error);
-      updateHud();
-      return false;
+      target[key] = nextValue;
+      if (Object.is(target[key], nextValue)) {
+        recordWrite(path, before, nextValue);
+        return 1;
+      }
+    } catch (_) {
+      // Some Phaser/game fields are read-only; ignore them and keep scanning other fields.
     }
+    return 0;
   }
 
-  function shouldTryZero(key, value) {
-    return typeof key === "string"
-      && typeof value === "number"
-      && Number.isFinite(value)
-      && value !== 0
-      && RELOAD_KEY_PATTERN.test(key)
-      && ZERO_KEYS_PATTERN.test(key);
+  function normalizePropertyDescriptor(prop, descriptor, path) {
+    if (!descriptor || !("value" in descriptor)) return descriptor;
+    const nextValue = wantedValueForKey(prop, descriptor.value);
+    if (nextValue === undefined) return descriptor;
+
+    state.patchedDefineProperties += 1;
+    recordWrite(path, descriptor.value, nextValue);
+    return { ...descriptor, value: nextValue };
   }
 
-  function zeroReloadFields(root, label) {
+  function getScanRoots(deep) {
+    const unsafe = getUnsafeWindow();
+    const stores = unsafe.stores;
+    const phaser = stores?.phaser;
+    const scene = phaser?.scene;
+    const roots = [
+      [stores, "stores"],
+      [phaser, "stores.phaser"],
+      [phaser?.mainCharacter, "mainCharacter"],
+      [scene, "scene"],
+      [scene?.characterManager, "scene.characterManager"],
+      [scene?.projectileManager, "scene.projectileManager"],
+      [scene?.weaponManager, "scene.weaponManager"],
+      [scene?.registry?.values, "scene.registry.values"],
+    ];
+
+    if (deep) {
+      roots.push(
+        [unsafe.__NEXT_DATA__, "__NEXT_DATA__"],
+        [unsafe.webpackChunk_N_E, "webpackChunk_N_E"],
+        [unsafe.webpackChunkgimkit, "webpackChunkgimkit"],
+        [unsafe.__zyroxEspShared, "__zyroxEspShared"],
+      );
+    }
+
+    return roots.filter(([root]) => root && (typeof root === "object" || typeof root === "function"));
+  }
+
+  function shouldFollowKey(key, depth, deep) {
+    const name = displayKey(key);
+    if (SKIP_KEY_PATTERN.test(name)) return false;
+    if (depth < 2) return true;
+    if (deep && depth < 4) return true;
+    return FOLLOW_KEY_PATTERN.test(name) || ZERO_NUMBER_KEY_PATTERN.test(compactKey(name));
+  }
+
+  function normalizeReloadFields(root, label, options = {}) {
     if (!root || (typeof root !== "object" && typeof root !== "function")) return 0;
 
+    const maxDepth = options.maxDepth ?? MAX_SCAN_DEPTH;
+    const maxNodes = options.maxNodes ?? MAX_NODES_PER_SCAN;
+    const deep = Boolean(options.deep);
     const seen = new WeakSet();
     const queue = [{ value: root, path: label, depth: 0 }];
     let changed = 0;
+    let visited = 0;
 
-    while (queue.length) {
+    while (queue.length && visited < maxNodes) {
       const item = queue.shift();
       const value = item.value;
       if (!value || (typeof value !== "object" && typeof value !== "function") || seen.has(value)) continue;
       seen.add(value);
+      visited += 1;
 
       let keys;
       try {
-        keys = Object.keys(value);
+        keys = Reflect.ownKeys(value);
       } catch (_) {
         continue;
       }
 
       for (const key of keys) {
+        const keyName = displayKey(key);
+        const childPath = `${item.path}.${keyName}`;
         let child;
         try {
           child = value[key];
@@ -241,84 +178,106 @@
           continue;
         }
 
-        if (shouldTryZero(key, child)) {
-          try {
-            value[key] = 0;
-            changed += 1;
-          } catch (_) {
-            // Read-only fields are expected on some game objects.
-          }
+        const nextValue = wantedValueForKey(key, child);
+        if (nextValue !== undefined) {
+          changed += setReloadValue(value, key, nextValue, childPath);
           continue;
         }
 
-        if (item.depth < MAX_SCAN_DEPTH && child && (typeof child === "object" || typeof child === "function")) {
-          const childKey = String(key);
-          if (RELOAD_KEY_PATTERN.test(childKey) || /weapon|gun|projectile|character|player|ability|item|stores|state|phaser/i.test(childKey)) {
-            queue.push({ value: child, path: `${item.path}.${childKey}`, depth: item.depth + 1 });
-          }
-        }
+        if (item.depth >= maxDepth || !child || (typeof child !== "object" && typeof child !== "function")) continue;
+        if (!shouldFollowKey(key, item.depth, deep)) continue;
+        queue.push({ value: child, path: childPath, depth: item.depth + 1 });
       }
     }
 
     return changed;
   }
 
-  function zeroLikelyReloadState() {
-    if (!state.zeroReload) return;
-    const unsafe = window.wrappedJSObject || window;
-    const roots = [
-      [unsafe.stores, "stores"],
-      [unsafe.stores?.phaser, "stores.phaser"],
-      [unsafe.stores?.phaser?.mainCharacter, "mainCharacter"],
-      [unsafe.stores?.phaser?.scene, "scene"],
-    ];
-    const changed = roots.reduce((total, [root, label]) => total + zeroReloadFields(root, label), 0);
-    if (changed) {
-      state.zeroedFields += changed;
+  function scan(deep = false) {
+    if (!state.enabled) return 0;
+    const startedAt = performance.now();
+    let changed = 0;
+
+    try {
+      for (const [root, label] of getScanRoots(deep)) {
+        changed += normalizeReloadFields(root, label, {
+          deep,
+          maxDepth: deep ? MAX_SCAN_DEPTH : 5,
+          maxNodes: deep ? MAX_NODES_PER_SCAN : 2500,
+        });
+      }
+      state.scanCount += 1;
+      state.lastScanMs = Math.round((performance.now() - startedAt) * 10) / 10;
+      updateHud();
+    } catch (error) {
+      state.lastError = error?.message || String(error);
+      console.warn(LOG, "scan failed", error);
       updateHud();
     }
+
+    return changed;
   }
 
-  function startTimers() {
-    stopTimers();
-    state.fireTimer = setInterval(sendFire, Math.max(1, Number(state.intervalMs) || DEFAULT_INTERVAL_MS));
-    state.zeroTimer = setInterval(zeroLikelyReloadState, ZERO_RELOAD_INTERVAL_MS);
+  function patchObjectAPIs() {
+    JSON.parse = function zyroxReloadJsonParse(text, reviver) {
+      const result = original.jsonParse.apply(this, arguments);
+      state.patchedJsonParses += 1;
+      normalizeReloadFields(result, "JSON.parse", { maxDepth: 6, maxNodes: 2500, deep: true });
+      return result;
+    };
+
+    Object.assign = function zyroxReloadObjectAssign(target, ...sources) {
+      const result = original.objectAssign.call(this, target, ...sources);
+      state.patchedAssigns += 1;
+      normalizeReloadFields(result, "Object.assign", { maxDepth: 4, maxNodes: 1200, deep: true });
+      return result;
+    };
+
+    Object.defineProperty = function zyroxReloadDefineProperty(target, prop, descriptor) {
+      return original.defineProperty.call(
+        this,
+        target,
+        prop,
+        normalizePropertyDescriptor(prop, descriptor, `Object.defineProperty.${displayKey(prop)}`),
+      );
+    };
+
+    Object.defineProperties = function zyroxReloadDefineProperties(target, descriptors) {
+      const normalizedDescriptors = {};
+      for (const prop of Reflect.ownKeys(descriptors || {})) {
+        normalizedDescriptors[prop] = normalizePropertyDescriptor(
+          prop,
+          descriptors[prop],
+          `Object.defineProperties.${displayKey(prop)}`,
+        );
+      }
+      return original.defineProperties.call(this, target, normalizedDescriptors);
+    };
   }
 
-  function stopTimers() {
-    clearInterval(state.fireTimer);
-    clearInterval(state.zeroTimer);
-    state.fireTimer = null;
-    state.zeroTimer = null;
+  function restoreObjectAPIs() {
+    JSON.parse = original.jsonParse;
+    Object.assign = original.objectAssign;
+    Object.defineProperty = original.defineProperty;
+    Object.defineProperties = original.defineProperties;
   }
 
-  function setEnabled(enabled) {
-    state.enabled = Boolean(enabled);
-    if (state.enabled) startTimers();
-    else stopTimers();
+  function start() {
+    if (state.shallowIntervalId || state.deepIntervalId) return;
+    state.enabled = true;
+    scan(true);
+    state.shallowIntervalId = setInterval(() => scan(false), SCAN_INTERVAL_MS);
+    state.deepIntervalId = setInterval(() => scan(true), DEEP_SCAN_INTERVAL_MS);
     updateHud();
   }
 
-  function patchWebSocket() {
-    const NativeWebSocket = window.WebSocket;
-    class ReloadTestWebSocket extends NativeWebSocket {
-      constructor(url, protocols) {
-        if (protocols === undefined) super(url);
-        else super(url, protocols);
-        if (!state.socket) {
-          state.socket = this;
-          console.log(LOG, "captured WebSocket", url);
-          updateHud();
-        }
-      }
-    }
-
-    Object.setPrototypeOf(ReloadTestWebSocket, NativeWebSocket);
-    window.WebSocket = ReloadTestWebSocket;
-
-    return () => {
-      if (window.WebSocket === ReloadTestWebSocket) window.WebSocket = NativeWebSocket;
-    };
+  function stop() {
+    state.enabled = false;
+    clearInterval(state.shallowIntervalId);
+    clearInterval(state.deepIntervalId);
+    state.shallowIntervalId = null;
+    state.deepIntervalId = null;
+    updateHud();
   }
 
   function makeHud() {
@@ -329,7 +288,7 @@
       "top:12px",
       "right:12px",
       "z-index:2147483647",
-      "width:260px",
+      "width:280px",
       "padding:10px",
       "border-radius:8px",
       "background:rgba(15,15,18,.92)",
@@ -338,29 +297,20 @@
       "box-shadow:0 4px 16px rgba(0,0,0,.35)",
     ].join(";");
     hud.innerHTML = `
-      <div style="font-weight:700;margin-bottom:8px">Reload / projectile test</div>
-      <button data-action="toggle" style="width:100%;margin-bottom:6px">Start</button>
-      <label style="display:block;margin:4px 0"><input data-action="zero" type="checkbox" checked> zero reload-like fields</label>
-      <label style="display:block;margin:4px 0"><input data-action="mouse" type="checkbox" checked> only fire while mouse is down</label>
-      <label style="display:block;margin:6px 0">interval ms <input data-action="interval" type="number" min="1" value="${DEFAULT_INTERVAL_MS}" style="width:70px"></label>
-      <button data-action="single" style="width:100%;margin:4px 0">Send one FIRE</button>
+      <div style="font-weight:700;margin-bottom:6px">Zero reload test</div>
+      <div style="margin-bottom:8px;color:#ddd">Keeps reload/cooldown duration fields at <b>0</b>. It does not send FIRE packets.</div>
+      <button data-action="toggle" style="width:100%;margin-bottom:6px">Stop</button>
+      <button data-action="scan" style="width:100%;margin-bottom:6px">Deep scan now</button>
       <div data-status style="margin-top:8px;color:#ddd"></div>
+      <details style="margin-top:6px"><summary>Recent changes</summary><pre data-samples style="white-space:pre-wrap;max-height:120px;overflow:auto;margin:6px 0 0"></pre></details>
     `;
     hud.addEventListener("click", (event) => {
       const action = event.target?.dataset?.action;
-      if (action === "toggle") setEnabled(!state.enabled);
-      if (action === "single") sendFire();
-    });
-    hud.addEventListener("change", (event) => {
-      const target = event.target;
-      const action = target?.dataset?.action;
-      if (action === "zero") state.zeroReload = target.checked;
-      if (action === "mouse") state.fireWhileMouseDownOnly = target.checked;
-      if (action === "interval") {
-        state.intervalMs = Math.max(1, Number(target.value) || DEFAULT_INTERVAL_MS);
-        if (state.enabled) startTimers();
+      if (action === "toggle") {
+        if (state.enabled) stop();
+        else start();
       }
-      updateHud();
+      if (action === "scan") scan(true);
     });
     return hud;
   }
@@ -370,16 +320,20 @@
     if (!hud) return;
     const toggle = hud.querySelector('[data-action="toggle"]');
     const status = hud.querySelector("[data-status]");
+    const samples = hud.querySelector("[data-samples]");
     if (toggle) toggle.textContent = state.enabled ? "Stop" : "Start";
     if (status) {
       status.innerHTML = [
-        `socket: ${state.socket?.readyState === WebSocket.OPEN ? "open" : state.socket ? "captured" : "waiting"}`,
-        `sent: ${state.packetsSent}`,
-        `zeroed writes: ${state.zeroedFields}`,
-        state.lastFireAt ? `last fire: ${new Date(state.lastFireAt).toLocaleTimeString()}` : "last fire: never",
+        `status: ${state.enabled ? "forcing reload time to 0" : "stopped"}`,
+        `writes: ${state.totalWrites}`,
+        `scans: ${state.scanCount}`,
+        `last scan: ${state.lastScanMs}ms`,
+        `JSON.parse patches: ${state.patchedJsonParses}`,
+        `Object.assign patches: ${state.patchedAssigns}`,
         state.lastError ? `last error: ${state.lastError}` : "",
       ].filter(Boolean).join("<br>");
     }
+    if (samples) samples.textContent = state.samples.join("\n");
   }
 
   function installHud() {
@@ -392,22 +346,23 @@
     updateHud();
   }
 
-  const restoreWebSocket = patchWebSocket();
+  patchObjectAPIs();
   installHud();
+  start();
 
   window.__zyroxReloadTest = {
     state,
-    start: () => setEnabled(true),
-    stop: () => setEnabled(false),
-    fire: sendFire,
-    zero: zeroLikelyReloadState,
+    start,
+    stop,
+    scan,
+    zero: () => scan(true),
     destroy() {
-      setEnabled(false);
-      restoreWebSocket();
+      stop();
+      restoreObjectAPIs();
       hud?.remove();
       if (window.__zyroxReloadTest === this) delete window.__zyroxReloadTest;
     },
   };
 
-  console.log(LOG, "loaded. Use the HUD or window.__zyroxReloadTest.start().");
+  console.log(LOG, "loaded; reload/cooldown duration fields will be kept at 0. Use window.__zyroxReloadTest.stop() to disable.");
 })();
