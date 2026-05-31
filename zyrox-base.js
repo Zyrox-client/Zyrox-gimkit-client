@@ -4697,8 +4697,8 @@
     pageBackground: "#020617",
     correctBackground: "#166534",
     wrongBackground: "#7f1d1d",
-    continueButtonBackground: "#1d4ed8",
-    shopButtonBackground: "#7c2d12",
+    continueButtonBackground: "#0f1e3a",
+    shopButtonBackground: "#431407",
     questionBackground: "#101827",
     questionText: "#e0f2fe",
     option1Background: "#771322",
@@ -4747,8 +4747,8 @@
         pageBackground: "#020617",
         correctBackground: "#166534",
         wrongBackground: "#7f1d1d",
-        continueButtonBackground: "#1d4ed8",
-        shopButtonBackground: "#7c2d12",
+        continueButtonBackground: "#0f1e3a",
+        shopButtonBackground: "#431407",
         questionBackground: "#101827",
         questionText: "#e0f2fe",
         option1Background: "#771322",
@@ -4949,6 +4949,21 @@
     return String(value || "").replace(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/gi, (_match, r, g, b, a) => darkenPart(r, g, b, a ?? null));
   }
 
+  function cssBackgroundLayer(value) {
+    const background = String(value || "").trim();
+    if (!background || background === "transparent") return "";
+    if (/gradient\(|url\(/i.test(background)) return background;
+    return `linear-gradient(${background}, ${background})`;
+  }
+
+  function composeGlobalThemeButtonBackground(globalTheme) {
+    if (!globalTheme) return "";
+    const baseBackground = globalTheme.inactiveBackground || "#000000";
+    const overlayLayer = cssBackgroundLayer(globalTheme.activeBackground);
+    const baseLayer = cssBackgroundLayer(baseBackground) || baseBackground;
+    return overlayLayer ? `${overlayLayer}, ${baseLayer}` : baseBackground;
+  }
+
   function getStylesGlobalThemeValues() {
     const uiRoot = document.querySelector(".zyrox-root");
     const activeModule = uiRoot?.querySelector?.(".zyrox-module.active")
@@ -4964,9 +4979,12 @@
     const radiusFallback = uiComputed?.getPropertyValue("--zyx-radius-md")?.trim() || `${QUESTION_STYLES_DEFAULTS.borderRadius}px`;
     const activeComputed = activeModule instanceof HTMLElement ? window.getComputedStyle(activeModule) : null;
     const categoryBackground = getComputedBackgroundValue(categoryHeader, categoryFallback);
+    const activeBackground = getComputedBackgroundValue(activeModule, activeFallback);
+    const inactiveBackground = getComputedOpaqueBackgroundColor(inactiveModule, inactiveFallback);
     return {
-      activeBackground: getComputedBackgroundValue(activeModule, activeFallback),
-      inactiveBackground: getComputedOpaqueBackgroundColor(inactiveModule, inactiveFallback),
+      activeBackground,
+      inactiveBackground,
+      buttonBackground: composeGlobalThemeButtonBackground({ activeBackground, inactiveBackground }),
       categoryBackground: darkenCssBackground(categoryBackground, 0.62),
       borderRadius: activeComputed?.borderRadius || radiusFallback,
     };
@@ -5213,11 +5231,34 @@
     }
   }
 
+  function elementHasVisibleBackground(element) {
+    if (!(element instanceof HTMLElement)) return false;
+    const computed = window.getComputedStyle(element);
+    if (computed.backgroundImage && computed.backgroundImage !== "none") return true;
+    const parsed = parseCssRgb(computed.backgroundColor);
+    return Boolean(parsed && parsed.a > 0.01);
+  }
+
+  function applyGlobalThemeButtonSurface(element, background, borderRadiusValue, baseBackground = "#000000") {
+    if (!isQuestionStyleElement(element)) return;
+    setQuestionInlineStyle(element, "background", background);
+    setQuestionInlineStyle(element, "background-color", baseBackground);
+    if (borderRadiusValue) setQuestionInlineStyle(element, "border-radius", borderRadiusValue);
+    const descendants = Array.from(element.querySelectorAll("button,[role='button'],a,div,span"))
+      .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
+    for (const child of descendants.slice(0, 12)) {
+      setQuestionInlineStyle(child, "background", background);
+      setQuestionInlineStyle(child, "background-color", baseBackground);
+      if (borderRadiusValue) setQuestionInlineStyle(child, "border-radius", borderRadiusValue);
+    }
+  }
+
   function applyQuestionShellStyles(cfg, globalTheme = null) {
     const topBarBackground = globalTheme?.categoryBackground || resolveStylesBackground(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
     const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
-    const continueBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
-    const shopBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
+    const continueBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
+    const shopBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
+    const borderRadiusValue = globalTheme?.borderRadius || `${Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius))}px`;
     if (globalTheme) {
       for (const element of [document.documentElement, document.body]) {
         if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
@@ -5230,10 +5271,14 @@
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
     }
     for (const element of document.querySelectorAll(".ljtfrY, .dDfMyc")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", continueBackground);
+      if (!(element instanceof HTMLElement)) continue;
+      if (globalTheme) applyGlobalThemeButtonSurface(element, continueBackground, borderRadiusValue, pageBackground);
+      else setQuestionInlineStyle(element, "background", continueBackground);
     }
     for (const element of document.querySelectorAll(".dBwWbX")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", shopBackground);
+      if (!(element instanceof HTMLElement)) continue;
+      if (globalTheme) applyGlobalThemeButtonSurface(element, shopBackground, borderRadiusValue, pageBackground);
+      else setQuestionInlineStyle(element, "background", shopBackground);
     }
   }
 
@@ -5257,8 +5302,9 @@
 
     targets.options.forEach((option, index) => {
       const optionNumber = index + 1;
-      const optionBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]);
-      setQuestionInlineStyle(option, "background", optionBackground);
+      const optionBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]);
+      if (globalTheme) applyGlobalThemeButtonSurface(option, optionBackground, borderRadiusValue, globalTheme.inactiveBackground);
+      else setQuestionInlineStyle(option, "background", optionBackground);
       applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
       setQuestionInlineStyle(option, "border-radius", borderRadiusValue);
     });
