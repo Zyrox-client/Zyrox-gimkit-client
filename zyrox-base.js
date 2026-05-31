@@ -7874,6 +7874,7 @@
     configBody.__zyroxStylesConfigAbort = null;
     const cfg = moduleCfg(moduleName);
     const moduleLayout = getModuleLayoutConfig(moduleName);
+    if (moduleName === STYLES_MODULE_NAME) attachStylesConfigLiveSync(configBody);
 
     configBody.innerHTML = `
       <div class="zyrox-config-row">
