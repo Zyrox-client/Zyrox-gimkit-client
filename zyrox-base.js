@@ -2564,6 +2564,14 @@
     statusText: "Idle",
   };
 
+  const quickFireState = {
+    enabled: false,
+    intervalId: null,
+    intervalMs: 50,
+    lastStatus: "Idle",
+    statusText: "Idle",
+  };
+
   const autoAimState = {
     enabled: false,
     rafId: null,
@@ -2600,6 +2608,17 @@
       showTargetRing: true,
     };
     const stored = window.__zyroxTriggerAssistConfig;
+    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+  }
+
+  function getQuickFireConfig() {
+    const defaults = {
+      enabled: true,
+      fireIntervalMs: 50,
+      onlyWhenMouseDown: true,
+      onlyWhenGameFocused: true,
+    };
+    const stored = window.__zyroxQuickFireConfig;
     return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
   }
 
@@ -3134,6 +3153,87 @@
     ctx.arc(triggerAssistState.target.screenX, triggerAssistState.target.screenY, 10 + pulse * 2.5, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+  }
+
+  function quickFireTick() {
+    if (!quickFireState.enabled) return;
+    const cfg = getQuickFireConfig();
+    if (!cfg.enabled) {
+      quickFireState.lastStatus = "Disabled in config";
+      quickFireState.statusText = quickFireState.lastStatus;
+      return;
+    }
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
+      quickFireState.lastStatus = "Waiting for focus";
+      quickFireState.statusText = quickFireState.lastStatus;
+      return;
+    }
+
+    const stores = espState.stores ?? window.stores;
+    const phaser = stores?.phaser;
+    const scene = phaser?.scene;
+    const mousePointer = scene?.input?.mousePointer ?? scene?.input?.activePointer;
+    const body = phaser?.mainCharacter?.body;
+    if (!mousePointer || !body) {
+      quickFireState.lastStatus = "Waiting for game objects";
+      quickFireState.statusText = quickFireState.lastStatus;
+      return;
+    }
+    if (cfg.onlyWhenMouseDown) {
+      const pointerButtons = Number(mousePointer.buttons) || 0;
+      const isLeftDown = Boolean(mousePointer.isDown || mousePointer.leftButtonDown?.() || (pointerButtons & 1));
+      if (!isLeftDown) {
+        quickFireState.lastStatus = "Waiting for left click";
+        quickFireState.statusText = quickFireState.lastStatus;
+        return;
+      }
+    }
+
+    const Vector2 = window.Phaser?.Math?.Vector2;
+    const angleBetween = window.Phaser?.Math?.Angle?.Between;
+    if (typeof Vector2 !== "function" || typeof angleBetween !== "function") {
+      quickFireState.lastStatus = "Waiting for Phaser math";
+      quickFireState.statusText = quickFireState.lastStatus;
+      return;
+    }
+
+    const bodyX = Number(body.x);
+    const bodyY = Number(body.y);
+    const worldX = Number(mousePointer.worldX);
+    const worldY = Number(mousePointer.worldY);
+    if (![bodyX, bodyY, worldX, worldY].every(Number.isFinite)) {
+      quickFireState.lastStatus = "Waiting for coordinates";
+      quickFireState.statusText = quickFireState.lastStatus;
+      return;
+    }
+
+    const vector = new Vector2(worldX - bodyX, worldY - (bodyY - 3)).normalize();
+    const angle = angleBetween(0, 0, vector.x, vector.y);
+    socketManager.sendMessage("FIRE", { angle, x: bodyX, y: bodyY });
+    quickFireState.lastStatus = "Fired";
+    quickFireState.statusText = quickFireState.lastStatus;
+  }
+
+  function startQuickFire() {
+    stopQuickFire();
+    quickFireState.enabled = true;
+    quickFireState.lastStatus = "Armed";
+    quickFireState.statusText = quickFireState.lastStatus;
+    const cfg = getQuickFireConfig();
+    const intervalMs = Math.max(16, Math.min(250, Number(cfg.fireIntervalMs) || 50));
+    quickFireState.intervalMs = intervalMs;
+    quickFireState.intervalId = setInterval(quickFireTick, intervalMs);
+  }
+
+  function stopQuickFire() {
+    if (quickFireState.intervalId != null) {
+      clearInterval(quickFireState.intervalId);
+      quickFireState.intervalId = null;
+    }
+    quickFireState.enabled = false;
+    quickFireState.intervalMs = 50;
+    quickFireState.lastStatus = "Idle";
+    quickFireState.statusText = "Idle";
   }
 
   function triggerAssistTick() {
@@ -6533,6 +6633,10 @@
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
     },
+    "Quick Fire": {
+      onEnable: startQuickFire,
+      onDisable: stopQuickFire,
+    },
     "Aimbot": {
       onEnable: startAutoAim,
       onDisable: stopAutoAim,
@@ -6584,6 +6688,7 @@
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
     "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
+    "Quick Fire": "Rapidly fires toward your cursor while left click is held.",
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
@@ -6771,6 +6876,16 @@
                 { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
                 { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
+              ],
+            },
+            {
+              name: "Quick Fire",
+              description: MODULE_DESCRIPTIONS["Quick Fire"],
+              settings: [
+                { id: "enabled",             label: "Enabled",              type: "checkbox", default: true },
+                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 50, min: 16, max: 250, step: 1, unit: "ms" },
+                { id: "onlyWhenMouseDown",   label: "Only While Left Click", type: "checkbox", default: true },
+                { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
               ],
             },
             {
@@ -8244,6 +8359,8 @@
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
     } else if (name === "Triggerbot (Autoshoot)") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
+    } else if (name === "Quick Fire") {
+      window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
     } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
     } else if (name === "Auto Answer") {
@@ -9361,6 +9478,10 @@
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
               }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
+              }
               saveSettings();
             });
             settingInput.addEventListener("change", (event) => {
@@ -9369,6 +9490,10 @@
               if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
+              }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             });
@@ -9420,6 +9545,10 @@
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
               }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
+              }
               saveSettings();
             });
           }
@@ -9454,6 +9583,10 @@
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
               }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
+              }
               saveSettings();
             });
           }
@@ -9472,6 +9605,10 @@
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
+              }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             };
@@ -9493,6 +9630,10 @@
               cfg[setting.id] = String(event.target.value ?? "");
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
+              }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             });
