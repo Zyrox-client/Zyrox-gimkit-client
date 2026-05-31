@@ -6,7 +6,7 @@
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
-// @grant        none
+// @grant        unsafeWindow
 // ==/UserScript==
 
 (() => {
@@ -25,8 +25,8 @@
   const FOLLOW_KEY_PATTERN = /weapon|gun|projectile|bullet|combat|attack|character|player|ability|item|inventory|controller|manager|phaser|scene|state|store|config|data|stats|equipment|gadget/i;
   const SKIP_KEY_PATTERN = /^(?:parent|parentContainer|children|displayList|events|textures|cache|anims|sound|renderer|plugins|sys|game|canvas|context|socket|connection|xhr|document|window)$/i;
 
-  if (window.__zyroxReloadTest?.destroy) {
-    window.__zyroxReloadTest.destroy();
+  if (getUnsafeWindow().__zyroxReloadTest?.destroy) {
+    getUnsafeWindow().__zyroxReloadTest.destroy();
   }
 
   const state = {
@@ -40,17 +40,25 @@
     patchedDefineProperties: 0,
     lastScanMs: 0,
     lastError: "",
+    patchErrors: [],
     samples: [],
   };
 
   const original = {
-    jsonParse: JSON.parse,
-    objectAssign: Object.assign,
-    defineProperty: Object.defineProperty,
-    defineProperties: Object.defineProperties,
+    jsonObject: null,
+    objectObject: null,
+    jsonParse: null,
+    objectAssign: null,
+    defineProperty: null,
+    defineProperties: null,
+    patchedJsonParse: false,
+    patchedObjectAssign: false,
+    patchedDefineProperty: false,
+    patchedDefineProperties: false,
   };
 
   function getUnsafeWindow() {
+    if (typeof unsafeWindow !== "undefined") return unsafeWindow;
     return window.wrappedJSObject || window;
   }
 
@@ -218,48 +226,87 @@
     return changed;
   }
 
+  function recordPatchError(name, error) {
+    const message = `${name}: ${error?.message || String(error)}`;
+    state.patchErrors.push(message);
+    state.lastError = message;
+    console.warn(LOG, `could not patch ${name}`, error);
+  }
+
   function patchObjectAPIs() {
-    JSON.parse = function zyroxReloadJsonParse(text, reviver) {
-      const result = original.jsonParse.apply(this, arguments);
-      state.patchedJsonParses += 1;
-      normalizeReloadFields(result, "JSON.parse", { maxDepth: 6, maxNodes: 2500, deep: true });
-      return result;
-    };
+    const unsafe = getUnsafeWindow();
+    original.jsonObject = unsafe.JSON || JSON;
+    original.objectObject = unsafe.Object || Object;
+    original.jsonParse = original.jsonObject.parse;
+    original.objectAssign = original.objectObject.assign;
+    original.defineProperty = original.objectObject.defineProperty;
+    original.defineProperties = original.objectObject.defineProperties;
 
-    Object.assign = function zyroxReloadObjectAssign(target, ...sources) {
-      const result = original.objectAssign.call(this, target, ...sources);
-      state.patchedAssigns += 1;
-      normalizeReloadFields(result, "Object.assign", { maxDepth: 4, maxNodes: 1200, deep: true });
-      return result;
-    };
+    try {
+      original.jsonObject.parse = function zyroxReloadJsonParse(text, reviver) {
+        const result = original.jsonParse.apply(this, arguments);
+        state.patchedJsonParses += 1;
+        normalizeReloadFields(result, "JSON.parse", { maxDepth: 6, maxNodes: 2500, deep: true });
+        return result;
+      };
+      original.patchedJsonParse = original.jsonObject.parse !== original.jsonParse;
+    } catch (error) {
+      recordPatchError("JSON.parse", error);
+    }
 
-    Object.defineProperty = function zyroxReloadDefineProperty(target, prop, descriptor) {
-      return original.defineProperty.call(
-        this,
-        target,
-        prop,
-        normalizePropertyDescriptor(prop, descriptor, `Object.defineProperty.${displayKey(prop)}`),
-      );
-    };
+    try {
+      original.objectObject.assign = function zyroxReloadObjectAssign(target, ...sources) {
+        const result = original.objectAssign.call(this, target, ...sources);
+        state.patchedAssigns += 1;
+        normalizeReloadFields(result, "Object.assign", { maxDepth: 4, maxNodes: 1200, deep: true });
+        return result;
+      };
+      original.patchedObjectAssign = original.objectObject.assign !== original.objectAssign;
+    } catch (error) {
+      recordPatchError("Object.assign", error);
+    }
 
-    Object.defineProperties = function zyroxReloadDefineProperties(target, descriptors) {
-      const normalizedDescriptors = {};
-      for (const prop of Reflect.ownKeys(descriptors || {})) {
-        normalizedDescriptors[prop] = normalizePropertyDescriptor(
+    try {
+      original.objectObject.defineProperty = function zyroxReloadDefineProperty(target, prop, descriptor) {
+        return original.defineProperty.call(
+          this,
+          target,
           prop,
-          descriptors[prop],
-          `Object.defineProperties.${displayKey(prop)}`,
+          normalizePropertyDescriptor(prop, descriptor, `Object.defineProperty.${displayKey(prop)}`),
         );
-      }
-      return original.defineProperties.call(this, target, normalizedDescriptors);
-    };
+      };
+      original.patchedDefineProperty = original.objectObject.defineProperty !== original.defineProperty;
+    } catch (error) {
+      recordPatchError("Object.defineProperty", error);
+    }
+
+    try {
+      original.objectObject.defineProperties = function zyroxReloadDefineProperties(target, descriptors) {
+        const normalizedDescriptors = {};
+        for (const prop of Reflect.ownKeys(descriptors || {})) {
+          normalizedDescriptors[prop] = normalizePropertyDescriptor(
+            prop,
+            descriptors[prop],
+            `Object.defineProperties.${displayKey(prop)}`,
+          );
+        }
+        return original.defineProperties.call(this, target, normalizedDescriptors);
+      };
+      original.patchedDefineProperties = original.objectObject.defineProperties !== original.defineProperties;
+    } catch (error) {
+      recordPatchError("Object.defineProperties", error);
+    }
   }
 
   function restoreObjectAPIs() {
-    JSON.parse = original.jsonParse;
-    Object.assign = original.objectAssign;
-    Object.defineProperty = original.defineProperty;
-    Object.defineProperties = original.defineProperties;
+    try {
+      if (original.patchedJsonParse) original.jsonObject.parse = original.jsonParse;
+      if (original.patchedObjectAssign) original.objectObject.assign = original.objectAssign;
+      if (original.patchedDefineProperty) original.objectObject.defineProperty = original.defineProperty;
+      if (original.patchedDefineProperties) original.objectObject.defineProperties = original.defineProperties;
+    } catch (error) {
+      recordPatchError("restore Object APIs", error);
+    }
   }
 
   function start() {
@@ -330,6 +377,12 @@
         `last scan: ${state.lastScanMs}ms`,
         `JSON.parse patches: ${state.patchedJsonParses}`,
         `Object.assign patches: ${state.patchedAssigns}`,
+        `API hooks: ${[
+          original.patchedJsonParse && "JSON.parse",
+          original.patchedObjectAssign && "Object.assign",
+          original.patchedDefineProperty && "defineProperty",
+          original.patchedDefineProperties && "defineProperties",
+        ].filter(Boolean).join(", ") || "unavailable; scanner still active"}`,
         state.lastError ? `last error: ${state.lastError}` : "",
       ].filter(Boolean).join("<br>");
     }
@@ -350,7 +403,7 @@
   installHud();
   start();
 
-  window.__zyroxReloadTest = {
+  const api = {
     state,
     start,
     stop,
@@ -360,9 +413,13 @@
       stop();
       restoreObjectAPIs();
       hud?.remove();
+      if (getUnsafeWindow().__zyroxReloadTest === this) delete getUnsafeWindow().__zyroxReloadTest;
       if (window.__zyroxReloadTest === this) delete window.__zyroxReloadTest;
     },
   };
+
+  getUnsafeWindow().__zyroxReloadTest = api;
+  window.__zyroxReloadTest = api;
 
   console.log(LOG, "loaded; reload/cooldown duration fields will be kept at 0. Use window.__zyroxReloadTest.stop() to disable.");
 })();
