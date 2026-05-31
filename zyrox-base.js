@@ -4872,8 +4872,9 @@
     '[class*="option" i]',
     '[style*="cursor: pointer" i]',
   ].join(",");
-  const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /^(continue|next|ok|okay)$/i;
-  const QUESTION_STYLE_SHOP_TEXT_PATTERN = /^(shop|open shop|store)$/i;
+  const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /(?:^|\b)(continue|next|ok|okay)(?:\b|$)/i;
+  const QUESTION_STYLE_SHOP_TEXT_PATTERN = /(?:^|\b)(shop|open shop|store)(?:\b|$)/i;
+  const QUESTION_STYLE_ACTION_TEXT_MAX_LENGTH = 90;
   const questionStylesState = {
     observer: null,
     changedElements: new Set(),
@@ -5086,22 +5087,71 @@
     return String(element?.textContent || element?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
   }
 
-  function isLikelyQuestionActionButton(element, textPattern) {
-    if (!isQuestionStyleVisible(element)) return false;
-    const text = getQuestionStyleInteractiveText(element);
-    if (!textPattern.test(text)) return false;
+  function isQuestionStyleClickableElement(element) {
+    if (!(element instanceof HTMLElement)) return false;
     const tagName = String(element.tagName || "").toLowerCase();
     const role = String(element.getAttribute?.("role") || "").toLowerCase();
+    const className = String(element.className || "");
     const style = window.getComputedStyle(element);
-    return tagName === "button" || role === "button" || style.cursor === "pointer" || element.tabIndex >= 0;
+    return tagName === "button"
+      || tagName === "a"
+      || role === "button"
+      || role === "link"
+      || style.cursor === "pointer"
+      || element.tabIndex >= 0
+      || /(?:^|[-_\s])(btn|button)(?:[-_\s]|$)/i.test(className);
   }
 
-  function getQuestionActionButtonCandidates(textPattern, root = document, limit = 4) {
+  function isQuestionActionTextMatch(element, textPattern) {
+    const text = getQuestionStyleInteractiveText(element);
+    return Boolean(text && text.length <= QUESTION_STYLE_ACTION_TEXT_MAX_LENGTH && textPattern.test(text));
+  }
+
+  function findQuestionActionSurface(element) {
+    if (!isQuestionStyleVisible(element)) return null;
+    let current = element;
+    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
+      if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
+      if (isQuestionStyleClickableElement(current) && isQuestionStyleVisible(current)) return current;
+    }
+    const rect = element.getBoundingClientRect();
+    if (elementHasVisibleBackground(element) && rect.width <= 340 && rect.height <= 120) return element;
+    return null;
+  }
+
+  function isLikelyQuestionActionButton(element, textPattern) {
+    return isQuestionActionTextMatch(element, textPattern) && Boolean(findQuestionActionSurface(element));
+  }
+
+  function addQuestionActionCandidate(buttons, seen, element, textPattern, limit) {
+    if (!(element instanceof HTMLElement) || !isQuestionActionTextMatch(element, textPattern)) return false;
+    const surface = findQuestionActionSurface(element);
+    if (!(surface instanceof HTMLElement) || seen.has(surface)) return false;
+    seen.add(surface);
+    buttons.push(surface);
+    return buttons.length >= limit;
+  }
+
+  function getQuestionActionButtonCandidates(textPattern, root = document, limit = 6) {
     const searchRoot = root && typeof root.querySelectorAll === "function" ? root : document;
     const buttons = [];
+    const seen = new Set();
     for (const element of searchRoot.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (buttons.length >= limit) break;
-      if (element instanceof HTMLElement && isLikelyQuestionActionButton(element, textPattern)) buttons.push(element);
+      if (addQuestionActionCandidate(buttons, seen, element, textPattern, limit)) return buttons;
+    }
+    const walkerRoot = searchRoot === document ? document.body : searchRoot;
+    if (walkerRoot instanceof HTMLElement) {
+      const walker = document.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
+        acceptNode(node) {
+          if (!(node instanceof HTMLElement) || !isQuestionStyleElement(node)) return NodeFilter.FILTER_REJECT;
+          if (!node.children.length && isQuestionActionTextMatch(node, textPattern)) return NodeFilter.FILTER_ACCEPT;
+          return NodeFilter.FILTER_SKIP;
+        },
+      });
+      let scanned = 0;
+      for (let node = walker.nextNode(); node && scanned < 3000; node = walker.nextNode(), scanned += 1) {
+        if (addQuestionActionCandidate(buttons, seen, node, textPattern, limit)) break;
+      }
     }
     return buttons;
   }
@@ -5212,6 +5262,7 @@
     if (isQuestionStyleVisible(direct)) return true;
     if (getQuestionContinueButtonCandidates().length > 0) return true;
     if (getQuestionShopButtonCandidates().length > 0) return true;
+    if (getQuestionTopBarCandidates(1).length > 0) return true;
     return false;
   }
 
@@ -5317,6 +5368,58 @@
     return Boolean(parsed && parsed.a > 0.01);
   }
 
+  function isLikelyQuestionTopBar(element) {
+    if (!isQuestionStyleVisible(element) || !elementHasVisibleBackground(element)) return false;
+    const tagName = String(element.tagName || "").toLowerCase();
+    if (["button", "a", "canvas", "svg", "img", "input", "select", "textarea"].includes(tagName)) return false;
+    const rect = element.getBoundingClientRect();
+    const viewportWidth = Math.max(320, window.innerWidth || 0);
+    if (rect.top > 120 || rect.bottom < 12) return false;
+    if (rect.width < Math.min(280, viewportWidth * 0.45)) return false;
+    if (rect.height < 28 || rect.height > 120) return false;
+    const text = getQuestionStyleInteractiveText(element);
+    if (QUESTION_STYLE_CONTINUE_TEXT_PATTERN.test(text) || QUESTION_STYLE_SHOP_TEXT_PATTERN.test(text)) return false;
+    return true;
+  }
+
+  function getQuestionTopBarCandidates(limit = 4) {
+    const candidates = new Map();
+    const addCandidate = (element, score = 0) => {
+      if (!(element instanceof HTMLElement) || candidates.has(element) || !isLikelyQuestionTopBar(element)) return;
+      const rect = element.getBoundingClientRect();
+      const widthRatio = rect.width / Math.max(1, window.innerWidth || rect.width);
+      candidates.set(element, score + (1 - Math.min(1, Math.max(0, rect.top) / 120)) * 40 + widthRatio * 35 - Math.abs(rect.height - 56) / 4);
+    };
+
+    for (const element of document.querySelectorAll(".gAlRHP, .dujAvP, header, nav, [class*='top' i], [class*='bar' i], [class*='header' i]")) {
+      addCandidate(element, 35);
+    }
+
+    let scanned = 0;
+    for (const element of document.body?.querySelectorAll?.("*") || []) {
+      if (scanned >= 2500) break;
+      scanned += 1;
+      addCandidate(element, 0);
+    }
+
+    return [...candidates.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([element]) => element);
+  }
+
+  function applyQuestionTopBarSurface(element, background) {
+    if (!isQuestionStyleElement(element)) return;
+    setQuestionInlineStyle(element, "background", background);
+    setQuestionInlineStyle(element, "background-color", background);
+    const descendants = Array.from(element.querySelectorAll("div,header,nav,section"))
+      .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
+    for (const child of descendants.slice(0, 8)) {
+      setQuestionInlineStyle(child, "background", background);
+      setQuestionInlineStyle(child, "background-color", background);
+    }
+  }
+
   function applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground = background) {
     if (!isQuestionStyleElement(element)) return;
     setQuestionInlineStyle(element, "background", background);
@@ -5370,8 +5473,12 @@
     const borderRadiusValue = globalTheme?.borderRadius || `${clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius)}px`;
     const scopeRoots = getQuestionStyleScopeRoots(targets);
 
-    for (const element of queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", topBarBackground);
+    const topBars = new Set([
+      ...queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP"),
+      ...getQuestionTopBarCandidates(),
+    ]);
+    for (const element of topBars) {
+      if (element instanceof HTMLElement) applyQuestionTopBarSurface(element, topBarBackground);
     }
     for (const element of queryQuestionStyleScope(scopeRoots, ".cZgLFG, .cChptk")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
@@ -5400,7 +5507,9 @@
 
     const targets = findQuestionStyleTargets();
     const hasContinueButton = getQuestionContinueButtonCandidates().length > 0;
-    if (!targets && !hasShell && !hasContinueButton) return false;
+    const hasShopButton = getQuestionShopButtonCandidates().length > 0;
+    const hasTopBar = getQuestionTopBarCandidates(1).length > 0;
+    if (!targets && !hasShell && !hasContinueButton && !hasShopButton && !hasTopBar) return false;
 
     const cfg = getStylesConfig();
     const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
