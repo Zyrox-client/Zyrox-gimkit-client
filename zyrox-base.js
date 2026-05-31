@@ -4906,6 +4906,41 @@
     return computed.backgroundImage && computed.backgroundImage !== "none" ? computed.backgroundImage : computed.backgroundColor || fallback;
   }
 
+  function parseCssRgb(value) {
+    const match = String(value || "").match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+    if (!match) return null;
+    return {
+      r: Math.max(0, Math.min(255, Number(match[1]) || 0)),
+      g: Math.max(0, Math.min(255, Number(match[2]) || 0)),
+      b: Math.max(0, Math.min(255, Number(match[3]) || 0)),
+      a: match[4] === undefined ? 1 : Math.max(0, Math.min(1, Number(match[4]) || 0)),
+    };
+  }
+
+  function opaqueCssColorOverBlack(value, fallback = "#000000") {
+    const parsed = parseCssRgb(value);
+    if (!parsed) return value && value !== "transparent" ? value : fallback;
+    const r = Math.round(parsed.r * parsed.a);
+    const g = Math.round(parsed.g * parsed.a);
+    const b = Math.round(parsed.b * parsed.a);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
+
+  function getComputedOpaqueBackgroundColor(element, fallback = "#000000") {
+    if (!(element instanceof HTMLElement)) return fallback;
+    return opaqueCssColorOverBlack(window.getComputedStyle(element).backgroundColor, fallback);
+  }
+
+  function darkenCssBackground(value, factor = 0.72) {
+    const darkenPart = (r, g, b, alpha = null) => {
+      const nr = Math.max(0, Math.min(255, Math.round(Number(r) * factor)));
+      const ng = Math.max(0, Math.min(255, Math.round(Number(g) * factor)));
+      const nb = Math.max(0, Math.min(255, Math.round(Number(b) * factor)));
+      return alpha == null ? `rgb(${nr}, ${ng}, ${nb})` : `rgba(${nr}, ${ng}, ${nb}, ${alpha})`;
+    };
+    return String(value || "").replace(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/gi, (_match, r, g, b, a) => darkenPart(r, g, b, a ?? null));
+  }
+
   function getStylesGlobalThemeValues() {
     const uiRoot = document.querySelector(".zyrox-root");
     const activeModule = uiRoot?.querySelector?.(".zyrox-module.active")
@@ -4915,15 +4950,16 @@
       || uiRoot?.querySelector?.(".zyrox-module");
     const categoryHeader = uiRoot?.querySelector?.(".zyrox-panel-header");
     const activeFallback = "linear-gradient(90deg, rgba(255, 61, 61, 0.35), rgba(60, 18, 18, 0.82))";
-    const inactiveFallback = "rgba(255, 255, 255, 0.03)";
+    const inactiveFallback = "#000000";
     const categoryFallback = "linear-gradient(90deg, rgba(255, 74, 74, 0.24), rgba(60, 18, 18, 0.92))";
     const uiComputed = uiRoot instanceof HTMLElement ? window.getComputedStyle(uiRoot) : null;
     const radiusFallback = uiComputed?.getPropertyValue("--zyx-radius-md")?.trim() || `${QUESTION_STYLES_DEFAULTS.borderRadius}px`;
     const activeComputed = activeModule instanceof HTMLElement ? window.getComputedStyle(activeModule) : null;
+    const categoryBackground = getComputedBackgroundValue(categoryHeader, categoryFallback);
     return {
       activeBackground: getComputedBackgroundValue(activeModule, activeFallback),
-      inactiveBackground: getComputedBackgroundValue(inactiveModule, inactiveFallback),
-      categoryBackground: getComputedBackgroundValue(categoryHeader, categoryFallback),
+      inactiveBackground: getComputedOpaqueBackgroundColor(inactiveModule, inactiveFallback),
+      categoryBackground: darkenCssBackground(categoryBackground, 0.62),
       borderRadius: activeComputed?.borderRadius || radiusFallback,
     };
   }
@@ -5174,6 +5210,11 @@
     const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
     const continueBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
     const shopBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
+    if (globalTheme) {
+      for (const element of [document.documentElement, document.body]) {
+        if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
+      }
+    }
     for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", topBarBackground);
     }
@@ -5208,7 +5249,7 @@
 
     targets.options.forEach((option, index) => {
       const optionNumber = index + 1;
-      const optionBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]);
+      const optionBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]);
       setQuestionInlineStyle(option, "background", optionBackground);
       applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
       setQuestionInlineStyle(option, "border-radius", borderRadiusValue);
