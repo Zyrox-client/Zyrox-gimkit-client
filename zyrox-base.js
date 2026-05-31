@@ -4724,7 +4724,7 @@
         correctBackground: "#0d6b33",
         wrongBackground: "#771322",
         continueButtonBackground: "#076296",
-        shopButtonBackground: "#a85c15",
+        shopButtonBackground: "#076296",
         questionBackground: "#303f9f",
         questionText: "#ffffff",
         option1Background: "#771322",
@@ -4738,6 +4738,7 @@
         questionFontSize: 28,
         answerFontSize: 20,
         borderRadius: 0,
+        useGlobalTheme: false,
       },
     },
     midnight: {
@@ -4871,6 +4872,7 @@
     '[class*="option" i]',
     '[style*="cursor: pointer" i]',
   ].join(",");
+  const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /^(continue|next|ok|okay)$/i;
   const questionStylesState = {
     observer: null,
     changedElements: new Set(),
@@ -5072,6 +5074,26 @@
     questionStylesState.originalStyles = new WeakMap();
   }
 
+  function isLikelyQuestionContinueButton(element) {
+    if (!isQuestionStyleVisible(element)) return false;
+    const text = String(element.textContent || element.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+    if (!QUESTION_STYLE_CONTINUE_TEXT_PATTERN.test(text)) return false;
+    const tagName = String(element.tagName || "").toLowerCase();
+    const role = String(element.getAttribute?.("role") || "").toLowerCase();
+    const style = window.getComputedStyle(element);
+    return tagName === "button" || role === "button" || style.cursor === "pointer" || element.tabIndex >= 0;
+  }
+
+  function getQuestionContinueButtonCandidates(root = document) {
+    const searchRoot = root && typeof root.querySelectorAll === "function" ? root : document;
+    const buttons = [];
+    for (const element of searchRoot.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
+      if (buttons.length >= 4) break;
+      if (element instanceof HTMLElement && isLikelyQuestionContinueButton(element)) buttons.push(element);
+    }
+    return buttons;
+  }
+
   function getQuestionOptionCandidates(root) {
     if (!isQuestionStyleElement(root)) return [];
     const seen = new Set();
@@ -5098,6 +5120,8 @@
     if (!isQuestionStyleVisible(element)) return -1;
     const text = String(element.textContent || "").trim();
     if (text.length < 4) return -1;
+    const interactiveTotal = element.querySelectorAll?.(QUESTION_STYLE_INTERACTIVE_SELECTOR).length || 0;
+    if (interactiveTotal > 8 && !/question|answer|option|prompt/i.test(element.className || "")) return -1;
     const options = getQuestionOptionCandidates(element);
     if (options.length < 2) return -1;
     const rect = element.getBoundingClientRect();
@@ -5166,6 +5190,7 @@
     if (isQuestionStyleVisible(questionStylesState.currentRoot)) return true;
     const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
     if (isQuestionStyleVisible(direct)) return true;
+    if (getQuestionContinueButtonCandidates().length > 0) return true;
 
     let visibleInteractiveCount = 0;
     for (const element of document.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
@@ -5295,29 +5320,57 @@
     }
   }
 
-  function applyQuestionShellStyles(cfg, globalTheme = null) {
+  function getQuestionStyleScopeRoots(targets = null) {
+    const roots = new Set();
+    const addRoot = (element) => {
+      if (!isQuestionStyleElement(element)) return;
+      roots.add(element);
+      const shell = element.closest?.(QUESTION_STYLE_SCREEN_SELECTOR);
+      if (isQuestionStyleElement(shell)) roots.add(shell);
+      const section = element.closest?.("main,section");
+      if (isQuestionStyleElement(section)) roots.add(section);
+    };
+    addRoot(targets?.root);
+    addRoot(questionStylesState.currentRoot);
+    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+    addRoot(direct);
+    return roots;
+  }
+
+  function queryQuestionStyleScope(scopeRoots, selector) {
+    const elements = new Set();
+    for (const root of scopeRoots) {
+      if (!(root instanceof HTMLElement)) continue;
+      if (root.matches?.(selector)) elements.add(root);
+      for (const element of root.querySelectorAll(selector)) elements.add(element);
+    }
+    return elements;
+  }
+
+  function applyQuestionShellStyles(cfg, globalTheme = null, targets = null) {
     const topBarBackground = globalTheme?.categoryBackground || resolveStylesBackground(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
     const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
     const continueBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
     const shopBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
     const borderRadiusValue = globalTheme?.borderRadius || `${Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius))}px`;
-    if (globalTheme) {
-      for (const element of [document.documentElement, document.body]) {
-        if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
-      }
-    }
-    for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
+    const scopeRoots = getQuestionStyleScopeRoots(targets);
+
+    for (const element of queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", topBarBackground);
     }
-    for (const element of document.querySelectorAll(".cZgLFG, .cChptk")) {
+    for (const element of queryQuestionStyleScope(scopeRoots, ".cZgLFG, .cChptk")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
     }
-    for (const element of document.querySelectorAll(".ljtfrY, .dDfMyc")) {
+    const continueButtons = new Set([
+      ...queryQuestionStyleScope(scopeRoots, ".ljtfrY, .dDfMyc"),
+      ...getQuestionContinueButtonCandidates(),
+    ]);
+    for (const element of continueButtons) {
       if (!(element instanceof HTMLElement)) continue;
       if (globalTheme) applyGlobalThemeButtonSurface(element, continueBackground, borderRadiusValue, pageBackground);
       else setQuestionInlineStyle(element, "background", continueBackground);
     }
-    for (const element of document.querySelectorAll(".dBwWbX")) {
+    for (const element of queryQuestionStyleScope(scopeRoots, ".dBwWbX")) {
       if (!(element instanceof HTMLElement)) continue;
       if (globalTheme) applyGlobalThemeButtonSurface(element, shopBackground, borderRadiusValue, pageBackground);
       else setQuestionInlineStyle(element, "background", shopBackground);
@@ -5329,11 +5382,12 @@
     if (!hasLikelyQuestionStyleSurface(hasShell)) return false;
 
     const targets = findQuestionStyleTargets();
-    if (!targets && !hasShell) return false;
+    const hasContinueButton = getQuestionContinueButtonCandidates().length > 0;
+    if (!targets && !hasShell && !hasContinueButton) return false;
 
     const cfg = getStylesConfig();
     const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
-    applyQuestionShellStyles(cfg, globalTheme);
+    applyQuestionShellStyles(cfg, globalTheme, targets);
     if (!targets) return true;
     const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
     const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
@@ -8303,6 +8357,8 @@
         if (!(button instanceof HTMLButtonElement)) return;
         applyStylesPresetToConfig(cfg, button.dataset.stylePreset);
         syncAdvancedControlsFromCfg();
+        const globalThemeInput = presetCard.querySelector(".styles-use-global-theme");
+        if (globalThemeInput instanceof HTMLInputElement) globalThemeInput.checked = Boolean(cfg.useGlobalTheme);
         refreshQuestionStylesAfterConfigChange();
         saveSettings();
       });
