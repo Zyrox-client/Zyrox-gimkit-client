@@ -4689,6 +4689,464 @@
     }
   }
 
+
+  const STYLES_MODULE_NAME = "Styles";
+  const QUESTION_STYLES_DEFAULTS = {
+    questionBackground: "#000000",
+    questionText: "#ffffff",
+    option1Background: "#1368ce",
+    option1Text: "#ffffff",
+    option2Background: "#d89e00",
+    option2Text: "#ffffff",
+    option3Background: "#26890c",
+    option3Text: "#ffffff",
+    option4Background: "#c52222",
+    option4Text: "#ffffff",
+    questionFontSize: 28,
+    answerFontSize: 20,
+    borderRadius: 14,
+    stylePreset: "default",
+  };
+  const QUESTION_STYLES_PRESETS = {
+    default: {
+      label: "Default Gimkit",
+      values: {
+        questionBackground: "#000000",
+        questionText: "#ffffff",
+        option1Background: "#1368ce",
+        option1Text: "#ffffff",
+        option2Background: "#d89e00",
+        option2Text: "#ffffff",
+        option3Background: "#26890c",
+        option3Text: "#ffffff",
+        option4Background: "#c52222",
+        option4Text: "#ffffff",
+        questionFontSize: 28,
+        answerFontSize: 20,
+        borderRadius: 14,
+      },
+    },
+    midnight: {
+      label: "Midnight",
+      values: {
+        questionBackground: "#101827",
+        questionText: "#e0f2fe",
+        option1Background: "#1d4ed8",
+        option1Text: "#ffffff",
+        option2Background: "#7c2d12",
+        option2Text: "#fff7ed",
+        option3Background: "#166534",
+        option3Text: "#ecfdf5",
+        option4Background: "#7f1d1d",
+        option4Text: "#fef2f2",
+        questionFontSize: 30,
+        answerFontSize: 22,
+        borderRadius: 18,
+      },
+    },
+    highContrast: {
+      label: "High Contrast",
+      values: {
+        questionBackground: "#ffffff",
+        questionText: "#000000",
+        option1Background: "#0000ff",
+        option1Text: "#ffffff",
+        option2Background: "#ffcc00",
+        option2Text: "#000000",
+        option3Background: "#008000",
+        option3Text: "#ffffff",
+        option4Background: "#ff0000",
+        option4Text: "#ffffff",
+        questionFontSize: 32,
+        answerFontSize: 24,
+        borderRadius: 8,
+      },
+    },
+    pastel: {
+      label: "Pastel",
+      values: {
+        questionBackground: "#f8fafc",
+        questionText: "#1f2937",
+        option1Background: "#93c5fd",
+        option1Text: "#10233f",
+        option2Background: "#fde68a",
+        option2Text: "#3f2a00",
+        option3Background: "#bbf7d0",
+        option3Text: "#12351f",
+        option4Background: "#fecaca",
+        option4Text: "#451a1a",
+        questionFontSize: 28,
+        answerFontSize: 21,
+        borderRadius: 22,
+      },
+    },
+  };
+  const QUESTION_STYLE_SCREEN_SELECTOR = '[style*="opacity:"][style*="translateY(0%)"]';
+  const questionStylesState = {
+    observer: null,
+    changedElements: new Set(),
+    originalStyles: new WeakMap(),
+    syncTimer: null,
+    currentRoot: null,
+  };
+
+  function getStylesConfigStore() {
+    if (!(state.moduleConfig instanceof Map)) return null;
+    let cfg = state.moduleConfig.get(STYLES_MODULE_NAME);
+    if (!cfg || typeof cfg !== "object") {
+      cfg = { keybind: null, ...QUESTION_STYLES_DEFAULTS };
+      state.moduleConfig.set(STYLES_MODULE_NAME, cfg);
+    }
+    for (const [key, value] of Object.entries(QUESTION_STYLES_DEFAULTS)) {
+      if (cfg[key] === undefined) cfg[key] = value;
+    }
+    return cfg;
+  }
+
+  function getStylesConfig() {
+    const cfg = getStylesConfigStore() || {};
+    return { ...QUESTION_STYLES_DEFAULTS, ...cfg };
+  }
+
+  function applyStylesPresetToConfig(cfg, presetName) {
+    if (!cfg || typeof cfg !== "object") return;
+    const preset = QUESTION_STYLES_PRESETS[presetName];
+    if (!preset) return;
+    Object.assign(cfg, preset.values, { stylePreset: presetName });
+  }
+
+  function isStylesHexColor(value, fallback) {
+    const color = String(value || "").trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+  }
+
+  function isQuestionStyleElement(value) {
+    return value instanceof HTMLElement && !value.closest("#zyrox-menu-shell, #zyrox-config-menu, #zyrox-settings-menu, #zyrox-config-backdrop, #zyrox-welcome-card");
+  }
+
+  function isQuestionStyleVisible(element) {
+    if (!isQuestionStyleElement(element)) return false;
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width >= 20 && rect.height >= 20 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+  }
+
+  function rememberQuestionStyle(element, property) {
+    if (!isQuestionStyleElement(element)) return;
+    let original = questionStylesState.originalStyles.get(element);
+    if (!original) {
+      original = {};
+      questionStylesState.originalStyles.set(element, original);
+      questionStylesState.changedElements.add(element);
+    }
+    if (!Object.prototype.hasOwnProperty.call(original, property)) {
+      original[property] = {
+        value: element.style.getPropertyValue(property) || "",
+        priority: element.style.getPropertyPriority(property) || "",
+      };
+    }
+  }
+
+  function setQuestionInlineStyle(element, property, value) {
+    if (!isQuestionStyleElement(element)) return;
+    const nextValue = String(value ?? "");
+    rememberQuestionStyle(element, property);
+    if (element.style.getPropertyValue(property) === nextValue && element.style.getPropertyPriority(property) === "important") return;
+    element.style.setProperty(property, nextValue, "important");
+  }
+
+  function restoreQuestionStyles() {
+    for (const element of questionStylesState.changedElements) {
+      const original = questionStylesState.originalStyles.get(element);
+      if (!original || !(element instanceof HTMLElement)) continue;
+      for (const [property, snapshot] of Object.entries(original)) {
+        if (snapshot?.value) element.style.setProperty(property, snapshot.value, snapshot.priority || "");
+        else element.style.removeProperty(property);
+      }
+    }
+    questionStylesState.changedElements.clear();
+    questionStylesState.originalStyles = new WeakMap();
+  }
+
+  function getQuestionOptionCandidates(root) {
+    if (!isQuestionStyleElement(root)) return [];
+    const selectors = [
+      "button",
+      '[role="button"]',
+      "[tabindex]",
+      '[class*="answer" i]',
+      '[class*="option" i]',
+      '[style*="cursor: pointer" i]',
+    ].join(",");
+    const seen = new Set();
+    const options = [];
+    for (const element of root.querySelectorAll(selectors)) {
+      if (!isQuestionStyleVisible(element) || seen.has(element)) continue;
+      const rect = element.getBoundingClientRect();
+      const text = String(element.textContent || "").trim();
+      if (!text || rect.width < 70 || rect.height < 30) continue;
+      if (element.closest("#zyrox-menu-shell, #zyrox-config-menu, #zyrox-settings-menu")) continue;
+      seen.add(element);
+      options.push(element);
+    }
+    return options
+      .sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        return ar.top === br.top ? ar.left - br.left : ar.top - br.top;
+      })
+      .slice(0, 4);
+  }
+
+  function scoreQuestionStyleRoot(element) {
+    if (!isQuestionStyleVisible(element)) return -1;
+    const text = String(element.textContent || "").trim();
+    if (text.length < 4) return -1;
+    const options = getQuestionOptionCandidates(element);
+    if (options.length < 2) return -1;
+    const rect = element.getBoundingClientRect();
+    let score = options.length * 30;
+    if (options.length === 4) score += 45;
+    if (/question|answer|option|prompt/i.test(element.className || "")) score += 20;
+    const inlineStyle = element.getAttribute("style") || "";
+    if (/opacity\s*:/.test(inlineStyle) && /translateY\(0%\)/.test(inlineStyle)) score += 35;
+    if (rect.width > 250 && rect.height > 180) score += 15;
+    return score;
+  }
+
+  function findQuestionStyleRoot() {
+    const selectors = [
+      QUESTION_STYLE_SCREEN_SELECTOR,
+      '[style*="translateY(0%)"]',
+      '[class*="question" i]',
+      '[class*="answer" i]',
+      "main",
+      "section",
+    ].join(",");
+    const candidates = new Set();
+    for (const element of document.querySelectorAll(selectors)) {
+      if (isQuestionStyleElement(element)) candidates.add(element);
+    }
+    for (const element of document.querySelectorAll("div")) {
+      if (!isQuestionStyleElement(element)) continue;
+      const optionCount = element.querySelectorAll('button,[role="button"],[class*="answer" i],[class*="option" i]').length;
+      if (optionCount >= 2 && optionCount <= 8) candidates.add(element);
+    }
+    let best = null;
+    let bestScore = -1;
+    for (const candidate of candidates) {
+      const score = scoreQuestionStyleRoot(candidate);
+      if (score > bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return bestScore >= 0 ? best : null;
+  }
+
+  function findQuestionDisplay(root, options) {
+    if (!isQuestionStyleElement(root)) return null;
+    const optionSet = new Set(options || []);
+    const optionTop = options?.length ? Math.min(...options.map((option) => option.getBoundingClientRect().top)) : Infinity;
+    const selectors = ["h1", "h2", "h3", '[class*="question" i]', '[class*="prompt" i]', '[data-testid*="question" i]', "p", "div"].join(",");
+    let best = null;
+    let bestScore = -1;
+    for (const element of root.querySelectorAll(selectors)) {
+      if (!isQuestionStyleVisible(element) || optionSet.has(element)) continue;
+      if ([...optionSet].some((option) => element.contains(option) || option.contains(element))) continue;
+      const text = String(element.textContent || "").trim();
+      if (text.length < 4 || text.length > 600) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.top > optionTop + 8) continue;
+      let score = Math.min(text.length, 120);
+      if (/question|prompt/i.test(element.className || "")) score += 35;
+      if (/^H[1-3]$/.test(element.tagName)) score += 25;
+      score += Math.min(rect.width, 900) / 25;
+      if (rect.bottom <= optionTop + 12) score += 30;
+      if (score > bestScore) {
+        best = element;
+        bestScore = score;
+      }
+    }
+    return best || root;
+  }
+
+
+  function getElementChild(element, index) {
+    if (!isQuestionStyleElement(element)) return null;
+    const child = element.children?.[index];
+    return child instanceof HTMLElement ? child : null;
+  }
+
+  function findReferenceQuestionTargets() {
+    let root = questionStylesState.currentRoot;
+    if (!isQuestionStyleVisible(root)) root = null;
+    if (!root) {
+      const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+      root = isQuestionStyleVisible(direct) ? direct : null;
+    }
+    if (!root) return null;
+
+    const questionDisplay = getElementChild(getElementChild(getElementChild(getElementChild(root, 0), 0), 0), 0);
+    const optionsWrap = getElementChild(root, 1);
+    const options = [];
+    if (optionsWrap) {
+      for (const option of Array.from(optionsWrap.children || [])) {
+        if (!(option instanceof HTMLElement)) continue;
+        const optionDisplay = getElementChild(option, 0) || option;
+        if (isQuestionStyleVisible(optionDisplay)) options.push(optionDisplay);
+        if (options.length >= 4) break;
+      }
+    }
+    if (questionDisplay && options.length >= 2) {
+      questionStylesState.currentRoot = root;
+      return { root, question: questionDisplay, options };
+    }
+    return null;
+  }
+
+  function captureQuestionStyleRootFromNode(node) {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.matches?.(QUESTION_STYLE_SCREEN_SELECTOR)) {
+      questionStylesState.currentRoot = node;
+      return;
+    }
+    const found = node.querySelector?.(QUESTION_STYLE_SCREEN_SELECTOR);
+    if (found instanceof HTMLElement) questionStylesState.currentRoot = found;
+  }
+
+  function findQuestionStyleTargets() {
+    const referenceTargets = findReferenceQuestionTargets();
+    if (referenceTargets) return referenceTargets;
+    const root = findQuestionStyleRoot();
+    if (!root) return null;
+    const options = getQuestionOptionCandidates(root);
+    if (options.length < 2) return null;
+    const question = findQuestionDisplay(root, options);
+    return { root, question, options };
+  }
+
+  function applyQuestionTextInlineStyles(element, color, fontSizePx) {
+    if (!isQuestionStyleElement(element)) return;
+    setQuestionInlineStyle(element, "color", color);
+    setQuestionInlineStyle(element, "font-size", `${fontSizePx}px`);
+    const descendants = Array.from(element.querySelectorAll("*")).filter((child) => child instanceof HTMLElement && String(child.textContent || "").trim());
+    for (const child of descendants.slice(0, 24)) {
+      setQuestionInlineStyle(child, "color", color);
+      setQuestionInlineStyle(child, "font-size", `${fontSizePx}px`);
+    }
+  }
+
+  function applyQuestionStyles() {
+    const targets = findQuestionStyleTargets();
+    if (!targets) return;
+    const cfg = getStylesConfig();
+    const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
+    const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
+    const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
+
+    if (targets.question) {
+      setQuestionInlineStyle(targets.question, "background", isStylesHexColor(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground));
+      applyQuestionTextInlineStyles(targets.question, isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText), questionFontSize);
+      setQuestionInlineStyle(targets.question, "border-radius", `${borderRadius}px`);
+    }
+
+    targets.options.forEach((option, index) => {
+      const optionNumber = index + 1;
+      setQuestionInlineStyle(option, "background", isStylesHexColor(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]));
+      applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
+      setQuestionInlineStyle(option, "border-radius", `${borderRadius}px`);
+    });
+  }
+
+  function isQuestionStylesEnabled() {
+    return Boolean(state.enabledModules.has(STYLES_MODULE_NAME) || state.modules.get(STYLES_MODULE_NAME)?.enabled);
+  }
+
+  function refreshQuestionStylesAfterConfigChange() {
+    if (!isQuestionStylesEnabled()) return;
+    restoreQuestionStyles();
+    applyQuestionStyles();
+    requestAnimationFrame(() => {
+      if (isQuestionStylesEnabled()) applyQuestionStyles();
+    });
+    setTimeout(() => {
+      if (isQuestionStylesEnabled()) applyQuestionStyles();
+    }, 75);
+  }
+
+  function syncQuestionStyles() {
+    if (!isQuestionStylesEnabled()) return;
+    if (questionStylesState.syncTimer) return;
+    questionStylesState.syncTimer = setTimeout(() => {
+      questionStylesState.syncTimer = null;
+      applyQuestionStyles();
+    }, 40);
+  }
+
+
+  function isStylesSettingId(settingId) {
+    return typeof settingId === "string" && Object.prototype.hasOwnProperty.call(QUESTION_STYLES_DEFAULTS, settingId);
+  }
+
+  function syncStylesConfigControl(control) {
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return false;
+    const settingId = control.dataset?.settingId;
+    if (!isStylesSettingId(settingId)) return false;
+    const cfg = getStylesConfigStore();
+    if (!cfg) return false;
+    if (control instanceof HTMLInputElement && control.type === "checkbox") cfg[settingId] = Boolean(control.checked);
+    else if (control instanceof HTMLInputElement && control.type === "range") cfg[settingId] = Number(control.value);
+    else cfg[settingId] = String(control.value ?? "");
+    refreshQuestionStylesAfterConfigChange();
+    if (typeof saveSettings === "function") saveSettings();
+    return true;
+  }
+
+  function attachStylesConfigLiveSync(targetBody) {
+    if (!(targetBody instanceof HTMLElement)) return;
+    targetBody.__zyroxStylesConfigAbort?.abort?.();
+    const controller = new AbortController();
+    targetBody.__zyroxStylesConfigAbort = controller;
+    const syncFromEvent = (event) => {
+      const control = event.target?.closest?.("[data-setting-id]");
+      if (!control) return;
+      syncStylesConfigControl(control);
+    };
+    targetBody.addEventListener("input", syncFromEvent, { capture: true, signal: controller.signal });
+    targetBody.addEventListener("change", syncFromEvent, { capture: true, signal: controller.signal });
+  }
+
+  function startQuestionStyles() {
+    if (questionStylesState.observer) questionStylesState.observer.disconnect();
+    const existingRoot = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+    if (existingRoot instanceof HTMLElement) questionStylesState.currentRoot = existingRoot;
+    questionStylesState.observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.target instanceof HTMLElement) captureQuestionStyleRootFromNode(mutation.target);
+        for (const node of mutation.addedNodes) captureQuestionStyleRootFromNode(node);
+      }
+      syncQuestionStyles();
+    });
+    const target = document.body || document.documentElement;
+    if (target) questionStylesState.observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-testid"] });
+    applyQuestionStyles();
+  }
+
+  function stopQuestionStyles() {
+    if (questionStylesState.observer) {
+      questionStylesState.observer.disconnect();
+      questionStylesState.observer = null;
+    }
+    if (questionStylesState.syncTimer) {
+      clearTimeout(questionStylesState.syncTimer);
+      questionStylesState.syncTimer = null;
+    }
+    restoreQuestionStyles();
+    questionStylesState.currentRoot = null;
+  }
+
   const ABILITY_HUD_MODULE_NAME = "Ability HUD";
   const ABILITY_HUD_LOG = "[AbilityHUD]";
   const ABILITY_HUD_INTERNAL_OPACITY = 0.95;
@@ -5558,6 +6016,10 @@
       onEnable: startAntiAfk,
       onDisable: stopAntiAfk,
     },
+    [STYLES_MODULE_NAME]: {
+      onEnable: startQuestionStyles,
+      onDisable: stopQuestionStyles,
+    },
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
@@ -5575,6 +6037,7 @@
     [CAMERA_ZOOM_MODULE_NAME]: "Adjust how much you can see on the screen",
     [HIDE_POPUPS_MODULE_NAME]: "Hides Floor is Lava building purchase toasts and energy/resource popups.",
     [ANTI_AFK_MODULE_NAME]: "Sends lightweight synthetic activity pulses to reduce AFK kicks.",
+    [STYLES_MODULE_NAME]: "Customizes question and answer colors on Gimkit question screens.",
   };
 
   // --- End of Core Utilities ---
@@ -5681,6 +6144,25 @@
               settings: [
                 { id: "hideEnergyPopups", label: "Hide Energy Popup", type: "checkbox", default: true },
                 { id: "hideBuildingPopups", label: "Hide Building Popup", type: "checkbox", default: true },
+              ],
+            },
+            {
+              name: STYLES_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[STYLES_MODULE_NAME],
+              settings: [
+                { id: "questionBackground", label: "Question Background", type: "color", default: QUESTION_STYLES_DEFAULTS.questionBackground },
+                { id: "questionText", label: "Question Text", type: "color", default: QUESTION_STYLES_DEFAULTS.questionText },
+                { id: "option1Background", label: "Option 1 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option1Background },
+                { id: "option1Text", label: "Option 1 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option1Text },
+                { id: "option2Background", label: "Option 2 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option2Background },
+                { id: "option2Text", label: "Option 2 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option2Text },
+                { id: "option3Background", label: "Option 3 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option3Background },
+                { id: "option3Text", label: "Option 3 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option3Text },
+                { id: "option4Background", label: "Option 4 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option4Background },
+                { id: "option4Text", label: "Option 4 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option4Text },
+                { id: "questionFontSize", label: "Question Font Size", type: "slider", min: 12, max: 64, step: 1, default: QUESTION_STYLES_DEFAULTS.questionFontSize, unit: "px" },
+                { id: "answerFontSize", label: "Answer Font Size", type: "slider", min: 10, max: 48, step: 1, default: QUESTION_STYLES_DEFAULTS.answerFontSize, unit: "px" },
+                { id: "borderRadius", label: "Border Radius", type: "slider", min: 0, max: 36, step: 1, default: QUESTION_STYLES_DEFAULTS.borderRadius, unit: "px" },
               ],
             },
           ],
@@ -7351,6 +7833,8 @@
   }
 
   function closeConfig() {
+    configBody.__zyroxStylesConfigAbort?.abort?.();
+    configBody.__zyroxStylesConfigAbort = null;
     configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
     settingsMenu.classList.add("hidden");
@@ -7362,6 +7846,8 @@
 
   function openConfig(moduleName) {
     openConfigModule = moduleName;
+    configBody.__zyroxStylesConfigAbort?.abort?.();
+    configBody.__zyroxStylesConfigAbort = null;
     const cfg = moduleCfg(moduleName);
     const moduleLayout = getModuleLayoutConfig(moduleName);
 
@@ -7401,7 +7887,101 @@
       });
     }
 
-    if (moduleName === "ESP") {
+
+    if (moduleName === STYLES_MODULE_NAME) {
+      Object.assign(cfg, getStylesConfigStore() || QUESTION_STYLES_DEFAULTS);
+
+      const presetCard = document.createElement("div");
+      presetCard.className = "zyrox-setting-card";
+      presetCard.style.alignItems = "stretch";
+      presetCard.style.flexDirection = "column";
+      presetCard.style.gap = "8px";
+      const presetButtonsHtml = Object.entries(QUESTION_STYLES_PRESETS)
+        .map(([value, preset]) => `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;">${preset.label}</button>`)
+        .join("");
+      presetCard.innerHTML = `
+        <label style="font-weight:700;">Presets</label>
+        <div class="styles-preset-buttons" style="display:flex;gap:8px;flex-wrap:wrap;">${presetButtonsHtml}</div>
+        <div style="font-size:11px;opacity:.72;line-height:1.35;">Preset buttons copy their values into the settings below. You can still edit every setting afterward, then click a preset again to reapply it.</div>
+      `;
+      configBody.appendChild(presetCard);
+
+      const details = document.createElement("details");
+      details.className = "zyrox-setting-card styles-advanced-settings";
+      details.style.display = "block";
+      details.style.padding = "0";
+      details.style.overflow = "hidden";
+      details.innerHTML = `
+        <summary style="cursor:pointer;list-style:none;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span>Advanced color and size settings</span>
+          <span style="font-size:11px;opacity:.7;">click to expand</span>
+        </summary>
+        <div class="styles-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
+      `;
+      const advancedBody = details.querySelector(".styles-advanced-body");
+      const styleSettings = Array.isArray(moduleLayout?.settings) ? moduleLayout.settings : [];
+
+      const makeAdvancedRow = (setting) => {
+        const row = document.createElement("div");
+        row.className = "zyrox-setting-card";
+        row.style.margin = "0";
+        if (setting.type === "color") {
+          row.innerHTML = `<label>${setting.label}</label><input type="color" class="styles-live-control" data-setting-id="${setting.id}" value="${cfg[setting.id] ?? setting.default ?? "#ffffff"}" />`;
+        } else if (setting.type === "slider") {
+          const unit = setting.unit ?? "";
+          const value = cfg[setting.id] ?? setting.default ?? setting.min ?? 0;
+          row.innerHTML = `
+            <label style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;">
+              <span>${setting.label}</span>
+              <span class="zyrox-slider-value" data-value-for="${setting.id}" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${value}${unit}</span>
+            </label>
+            <input type="range" class="styles-live-control" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
+          `;
+        }
+        return row;
+      };
+
+      for (const setting of styleSettings) {
+        const row = makeAdvancedRow(setting);
+        if (row.innerHTML.trim()) advancedBody.appendChild(row);
+      }
+      configBody.appendChild(details);
+
+      const syncAdvancedControlsFromCfg = () => {
+        for (const control of advancedBody.querySelectorAll("[data-setting-id]")) {
+          const id = control.dataset.settingId;
+          if (cfg[id] === undefined) continue;
+          control.value = String(cfg[id]);
+          const setting = styleSettings.find((entry) => entry.id === id);
+          const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
+          if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting?.unit ?? ""}`;
+        }
+      };
+
+      presetCard.querySelector(".styles-preset-buttons")?.addEventListener("click", (event) => {
+        const button = event.target?.closest?.("[data-style-preset]");
+        if (!(button instanceof HTMLButtonElement)) return;
+        applyStylesPresetToConfig(cfg, button.dataset.stylePreset);
+        syncAdvancedControlsFromCfg();
+        refreshQuestionStylesAfterConfigChange();
+        saveSettings();
+      });
+
+      const updateAdvancedSetting = (event) => {
+        const control = event.target?.closest?.("[data-setting-id]");
+        if (!(control instanceof HTMLInputElement)) return;
+        const id = control.dataset.settingId;
+        const setting = styleSettings.find((entry) => entry.id === id);
+        if (!setting) return;
+        cfg[id] = control.type === "range" ? Number(control.value) : String(control.value || "#ffffff");
+        const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
+        if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting.unit ?? ""}`;
+        refreshQuestionStylesAfterConfigChange();
+        saveSettings();
+      };
+      advancedBody.addEventListener("input", updateAdvancedSetting);
+      advancedBody.addEventListener("change", updateAdvancedSetting);
+    } else if (moduleName === "ESP") {
       const defaults = getEspRenderConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxEspConfig = { ...cfg };
@@ -8195,6 +8775,18 @@
                 if (valueLabel) valueLabel.textContent = `${cfg.zoom}${valueUnit}`;
                 if (state.enabledModules.has(CAMERA_ZOOM_MODULE_NAME)) showCameraZoomToast(cfg.zoom);
               }
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
+              saveSettings();
+            });
+            settingInput.addEventListener("change", (event) => {
+              const newVal = Number(event.target.value);
+              cfg[setting.id] = newVal;
+              if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
               saveSettings();
             });
           }
@@ -8242,6 +8834,9 @@
               if (moduleName === HIDE_POPUPS_MODULE_NAME) {
                 syncHidePopups();
               }
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
               saveSettings();
             });
           }
@@ -8273,6 +8868,9 @@
                 if (setting.id === "abilityHudDisplayMode") openConfig(moduleName);
                 applyAbilityHudLiveConfig({ cfg });
               }
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
               saveSettings();
             });
           }
@@ -8286,11 +8884,16 @@
           `;
           const settingInput = settingCard.querySelector(".set-module-setting-color");
           if (settingInput) {
-            settingInput.addEventListener("input", (event) => {
+            const updateColorSetting = (event) => {
               cfg[setting.id] = String(event.target.value || "#ffffff");
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
               saveSettings();
-            });
+            };
+            settingInput.addEventListener("input", updateColorSetting);
+            settingInput.addEventListener("change", updateColorSetting);
           }
         }
 
@@ -8305,6 +8908,9 @@
           if (settingInput) {
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value ?? "");
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
               saveSettings();
             });
           }
