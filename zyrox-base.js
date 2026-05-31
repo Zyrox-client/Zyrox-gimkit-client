@@ -7891,23 +7891,19 @@
 
     if (moduleName === STYLES_MODULE_NAME) {
       Object.assign(cfg, getStylesConfigStore() || QUESTION_STYLES_DEFAULTS);
-      if (!QUESTION_STYLES_PRESETS[cfg.stylePreset]) cfg.stylePreset = "custom";
 
       const presetCard = document.createElement("div");
       presetCard.className = "zyrox-setting-card";
       presetCard.style.alignItems = "stretch";
       presetCard.style.flexDirection = "column";
       presetCard.style.gap = "8px";
-      const presetOptions = [
-        ...Object.entries(QUESTION_STYLES_PRESETS).map(([value, preset]) => ({ value, label: preset.label })),
-        { value: "custom", label: "Custom" },
-      ];
+      const presetButtonsHtml = Object.entries(QUESTION_STYLES_PRESETS)
+        .map(([value, preset]) => `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;">${preset.label}</button>`)
+        .join("");
       presetCard.innerHTML = `
-        <label style="font-weight:700;">Preset</label>
-        <select class="set-module-setting-select styles-preset-select" data-setting-id="stylePreset">
-          ${presetOptions.map((option) => `<option value="${option.value}" ${String(cfg.stylePreset) === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
-        </select>
-        <div style="font-size:11px;opacity:.72;line-height:1.35;">Choose a base theme, or expand Advanced to fine-tune every color and size.</div>
+        <label style="font-weight:700;">Presets</label>
+        <div class="styles-preset-buttons" style="display:flex;gap:8px;flex-wrap:wrap;">${presetButtonsHtml}</div>
+        <div style="font-size:11px;opacity:.72;line-height:1.35;">Preset buttons copy their values into the settings below. You can still edit every setting afterward, then click a preset again to reapply it.</div>
       `;
       configBody.appendChild(presetCard);
 
@@ -7924,7 +7920,6 @@
         <div class="styles-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
       `;
       const advancedBody = details.querySelector(".styles-advanced-body");
-      const presetSelect = presetCard.querySelector(".styles-preset-select");
       const styleSettings = Array.isArray(moduleLayout?.settings) ? moduleLayout.settings : [];
 
       const makeAdvancedRow = (setting) => {
@@ -7964,14 +7959,11 @@
         }
       };
 
-      presetSelect?.addEventListener("change", (event) => {
-        const presetName = String(event.target.value || "custom");
-        if (presetName !== "custom") {
-          applyStylesPresetToConfig(cfg, presetName);
-          syncAdvancedControlsFromCfg();
-        } else {
-          cfg.stylePreset = "custom";
-        }
+      presetCard.querySelector(".styles-preset-buttons")?.addEventListener("click", (event) => {
+        const button = event.target?.closest?.("[data-style-preset]");
+        if (!(button instanceof HTMLButtonElement)) return;
+        applyStylesPresetToConfig(cfg, button.dataset.stylePreset);
+        syncAdvancedControlsFromCfg();
         refreshQuestionStylesAfterConfigChange();
         saveSettings();
       });
@@ -7983,8 +7975,6 @@
         const setting = styleSettings.find((entry) => entry.id === id);
         if (!setting) return;
         cfg[id] = control.type === "range" ? Number(control.value) : String(control.value || "#ffffff");
-        cfg.stylePreset = "custom";
-        if (presetSelect) presetSelect.value = "custom";
         const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
         if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting.unit ?? ""}`;
         refreshQuestionStylesAfterConfigChange();
