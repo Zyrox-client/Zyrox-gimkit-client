@@ -4981,6 +4981,39 @@
     }, 40);
   }
 
+
+  function getStylesSettingDefinition(settingId) {
+    const layout = getModuleLayoutConfig(STYLES_MODULE_NAME);
+    return layout?.settings?.find((setting) => setting?.id === settingId) || null;
+  }
+
+  function syncStylesConfigControl(control) {
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return false;
+    const settingId = control.dataset?.settingId;
+    const setting = settingId ? getStylesSettingDefinition(settingId) : null;
+    if (!setting) return false;
+    const cfg = moduleCfg(STYLES_MODULE_NAME);
+    if (setting.type === "checkbox") cfg[settingId] = Boolean(control.checked);
+    else if (setting.type === "slider") cfg[settingId] = Number(control.value);
+    else cfg[settingId] = String(control.value ?? "");
+    refreshQuestionStylesAfterConfigChange();
+    saveSettings();
+    return true;
+  }
+
+  function attachStylesConfigLiveSync() {
+    configBody.__zyroxStylesConfigAbort?.abort?.();
+    const controller = new AbortController();
+    configBody.__zyroxStylesConfigAbort = controller;
+    const syncFromEvent = (event) => {
+      const control = event.target?.closest?.("[data-setting-id]");
+      if (!control) return;
+      syncStylesConfigControl(control);
+    };
+    configBody.addEventListener("input", syncFromEvent, { capture: true, signal: controller.signal });
+    configBody.addEventListener("change", syncFromEvent, { capture: true, signal: controller.signal });
+  }
+
   function startQuestionStyles() {
     if (questionStylesState.observer) questionStylesState.observer.disconnect();
     const existingRoot = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
@@ -7696,6 +7729,8 @@
   }
 
   function closeConfig() {
+    configBody.__zyroxStylesConfigAbort?.abort?.();
+    configBody.__zyroxStylesConfigAbort = null;
     configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
     settingsMenu.classList.add("hidden");
@@ -7707,8 +7742,11 @@
 
   function openConfig(moduleName) {
     openConfigModule = moduleName;
+    configBody.__zyroxStylesConfigAbort?.abort?.();
+    configBody.__zyroxStylesConfigAbort = null;
     const cfg = moduleCfg(moduleName);
     const moduleLayout = getModuleLayoutConfig(moduleName);
+    if (moduleName === STYLES_MODULE_NAME) attachStylesConfigLiveSync();
 
     configBody.innerHTML = `
       <div class="zyrox-config-row">
