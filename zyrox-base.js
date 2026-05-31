@@ -4898,8 +4898,24 @@
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
   }
 
+  const ZYROX_OWN_UI_SELECTOR = [
+    ".zyrox-root",
+    ".zyrox-config-backdrop",
+    ".zyrox-config",
+    ".zyrox-settings",
+    ".zyrox-answer-popup",
+    ".zyrox-upgrade-hud",
+    ".zyrox-ability-hud",
+    "#zyrox-menu-shell",
+    "#zyrox-config-menu",
+    "#zyrox-settings-menu",
+    "#zyrox-config-backdrop",
+    "#zyrox-welcome-card",
+    "#zyrox-target-menu",
+  ].join(",");
+
   function isQuestionStyleElement(value) {
-    return value instanceof HTMLElement && !value.closest("#zyrox-menu-shell, #zyrox-config-menu, #zyrox-settings-menu, #zyrox-config-backdrop, #zyrox-welcome-card");
+    return value instanceof HTMLElement && !value.closest(ZYROX_OWN_UI_SELECTOR);
   }
 
   function isQuestionStyleVisible(element) {
@@ -4964,7 +4980,7 @@
       const rect = element.getBoundingClientRect();
       const text = String(element.textContent || "").trim();
       if (!text || rect.width < 70 || rect.height < 30) continue;
-      if (element.closest("#zyrox-menu-shell, #zyrox-config-menu, #zyrox-settings-menu")) continue;
+      if (element.closest(ZYROX_OWN_UI_SELECTOR)) continue;
       seen.add(element);
       options.push(element);
     }
@@ -5119,8 +5135,6 @@
   function applyQuestionShellStyles(cfg) {
     const topBarColor = isStylesHexColor(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
     const pageColor = isStylesHexColor(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
-    const correctColor = isStylesHexColor(cfg.correctBackground, QUESTION_STYLES_DEFAULTS.correctBackground);
-    const wrongColor = isStylesHexColor(cfg.wrongBackground, QUESTION_STYLES_DEFAULTS.wrongBackground);
     const continueColor = isStylesHexColor(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
     const shopColor = isStylesHexColor(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
     for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
@@ -5128,12 +5142,6 @@
     }
     for (const element of document.querySelectorAll(".cZgLFG, .cChptk")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", pageColor);
-    }
-    for (const element of document.querySelectorAll(".lgdHhp")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", correctColor);
-    }
-    for (const element of document.querySelectorAll(".cZjVxd")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", wrongColor);
     }
     for (const element of document.querySelectorAll(".ljtfrY, .dDfMyc")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", continueColor);
@@ -6257,8 +6265,6 @@
               settings: [
                 { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
                 { id: "pageBackground", label: "Page Background", type: "color", default: QUESTION_STYLES_DEFAULTS.pageBackground },
-                { id: "correctBackground", label: "Correct Screen", type: "color", default: QUESTION_STYLES_DEFAULTS.correctBackground },
-                { id: "wrongBackground", label: "Wrong Screen", type: "color", default: QUESTION_STYLES_DEFAULTS.wrongBackground },
                 { id: "continueButtonBackground", label: "Continue Button", type: "color", default: QUESTION_STYLES_DEFAULTS.continueButtonBackground },
                 { id: "shopButtonBackground", label: "Shop Button", type: "color", default: QUESTION_STYLES_DEFAULTS.shopButtonBackground },
                 { id: "questionBackground", label: "Question Background", type: "color", default: QUESTION_STYLES_DEFAULTS.questionBackground },
