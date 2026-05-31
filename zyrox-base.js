@@ -4706,6 +4706,7 @@
     answerFontSize: 20,
     borderRadius: 14,
     topBarBackground: "#ffffff",
+    pageBackground: "#f5f7fb",
     stylePreset: "default",
   };
   const QUESTION_STYLES_PRESETS = {
@@ -4726,6 +4727,7 @@
         answerFontSize: 20,
         borderRadius: 14,
         topBarBackground: "#ffffff",
+        pageBackground: "#f5f7fb",
       },
     },
     midnight: {
@@ -4745,6 +4747,7 @@
         answerFontSize: 22,
         borderRadius: 18,
         topBarBackground: "#0f172a",
+        pageBackground: "#020617",
       },
     },
     highContrast: {
@@ -4764,6 +4767,7 @@
         answerFontSize: 24,
         borderRadius: 8,
         topBarBackground: "#000000",
+        pageBackground: "#ffffff",
       },
     },
     pastel: {
@@ -4783,6 +4787,7 @@
         answerFontSize: 21,
         borderRadius: 22,
         topBarBackground: "#e0f2fe",
+        pageBackground: "#fff7ed",
       },
     },
   };
@@ -5043,16 +5048,20 @@
     }
   }
 
-  function applyQuestionTopBarStyles(cfg) {
+  function applyQuestionShellStyles(cfg) {
     const topBarColor = isStylesHexColor(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
+    const pageColor = isStylesHexColor(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
     for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", topBarColor);
+    }
+    for (const element of document.querySelectorAll(".cZgLFG, .cChptk")) {
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", pageColor);
     }
   }
 
   function applyQuestionStyles() {
     const cfg = getStylesConfig();
-    applyQuestionTopBarStyles(cfg);
+    applyQuestionShellStyles(cfg);
     const targets = findQuestionStyleTargets();
     if (!targets) return;
     const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
@@ -6177,6 +6186,7 @@
                 { id: "answerFontSize", label: "Answer Font Size", type: "slider", min: 10, max: 48, step: 1, default: QUESTION_STYLES_DEFAULTS.answerFontSize, unit: "px" },
                 { id: "borderRadius", label: "Border Radius", type: "slider", min: 0, max: 36, step: 1, default: QUESTION_STYLES_DEFAULTS.borderRadius, unit: "px" },
                 { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
+                { id: "pageBackground", label: "Page Background", type: "color", default: QUESTION_STYLES_DEFAULTS.pageBackground },
               ],
             },
           ],
