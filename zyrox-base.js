@@ -4862,11 +4862,21 @@
     },
   };
   const QUESTION_STYLE_SCREEN_SELECTOR = '[style*="opacity:"][style*="translateY(0%)"]';
+  const QUESTION_STYLE_SHELL_SELECTOR = ".gAlRHP, .dujAvP, .cZgLFG, .cChptk, .ljtfrY, .dDfMyc, .dBwWbX";
+  const QUESTION_STYLE_INTERACTIVE_SELECTOR = [
+    "button",
+    '[role="button"]',
+    "[tabindex]",
+    '[class*="answer" i]',
+    '[class*="option" i]',
+    '[style*="cursor: pointer" i]',
+  ].join(",");
   const questionStylesState = {
     observer: null,
     changedElements: new Set(),
     originalStyles: new WeakMap(),
     syncQueued: false,
+    syncFrameId: null,
     burstFrameId: null,
     burstFramesRemaining: 0,
     currentRoot: null,
@@ -5064,17 +5074,9 @@
 
   function getQuestionOptionCandidates(root) {
     if (!isQuestionStyleElement(root)) return [];
-    const selectors = [
-      "button",
-      '[role="button"]',
-      "[tabindex]",
-      '[class*="answer" i]',
-      '[class*="option" i]',
-      '[style*="cursor: pointer" i]',
-    ].join(",");
     const seen = new Set();
     const options = [];
-    for (const element of root.querySelectorAll(selectors)) {
+    for (const element of root.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
       if (!isQuestionStyleVisible(element) || seen.has(element)) continue;
       const rect = element.getBoundingClientRect();
       const text = String(element.textContent || "").trim();
@@ -5108,7 +5110,7 @@
     return score;
   }
 
-  function findQuestionStyleRoot() {
+  function collectQuestionStyleCandidates() {
     const selectors = [
       QUESTION_STYLE_SCREEN_SELECTOR,
       '[style*="translateY(0%)"]',
@@ -5121,11 +5123,28 @@
     for (const element of document.querySelectorAll(selectors)) {
       if (isQuestionStyleElement(element)) candidates.add(element);
     }
-    for (const element of document.querySelectorAll("div")) {
+
+    let interactiveCount = 0;
+    for (const element of document.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
       if (!isQuestionStyleElement(element)) continue;
-      const optionCount = element.querySelectorAll('button,[role="button"],[class*="answer" i],[class*="option" i]').length;
-      if (optionCount >= 2 && optionCount <= 8) candidates.add(element);
+      const text = String(element.textContent || "").trim();
+      if (!text) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 70 || rect.height < 30) continue;
+      interactiveCount += 1;
+      let parent = element.parentElement;
+      for (let depth = 0; parent && depth < 5; depth += 1, parent = parent.parentElement) {
+        if (parent.matches?.("main,section") || parent.querySelectorAll?.(QUESTION_STYLE_INTERACTIVE_SELECTOR).length >= 2) {
+          if (isQuestionStyleElement(parent)) candidates.add(parent);
+        }
+      }
+      if (interactiveCount >= 8) break;
     }
+    return candidates;
+  }
+
+  function findQuestionStyleRoot() {
+    const candidates = collectQuestionStyleCandidates();
     let best = null;
     let bestScore = -1;
     for (const candidate of candidates) {
@@ -5136,6 +5155,29 @@
       }
     }
     return bestScore >= 0 ? best : null;
+  }
+
+  function hasQuestionStyleShell() {
+    return Boolean(document.querySelector(QUESTION_STYLE_SHELL_SELECTOR));
+  }
+
+  function hasLikelyQuestionStyleSurface(hasShell = hasQuestionStyleShell()) {
+    if (hasShell) return true;
+    if (isQuestionStyleVisible(questionStylesState.currentRoot)) return true;
+    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+    if (isQuestionStyleVisible(direct)) return true;
+
+    let visibleInteractiveCount = 0;
+    for (const element of document.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
+      if (!isQuestionStyleElement(element)) continue;
+      const text = String(element.textContent || "").trim();
+      if (!text) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 70 || rect.height < 30 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) continue;
+      visibleInteractiveCount += 1;
+      if (visibleInteractiveCount >= 2) return true;
+    }
+    return false;
   }
 
   function findQuestionDisplay(root, options) {
@@ -5283,11 +5325,16 @@
   }
 
   function applyQuestionStyles() {
+    const hasShell = hasQuestionStyleShell();
+    if (!hasLikelyQuestionStyleSurface(hasShell)) return false;
+
+    const targets = findQuestionStyleTargets();
+    if (!targets && !hasShell) return false;
+
     const cfg = getStylesConfig();
     const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
     applyQuestionShellStyles(cfg, globalTheme);
-    const targets = findQuestionStyleTargets();
-    if (!targets) return;
+    if (!targets) return true;
     const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
     const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
     const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
@@ -5308,6 +5355,7 @@
       applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
       setQuestionInlineStyle(option, "border-radius", borderRadiusValue);
     });
+    return true;
   }
 
   function isQuestionStylesEnabled() {
@@ -5324,7 +5372,10 @@
         questionStylesState.burstFramesRemaining = 0;
         return;
       }
-      applyQuestionStyles();
+      if (!applyQuestionStyles()) {
+        questionStylesState.burstFramesRemaining = 0;
+        return;
+      }
       questionStylesState.burstFramesRemaining -= 1;
       if (questionStylesState.burstFramesRemaining > 0) {
         questionStylesState.burstFrameId = requestAnimationFrame(tick);
@@ -5336,26 +5387,21 @@
   function refreshQuestionStylesAfterConfigChange() {
     if (!isQuestionStylesEnabled()) return;
     restoreQuestionStyles();
-    applyQuestionStyles();
-    runQuestionStylesBurst(8);
+    if (applyQuestionStyles()) runQuestionStylesBurst(4);
     setTimeout(() => {
       if (isQuestionStylesEnabled()) applyQuestionStyles();
     }, 75);
   }
 
   function syncQuestionStyles() {
-    if (!isQuestionStylesEnabled()) return;
-    if (!questionStylesState.syncQueued) {
-      questionStylesState.syncQueued = true;
-      queueMicrotask(() => {
-        questionStylesState.syncQueued = false;
-        if (!isQuestionStylesEnabled()) return;
-        applyQuestionStyles();
-        runQuestionStylesBurst(3);
-      });
-    } else {
-      runQuestionStylesBurst(3);
-    }
+    if (!isQuestionStylesEnabled() || questionStylesState.syncQueued) return;
+    questionStylesState.syncQueued = true;
+    questionStylesState.syncFrameId = requestAnimationFrame(() => {
+      questionStylesState.syncFrameId = null;
+      questionStylesState.syncQueued = false;
+      if (!isQuestionStylesEnabled()) return;
+      if (applyQuestionStyles()) runQuestionStylesBurst(2);
+    });
   }
 
 
@@ -5403,9 +5449,8 @@
       syncQuestionStyles();
     });
     const target = document.body || document.documentElement;
-    if (target) questionStylesState.observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-testid"] });
-    applyQuestionStyles();
-    runQuestionStylesBurst(8);
+    if (target) questionStylesState.observer.observe(target, { childList: true, subtree: true });
+    if (applyQuestionStyles()) runQuestionStylesBurst(4);
   }
 
   function stopQuestionStyles() {
@@ -5416,6 +5461,10 @@
     if (questionStylesState.burstFrameId) {
       cancelAnimationFrame(questionStylesState.burstFrameId);
       questionStylesState.burstFrameId = null;
+    }
+    if (questionStylesState.syncFrameId) {
+      cancelAnimationFrame(questionStylesState.syncFrameId);
+      questionStylesState.syncFrameId = null;
     }
     questionStylesState.syncQueued = false;
     questionStylesState.burstFramesRemaining = 0;
