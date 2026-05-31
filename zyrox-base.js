@@ -4715,8 +4715,21 @@
     currentRoot: null,
   };
 
+  function getStylesConfigStore() {
+    if (!(state.moduleConfig instanceof Map)) return null;
+    let cfg = state.moduleConfig.get(STYLES_MODULE_NAME);
+    if (!cfg || typeof cfg !== "object") {
+      cfg = { keybind: null, ...QUESTION_STYLES_DEFAULTS };
+      state.moduleConfig.set(STYLES_MODULE_NAME, cfg);
+    }
+    for (const [key, value] of Object.entries(QUESTION_STYLES_DEFAULTS)) {
+      if (cfg[key] === undefined) cfg[key] = value;
+    }
+    return cfg;
+  }
+
   function getStylesConfig() {
-    const cfg = getModuleConfigSafe(STYLES_MODULE_NAME, {});
+    const cfg = getStylesConfigStore() || {};
     return { ...QUESTION_STYLES_DEFAULTS, ...cfg };
   }
 
@@ -4990,12 +5003,13 @@
     if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return false;
     const settingId = control.dataset?.settingId;
     if (!isStylesSettingId(settingId)) return false;
-    const cfg = moduleCfg(STYLES_MODULE_NAME);
+    const cfg = getStylesConfigStore();
+    if (!cfg) return false;
     if (control instanceof HTMLInputElement && control.type === "checkbox") cfg[settingId] = Boolean(control.checked);
     else if (control instanceof HTMLInputElement && control.type === "range") cfg[settingId] = Number(control.value);
     else cfg[settingId] = String(control.value ?? "");
     refreshQuestionStylesAfterConfigChange();
-    saveSettings();
+    if (typeof saveSettings === "function") saveSettings();
     return true;
   }
 
