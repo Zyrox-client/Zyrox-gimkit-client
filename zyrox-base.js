@@ -4933,40 +4933,26 @@
   }
 
 
-  const ZYROX_OWN_UI_SELECTOR = [
-    ".zyrox-root",
-    ".zyrox-config-backdrop",
-    ".zyrox-config",
-    ".zyrox-settings",
-    ".zyrox-answer-popup",
-    ".zyrox-upgrade-hud",
-    ".zyrox-ability-hud",
-    "#zyrox-menu-shell",
-    "#zyrox-config-menu",
-    "#zyrox-settings-menu",
-    "#zyrox-config-backdrop",
-    "#zyrox-welcome-card",
-    "#zyrox-target-menu",
-  ].join(",");
-
-  const ZYROX_OWN_UI_SELECTOR = [
-    ".zyrox-root",
-    ".zyrox-config-backdrop",
-    ".zyrox-config",
-    ".zyrox-settings",
-    ".zyrox-answer-popup",
-    ".zyrox-upgrade-hud",
-    ".zyrox-ability-hud",
-    "#zyrox-menu-shell",
-    "#zyrox-config-menu",
-    "#zyrox-settings-menu",
-    "#zyrox-config-backdrop",
-    "#zyrox-welcome-card",
-    "#zyrox-target-menu",
-  ].join(",");
+  function getZyroxOwnUiSelector() {
+    return [
+      ".zyrox-root",
+      ".zyrox-config-backdrop",
+      ".zyrox-config",
+      ".zyrox-settings",
+      ".zyrox-answer-popup",
+      ".zyrox-upgrade-hud",
+      ".zyrox-ability-hud",
+      "#zyrox-menu-shell",
+      "#zyrox-config-menu",
+      "#zyrox-settings-menu",
+      "#zyrox-config-backdrop",
+      "#zyrox-welcome-card",
+      "#zyrox-target-menu",
+    ].join(",");
+  }
 
   function isQuestionStyleElement(value) {
-    return value instanceof HTMLElement && !value.closest(ZYROX_OWN_UI_SELECTOR);
+    return value instanceof HTMLElement && !value.closest(getZyroxOwnUiSelector());
   }
 
   function isQuestionStyleVisible(element) {
@@ -5031,7 +5017,7 @@
       const rect = element.getBoundingClientRect();
       const text = String(element.textContent || "").trim();
       if (!text || rect.width < 70 || rect.height < 30) continue;
-      if (element.closest(ZYROX_OWN_UI_SELECTOR)) continue;
+      if (element.closest(getZyroxOwnUiSelector())) continue;
       seen.add(element);
       options.push(element);
     }
