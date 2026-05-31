@@ -4949,6 +4949,22 @@
     "#zyrox-target-menu",
   ].join(",");
 
+  const ZYROX_OWN_UI_SELECTOR = [
+    ".zyrox-root",
+    ".zyrox-config-backdrop",
+    ".zyrox-config",
+    ".zyrox-settings",
+    ".zyrox-answer-popup",
+    ".zyrox-upgrade-hud",
+    ".zyrox-ability-hud",
+    "#zyrox-menu-shell",
+    "#zyrox-config-menu",
+    "#zyrox-settings-menu",
+    "#zyrox-config-backdrop",
+    "#zyrox-welcome-card",
+    "#zyrox-target-menu",
+  ].join(",");
+
   function isQuestionStyleElement(value) {
     return value instanceof HTMLElement && !value.closest(ZYROX_OWN_UI_SELECTOR);
   }
