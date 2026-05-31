@@ -4692,6 +4692,12 @@
 
   const STYLES_MODULE_NAME = "Styles";
   const QUESTION_STYLES_DEFAULTS = {
+    topBarBackground: "#4252af",
+    pageBackground: "#f5f7fb",
+    correctBackground: "#0d6b33",
+    wrongBackground: "#771322",
+    continueButtonBackground: "#076296",
+    shopButtonBackground: "#a85c15",
     questionBackground: "#303f9f",
     questionText: "#ffffff",
     option1Background: "#771322",
@@ -4705,14 +4711,18 @@
     questionFontSize: 28,
     answerFontSize: 20,
     borderRadius: 0,
-    topBarBackground: "#4252af",
-    pageBackground: "#f5f7fb",
     stylePreset: "default",
   };
   const QUESTION_STYLES_PRESETS = {
     default: {
       label: "Default Gimkit",
       values: {
+        topBarBackground: "#4252af",
+        pageBackground: "#f5f7fb",
+        correctBackground: "#0d6b33",
+        wrongBackground: "#771322",
+        continueButtonBackground: "#076296",
+        shopButtonBackground: "#a85c15",
         questionBackground: "#303f9f",
         questionText: "#ffffff",
         option1Background: "#771322",
@@ -4726,88 +4736,126 @@
         questionFontSize: 28,
         answerFontSize: 20,
         borderRadius: 0,
-        topBarBackground: "#4252af",
-        pageBackground: "#f5f7fb",
       },
     },
     midnight: {
       label: "Midnight",
       values: {
+        topBarBackground: "#0f172a",
+        pageBackground: "#020617",
+        correctBackground: "#166534",
+        wrongBackground: "#7f1d1d",
+        continueButtonBackground: "#1d4ed8",
+        shopButtonBackground: "#7c2d12",
         questionBackground: "#101827",
         questionText: "#e0f2fe",
-        option1Background: "#1d4ed8",
-        option1Text: "#ffffff",
+        option1Background: "#7f1d1d",
+        option1Text: "#fef2f2",
         option2Background: "#7c2d12",
         option2Text: "#fff7ed",
         option3Background: "#166534",
         option3Text: "#ecfdf5",
-        option4Background: "#7f1d1d",
-        option4Text: "#fef2f2",
+        option4Background: "#1d4ed8",
+        option4Text: "#ffffff",
         questionFontSize: 30,
         answerFontSize: 22,
         borderRadius: 18,
-        topBarBackground: "#0f172a",
-        pageBackground: "#020617",
+      },
+    },
+    dark: {
+      label: "Dark",
+      values: {
+        topBarBackground: "#111827",
+        pageBackground: "#05070d",
+        correctBackground: "#14532d",
+        wrongBackground: "#7f1d1d",
+        continueButtonBackground: "#1e3a8a",
+        shopButtonBackground: "#374151",
+        questionBackground: "#111827",
+        questionText: "#e5e7eb",
+        option1Background: "#7f1d1d",
+        option1Text: "#fee2e2",
+        option2Background: "#27272a",
+        option2Text: "#f4f4f5",
+        option3Background: "#14532d",
+        option3Text: "#dcfce7",
+        option4Background: "#1e3a8a",
+        option4Text: "#dbeafe",
+        questionFontSize: 30,
+        answerFontSize: 22,
+        borderRadius: 12,
       },
     },
     highContrast: {
       label: "High Contrast",
       values: {
+        topBarBackground: "#000000",
+        pageBackground: "#ffffff",
+        correctBackground: "#008000",
+        wrongBackground: "#ff0000",
+        continueButtonBackground: "#0000ff",
+        shopButtonBackground: "#ffcc00",
         questionBackground: "#ffffff",
         questionText: "#000000",
-        option1Background: "#0000ff",
+        option1Background: "#ff0000",
         option1Text: "#ffffff",
         option2Background: "#ffcc00",
         option2Text: "#000000",
         option3Background: "#008000",
         option3Text: "#ffffff",
-        option4Background: "#ff0000",
+        option4Background: "#0000ff",
         option4Text: "#ffffff",
         questionFontSize: 32,
         answerFontSize: 24,
         borderRadius: 8,
-        topBarBackground: "#000000",
-        pageBackground: "#ffffff",
       },
     },
     pastel: {
       label: "Pastel",
       values: {
+        topBarBackground: "#6d5bd0",
+        pageBackground: "#fff7ed",
+        correctBackground: "#bbf7d0",
+        wrongBackground: "#fecaca",
+        continueButtonBackground: "#93c5fd",
+        shopButtonBackground: "#fde68a",
         questionBackground: "#f8fafc",
         questionText: "#1f2937",
-        option1Background: "#93c5fd",
-        option1Text: "#10233f",
+        option1Background: "#fecaca",
+        option1Text: "#451a1a",
         option2Background: "#fde68a",
         option2Text: "#3f2a00",
         option3Background: "#bbf7d0",
         option3Text: "#12351f",
-        option4Background: "#fecaca",
-        option4Text: "#451a1a",
+        option4Background: "#93c5fd",
+        option4Text: "#10233f",
         questionFontSize: 28,
         answerFontSize: 21,
         borderRadius: 22,
-        topBarBackground: "#6d5bd0",
-        pageBackground: "#fff7ed",
       },
     },
     forest: {
       label: "Forest",
       values: {
+        topBarBackground: "#1f3d2b",
+        pageBackground: "#102015",
+        correctBackground: "#2f6b3f",
+        wrongBackground: "#6b2525",
+        continueButtonBackground: "#1f4e5f",
+        shopButtonBackground: "#2f4a24",
         questionBackground: "#263a24",
         questionText: "#f4f7e8",
-        option1Background: "#3f4f1f",
-        option1Text: "#f9fbe7",
-        option2Background: "#5f6f22",
-        option2Text: "#fffde7",
-        option3Background: "#2f6b3f",
+        option1Background: "#6b2525",
+        option1Text: "#fef2f2",
+        option2Background: "#2f4a24",
+        option2Text: "#f4f7e8",
+        option3Background: "#1f5a32",
         option3Text: "#ecfdf5",
-        option4Background: "#174c3c",
+        option4Background: "#1f4e5f",
         option4Text: "#e0f2f1",
         questionFontSize: 30,
         answerFontSize: 22,
         borderRadius: 12,
-        topBarBackground: "#1f3d2b",
-        pageBackground: "#102015",
       },
     },
   };
@@ -5071,11 +5119,27 @@
   function applyQuestionShellStyles(cfg) {
     const topBarColor = isStylesHexColor(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
     const pageColor = isStylesHexColor(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
+    const correctColor = isStylesHexColor(cfg.correctBackground, QUESTION_STYLES_DEFAULTS.correctBackground);
+    const wrongColor = isStylesHexColor(cfg.wrongBackground, QUESTION_STYLES_DEFAULTS.wrongBackground);
+    const continueColor = isStylesHexColor(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
+    const shopColor = isStylesHexColor(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
     for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", topBarColor);
     }
     for (const element of document.querySelectorAll(".cZgLFG, .cChptk")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", pageColor);
+    }
+    for (const element of document.querySelectorAll(".lgdHhp")) {
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", correctColor);
+    }
+    for (const element of document.querySelectorAll(".cZjVxd")) {
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", wrongColor);
+    }
+    for (const element of document.querySelectorAll(".ljtfrY, .dDfMyc")) {
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", continueColor);
+    }
+    for (const element of document.querySelectorAll(".dBwWbX")) {
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", shopColor);
     }
   }
 
@@ -6191,6 +6255,12 @@
               name: STYLES_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[STYLES_MODULE_NAME],
               settings: [
+                { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
+                { id: "pageBackground", label: "Page Background", type: "color", default: QUESTION_STYLES_DEFAULTS.pageBackground },
+                { id: "correctBackground", label: "Correct Screen", type: "color", default: QUESTION_STYLES_DEFAULTS.correctBackground },
+                { id: "wrongBackground", label: "Wrong Screen", type: "color", default: QUESTION_STYLES_DEFAULTS.wrongBackground },
+                { id: "continueButtonBackground", label: "Continue Button", type: "color", default: QUESTION_STYLES_DEFAULTS.continueButtonBackground },
+                { id: "shopButtonBackground", label: "Shop Button", type: "color", default: QUESTION_STYLES_DEFAULTS.shopButtonBackground },
                 { id: "questionBackground", label: "Question Background", type: "color", default: QUESTION_STYLES_DEFAULTS.questionBackground },
                 { id: "questionText", label: "Question Text", type: "color", default: QUESTION_STYLES_DEFAULTS.questionText },
                 { id: "option1Background", label: "Option 1 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option1Background },
@@ -6204,8 +6274,6 @@
                 { id: "questionFontSize", label: "Question Font Size", type: "slider", min: 12, max: 64, step: 1, default: QUESTION_STYLES_DEFAULTS.questionFontSize, unit: "px" },
                 { id: "answerFontSize", label: "Answer Font Size", type: "slider", min: 10, max: 48, step: 1, default: QUESTION_STYLES_DEFAULTS.answerFontSize, unit: "px" },
                 { id: "borderRadius", label: "Border Radius", type: "slider", min: 0, max: 36, step: 1, default: QUESTION_STYLES_DEFAULTS.borderRadius, unit: "px" },
-                { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
-                { id: "pageBackground", label: "Page Background", type: "color", default: QUESTION_STYLES_DEFAULTS.pageBackground },
               ],
             },
           ],
@@ -7946,7 +8014,6 @@
       presetCard.innerHTML = `
         <label style="font-weight:700;">Presets</label>
         <div class="styles-preset-buttons" style="display:flex;gap:8px;flex-wrap:wrap;">${presetButtonsHtml}</div>
-        <div style="font-size:11px;opacity:.72;line-height:1.35;">Preset buttons copy their values into the settings below. You can still edit every setting afterward, then click a preset again to reapply it.</div>
       `;
       configBody.appendChild(presetCard);
 
