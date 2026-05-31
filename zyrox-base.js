@@ -3288,7 +3288,7 @@
     quickFireState.enabled = true;
     setQuickFireStatus("Armed");
     const cfg = getQuickFireConfig();
-    const intervalMs = Math.max(16, Math.min(250, Number(cfg.fireIntervalMs) || 50));
+    const intervalMs = Math.max(1, Math.min(250, Number(cfg.fireIntervalMs) || 50));
     quickFireState.intervalMs = intervalMs;
     quickFireState.intervalId = setInterval(quickFireTick, intervalMs);
   }
@@ -6965,7 +6965,7 @@
               description: MODULE_DESCRIPTIONS["Quick Fire"],
               settings: [
                 { id: "enabled",             label: "Enabled",              type: "checkbox", default: true },
-                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 50, min: 16, max: 250, step: 1, unit: "ms" },
+                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 50, min: 1, max: 250, step: 1, unit: "ms" },
                 { id: "onlyWhenMouseDown",   label: "Only While Left Click", type: "checkbox", default: true },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
               ],
