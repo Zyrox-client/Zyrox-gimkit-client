@@ -4711,6 +4711,7 @@
     questionFontSize: 28,
     answerFontSize: 20,
     borderRadius: 0,
+    useGlobalTheme: false,
     stylePreset: "default",
   };
   const QUESTION_STYLES_PRESETS = {
@@ -4899,6 +4900,54 @@
     const color = String(value || "").trim();
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
   }
+  function getComputedBackgroundValue(element, fallback) {
+    if (!(element instanceof HTMLElement)) return fallback;
+    const computed = window.getComputedStyle(element);
+    return computed.backgroundImage && computed.backgroundImage !== "none" ? computed.backgroundImage : computed.backgroundColor || fallback;
+  }
+
+  function getStylesGlobalThemeValues() {
+    const uiRoot = document.querySelector(".zyrox-root");
+    const activeModule = uiRoot?.querySelector?.(".zyrox-module.active")
+      || state.moduleItems?.get?.(STYLES_MODULE_NAME)
+      || uiRoot?.querySelector?.(".zyrox-module");
+    const inactiveModule = uiRoot?.querySelector?.(".zyrox-module:not(.active)")
+      || uiRoot?.querySelector?.(".zyrox-module");
+    const categoryHeader = uiRoot?.querySelector?.(".zyrox-panel-header");
+    const activeFallback = "linear-gradient(90deg, rgba(255, 61, 61, 0.35), rgba(60, 18, 18, 0.82))";
+    const inactiveFallback = "rgba(255, 255, 255, 0.03)";
+    const categoryFallback = "linear-gradient(90deg, rgba(255, 74, 74, 0.24), rgba(60, 18, 18, 0.92))";
+    const uiComputed = uiRoot instanceof HTMLElement ? window.getComputedStyle(uiRoot) : null;
+    const radiusFallback = uiComputed?.getPropertyValue("--zyx-radius-md")?.trim() || `${QUESTION_STYLES_DEFAULTS.borderRadius}px`;
+    const activeComputed = activeModule instanceof HTMLElement ? window.getComputedStyle(activeModule) : null;
+    return {
+      activeBackground: getComputedBackgroundValue(activeModule, activeFallback),
+      inactiveBackground: getComputedBackgroundValue(inactiveModule, inactiveFallback),
+      categoryBackground: getComputedBackgroundValue(categoryHeader, categoryFallback),
+      borderRadius: activeComputed?.borderRadius || radiusFallback,
+    };
+  }
+
+  function resolveStylesBackground(value, fallback) {
+    return isStylesHexColor(value, fallback);
+  }
+
+
+  const ZYROX_OWN_UI_SELECTOR = [
+    ".zyrox-root",
+    ".zyrox-config-backdrop",
+    ".zyrox-config",
+    ".zyrox-settings",
+    ".zyrox-answer-popup",
+    ".zyrox-upgrade-hud",
+    ".zyrox-ability-hud",
+    "#zyrox-menu-shell",
+    "#zyrox-config-menu",
+    "#zyrox-settings-menu",
+    "#zyrox-config-backdrop",
+    "#zyrox-welcome-card",
+    "#zyrox-target-menu",
+  ].join(",");
 
   const ZYROX_OWN_UI_SELECTOR = [
     ".zyrox-root",
@@ -5134,44 +5183,49 @@
     }
   }
 
-  function applyQuestionShellStyles(cfg) {
-    const topBarColor = isStylesHexColor(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
-    const pageColor = isStylesHexColor(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
-    const continueColor = isStylesHexColor(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
-    const shopColor = isStylesHexColor(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
+  function applyQuestionShellStyles(cfg, globalTheme = null) {
+    const topBarBackground = globalTheme?.categoryBackground || resolveStylesBackground(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
+    const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
+    const continueBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
+    const shopBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
     for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", topBarColor);
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", topBarBackground);
     }
     for (const element of document.querySelectorAll(".cZgLFG, .cChptk")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", pageColor);
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
     }
     for (const element of document.querySelectorAll(".ljtfrY, .dDfMyc")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", continueColor);
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", continueBackground);
     }
     for (const element of document.querySelectorAll(".dBwWbX")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", shopColor);
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", shopBackground);
     }
   }
 
   function applyQuestionStyles() {
     const cfg = getStylesConfig();
-    applyQuestionShellStyles(cfg);
+    const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
+    applyQuestionShellStyles(cfg, globalTheme);
     const targets = findQuestionStyleTargets();
     if (!targets) return;
     const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
     const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
     const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
+    const borderRadiusValue = globalTheme?.borderRadius || `${borderRadius}px`;
+    const questionBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
 
     if (targets.question) {
-      setQuestionInlineStyle(targets.question, "background", isStylesHexColor(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground));
+      setQuestionInlineStyle(targets.question, "background", questionBackground);
+      setQuestionInlineStyle(targets.question, "border-radius", borderRadiusValue);
       applyQuestionTextInlineStyles(targets.question, isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText), questionFontSize);
     }
 
     targets.options.forEach((option, index) => {
       const optionNumber = index + 1;
-      setQuestionInlineStyle(option, "background", isStylesHexColor(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]));
+      const optionBackground = globalTheme?.activeBackground || resolveStylesBackground(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]);
+      setQuestionInlineStyle(option, "background", optionBackground);
       applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
-      setQuestionInlineStyle(option, "border-radius", `${borderRadius}px`);
+      setQuestionInlineStyle(option, "border-radius", borderRadiusValue);
     });
   }
 
@@ -8045,12 +8099,16 @@
       const presetButtonsHtml = Object.entries(QUESTION_STYLES_PRESETS)
         .map(([value, preset]) => {
           const swatchColor = isStylesHexColor(preset.values?.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
-          return `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;"><span class="preset-swatch" style="display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:6px;border:1px solid rgba(255,255,255,.3);background:${swatchColor};vertical-align:-1px;"></span>${preset.label}</button>`;
+          return `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;"><span class="preset-swatch" style="display:inline-block;width:13px;height:13px;border-radius:999px;margin-right:7px;border:1px solid rgba(255,255,255,.36);background:${swatchColor};vertical-align:-2px;"></span>${preset.label}</button>`;
         })
         .join("");
       presetCard.innerHTML = `
         <label style="font-weight:700;">Presets</label>
         <div class="styles-preset-buttons" style="display:flex;gap:8px;flex-wrap:wrap;">${presetButtonsHtml}</div>
+        <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-top:2px;">
+          <input type="checkbox" class="styles-use-global-theme" ${cfg.useGlobalTheme ? "checked" : ""} />
+          Use global theme
+        </label>
       `;
       configBody.appendChild(presetCard);
 
@@ -8118,6 +8176,15 @@
         refreshQuestionStylesAfterConfigChange();
         saveSettings();
       });
+
+      const globalThemeInput = presetCard.querySelector(".styles-use-global-theme");
+      if (globalThemeInput instanceof HTMLInputElement) {
+        globalThemeInput.addEventListener("change", () => {
+          cfg.useGlobalTheme = Boolean(globalThemeInput.checked);
+          refreshQuestionStylesAfterConfigChange();
+          saveSettings();
+        });
+      }
 
       const updateAdvancedSetting = (event) => {
         const control = event.target?.closest?.("[data-setting-id]");
@@ -9569,6 +9636,9 @@
         hasPositionChanges = true;
       }
     }
+
+    const stylesCfg = getStylesConfigStore();
+    if (stylesCfg?.useGlobalTheme && isQuestionStylesEnabled()) refreshQuestionStylesAfterConfigChange();
   }
 
   function applySearchFilter() {
