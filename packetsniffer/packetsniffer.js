@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Zyrox packet sniffer
 // @namespace    https://github.com/zyrox
-// @version      3.0.0
+// @version      3.1.0
 // @description  WebSocket packet inspector — resend templates, variable substitution, sparkline stats, keyboard nav.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
@@ -861,6 +861,24 @@
 #zs-list, .zp, #zs-re-ed, #zs-re-tpl-list, #zs-re-hist-list {
   scrollbar-width:thin; scrollbar-color:var(--bdr2) transparent;
 }
+
+/* inline tree value editing */
+.zjval-editing {
+  outline:1px solid var(--acc-b) !important;
+  background:var(--bg2) !important;
+  border-radius:2px;
+  padding:0 2px;
+  cursor:text !important;
+}
+
+/* connection selector */
+#zs-re-ws {
+  background:var(--bg2); border:1px solid var(--bdr2);
+  color:var(--txt2); border-radius:var(--r);
+  padding:2px 4px; outline:none;
+  font-family:var(--font);
+}
+#zs-re-ws option { background:var(--bg2); color:var(--txt); }
 #zs-list::-webkit-scrollbar, .zp::-webkit-scrollbar,
 #zs-re-tpl-list::-webkit-scrollbar, #zs-re-hist-list::-webkit-scrollbar {
   width:4px; height:4px;
@@ -959,6 +977,7 @@
           <button id="zs-re-min"  class="zvb" title="Minify JSON">Minify</button>
           <button id="zs-re-orig" class="zvb" title="Restore original packet">Orig</button>
           <button id="zs-re-prev" class="zvb" title="Preview variable substitution">Preview</button>
+          <select id="zs-re-ws" class="zri" title="Target WebSocket connection" style="width:auto;max-width:140px;font-size:9px;cursor:pointer"></select>
           <div style="flex:1"></div>
           <button id="zs-re-vars-btn" class="zvb">Vars ▾</button>
         </div>
@@ -981,6 +1000,10 @@
           <span>×  every</span>
           <input id="zs-re-delay" class="zri" type="number" value="0" min="0" max="60000">
           <span>ms</span>
+          <span style="color:var(--bdr2);margin:0 2px">│</span>
+          <button class="zvb zre-preset" data-cnt="5"   data-delay="200"  title="5× · 200 ms">×5</button>
+          <button class="zvb zre-preset" data-cnt="10"  data-delay="500"  title="10× · 500 ms">×10</button>
+          <button class="zvb zre-preset" data-cnt="100" data-delay="0"    title="100× no delay (flood)" style="color:var(--red)">flood</button>
           <div style="flex:1"></div>
           <span id="zs-re-prog"></span>
         </div>
@@ -1142,7 +1165,10 @@
     sidebar.querySelector("#zs-vcl").addEventListener("click", closeViewer);
 
     sidebar.querySelectorAll(".zt").forEach(t =>
-      t.addEventListener("click", () => setTab(t.dataset.tab)));
+      t.addEventListener("click", () => {
+        setTab(t.dataset.tab);
+        if (t.dataset.tab==="resend") updateWsSelector();
+      }));
 
     sidebar.querySelector("#zs-cpj").addEventListener("click", async () => {
       const p = packets.find(x => x.id===selectedId);
@@ -1165,6 +1191,7 @@
 
     sidebar.querySelector("#zs-edt").addEventListener("click", () => {
       setTab("resend");
+      updateWsSelector();
       const p = packets.find(x => x.id===selectedId);
       if (!p) return;
       reEdEl.value = getEditableResendBody(p);
@@ -1236,6 +1263,13 @@
       const n = Math.max(1, parseInt(reCntEl.value,10)||1);
       sidebar.querySelector("#zs-re-cnt-lbl").textContent = n;
     });
+
+    // Repeat preset buttons
+    sidebar.querySelectorAll(".zre-preset").forEach(btn => btn.addEventListener("click", () => {
+      reCntEl.value   = btn.dataset.cnt;
+      reDelayEl.value = btn.dataset.delay;
+      sidebar.querySelector("#zs-re-cnt-lbl").textContent = btn.dataset.cnt;
+    }));
 
     // ── Send buttons ──────────────────────────────────────────
     sidebar.querySelector("#zs-send").addEventListener("click", () => doResend());
@@ -1480,6 +1514,49 @@
   }
 
   // ═══════════════════════════════════════════════════════════
+  //  Tree-edit helpers — inline value editing → resend editor
+  // ═══════════════════════════════════════════════════════════
+
+  // Walk a JSONPath string like "$.events[0].name" and overwrite the value
+  function setByPath(obj, pathStr, value) {
+    const clean=pathStr.replace(/^\$\.?/,"");
+    if (!clean) return;
+    const parts=[];
+    const re=/\[(\d+)\]|([^.\[\]]+)/g;
+    let m;
+    while ((m=re.exec(clean))!==null) parts.push(m[1]!==undefined?Number(m[1]):m[2]);
+    if (!parts.length) return;
+    let cur=obj;
+    for (let i=0; i<parts.length-1; i++) {
+      if (cur==null) throw new Error("Dead path at "+parts[i]);
+      cur=cur[parts[i]];
+    }
+    if (cur==null) throw new Error("Dead path at leaf");
+    cur[parts[parts.length-1]]=value;
+  }
+
+  // Called when the user commits an inline edit inside the JSON tree.
+  // Clones the current packet's JSON, patches the edited path, and
+  // pushes the result into the resend editor.
+  function updateResendFromTreeEdit(pathStr, rawNewVal) {
+    const p=packets.find(x=>x.id===selectedId);
+    if (!p) { setStatus("No packet selected — cannot apply tree edit"); return; }
+    const base=p.parsed.json??p.parsed;
+    try {
+      const cloned=JSON.parse(JSON.stringify(base));
+      let parsed;
+      try { parsed=JSON.parse(rawNewVal); }
+      catch { parsed=rawNewVal; }             // keep as string if not valid JSON literal
+      setByPath(cloned, pathStr, parsed);
+      if (reEdEl) {
+        reEdEl.value=JSON.stringify(cloned,null,2);
+        reErrEl.textContent="";
+        setStatus("Resend editor updated ✎ (switch to Resend tab to send)");
+      }
+    } catch(e) { setStatus("Tree edit failed: "+e.message); }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   //  JSON tree — with path tracking and value click-to-copy
   // ═══════════════════════════════════════════════════════════
   function renderJsonNode(val, depth, key, path) {
@@ -1522,13 +1599,53 @@
         if (pb) { pb.textContent=p2; }
         setStatus(`Path copied: ${p2}`);
       });
-      // Click value to copy it
+      // Single-click value → copy to clipboard
       row.querySelector(".zjval")?.addEventListener("click", e => {
         if (e.target.classList.contains("zjsm")) return;
         e.stopPropagation();
         const raw2=e.target.dataset.val||e.target.textContent;
         navigator.clipboard.writeText(raw2).catch(()=>{});
         setStatus("Value copied");
+      });
+      // Double-click value → inline edit, then inject into resend editor
+      row.querySelector(".zjval")?.addEventListener("dblclick", e => {
+        e.stopPropagation();
+        const span=e.target.closest(".zjval");
+        if (!span||span.contentEditable==="true") return;
+        const origHTML=span.innerHTML;
+        const origText=span.dataset.val ?? JSON.stringify(span.textContent);
+        // Show raw JSON-literal value for editing
+        let editText;
+        try { editText=JSON.parse(origText); }
+        catch { editText=origText; }
+        span.textContent=String(editText);
+        span.contentEditable="true";
+        span.classList.add("zjval-editing");
+        span.title="Enter to commit · Esc to cancel";
+        span.focus();
+        const sel2=window.getSelection(), rng=document.createRange();
+        rng.selectNodeContents(span); sel2.removeAllRanges(); sel2.addRange(rng);
+
+        const commit=()=>{
+          span.contentEditable="false";
+          span.classList.remove("zjval-editing");
+          span.title="Click to copy value";
+          const newText=span.textContent;
+          if (newText!==String(editText)) {
+            updateResendFromTreeEdit(path, newText);
+          }
+        };
+        const cancel=()=>{
+          span.contentEditable="false";
+          span.classList.remove("zjval-editing");
+          span.innerHTML=origHTML;
+          span.title="Click to copy value";
+        };
+        span.addEventListener("blur", commit, {once:true});
+        span.addEventListener("keydown", e2 => {
+          if (e2.key==="Enter")  { e2.preventDefault(); span.blur(); }
+          if (e2.key==="Escape") { span.removeEventListener("blur",commit); cancel(); }
+        });
       });
       return node;
     }
@@ -1611,6 +1728,38 @@
     }
   }
 
+  // Keep the WS selector in the resend toolbar up to date
+  function updateWsSelector() {
+    const sel=sidebar?.querySelector("#zs-re-ws");
+    if (!sel) return;
+    const open=[...wsMap.entries()].filter(([ws])=>ws.readyState===1);
+    const all =[...wsMap.entries()];
+    const rows=all.map(([ws,info])=>{
+      const state=["CONNECTING","OPEN","CLOSING","CLOSED"][ws.readyState]??"?";
+      const short=info.url.replace(/^wss?:\/\//,"").slice(0,40);
+      return `<option value="${info.id}" ${ws.readyState===1?"":"disabled"} ${ws.readyState!==1?"style='color:var(--txt3)'":""}>
+        #${info.id} ${state} · ${short}
+      </option>`;
+    });
+    if (!rows.length) rows.push(`<option value="">— no connections —</option>`);
+    sel.innerHTML=rows.join("");
+    // Auto-select the most recent open one
+    const newest=open[open.length-1];
+    if (newest) sel.value=String(newest[1].id);
+  }
+
+  function getTargetWs() {
+    const sel=sidebar?.querySelector("#zs-re-ws");
+    const targetId=sel ? Number(sel.value) : NaN;
+    if (!isNaN(targetId)) {
+      for (const [ws,info] of wsMap) {
+        if (info.id===targetId && ws.readyState===1) return ws;
+      }
+    }
+    // Fallback: newest open connection
+    return [...wsMap.keys()].find(w=>w.readyState===1)??null;
+  }
+
   // ═══════════════════════════════════════════════════════════
   //  Resend — variables, repeat, templates, history
   // ═══════════════════════════════════════════════════════════
@@ -1678,7 +1827,7 @@
       renderResendHistory();
       return false;
     }
-    const ws=[...wsMap.keys()].find(w=>w.readyState===1);
+    const ws=getTargetWs();
     if (!ws) {
       reErrEl.textContent="No open WebSocket connection.";
       resendHistory.push({ts:Date.now(),tag,bytes:0,ok:false,err:"No open WebSocket"});
@@ -2057,8 +2206,8 @@ ws.close()`;
       const info={id:++wsSeq,url};
       wsMap.set(ws,info);
 
-      ws.addEventListener("open",  ()  => { setStatus(`WS #${info.id} open · ${url}`); updateStats(); });
-      ws.addEventListener("close", e   => { setStatus(`WS #${info.id} closed (${e.code})`); updateStats(); });
+      ws.addEventListener("open",  ()  => { setStatus(`WS #${info.id} open · ${url}`); updateStats(); updateWsSelector(); });
+      ws.addEventListener("close", e   => { setStatus(`WS #${info.id} closed (${e.code})`); updateStats(); updateWsSelector(); });
       ws.addEventListener("error", ()  => { setStatus(`WS #${info.id} error`); });
 
       const origSend=ws.send;
