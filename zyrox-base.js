@@ -4872,7 +4872,9 @@
     '[class*="option" i]',
     '[style*="cursor: pointer" i]',
   ].join(",");
-  const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /^(continue|next|ok|okay)$/i;
+  const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /(?:^|\b)(continue|next|ok|okay)(?:\b|$)/i;
+  const QUESTION_STYLE_SHOP_TEXT_PATTERN = /(?:^|\b)(shop|open shop|store)(?:\b|$)/i;
+  const QUESTION_STYLE_ACTION_TEXT_MAX_LENGTH = 90;
   const questionStylesState = {
     observer: null,
     changedElements: new Set(),
@@ -4968,12 +4970,15 @@
     return `linear-gradient(${background}, ${background})`;
   }
 
+  function composeGlobalThemeLayeredBackground(overlayBackground, baseBackground = "#000000") {
+    const baseLayer = cssBackgroundLayer(baseBackground) || baseBackground;
+    const overlayLayer = cssBackgroundLayer(overlayBackground);
+    return overlayLayer ? `${overlayLayer}, ${baseLayer}` : baseLayer;
+  }
+
   function composeGlobalThemeButtonBackground(globalTheme) {
     if (!globalTheme) return "";
-    const baseBackground = globalTheme.inactiveBackground || "#000000";
-    const overlayLayer = cssBackgroundLayer(globalTheme.activeBackground);
-    const baseLayer = cssBackgroundLayer(baseBackground) || baseBackground;
-    return overlayLayer ? `${overlayLayer}, ${baseLayer}` : baseBackground;
+    return composeGlobalThemeLayeredBackground(globalTheme.activeBackground, globalTheme.inactiveBackground || "#000000");
   }
 
   function getStylesGlobalThemeValues() {
@@ -4997,13 +5002,20 @@
       activeBackground,
       inactiveBackground,
       buttonBackground: composeGlobalThemeButtonBackground({ activeBackground, inactiveBackground }),
-      categoryBackground: darkenCssBackground(categoryBackground, 0.62),
+      categoryBackground: composeGlobalThemeLayeredBackground(activeBackground || darkenCssBackground(categoryBackground, 0.62), "#000000"),
       borderRadius: activeComputed?.borderRadius || radiusFallback,
     };
   }
 
   function resolveStylesBackground(value, fallback) {
     return isStylesHexColor(value, fallback);
+  }
+
+  function clampStylesNumber(value, min, max, fallback) {
+    const parsed = Number(value);
+    const fallbackNumber = Number(fallback);
+    const nextValue = Number.isFinite(parsed) ? parsed : fallbackNumber;
+    return Math.max(min, Math.min(max, Number.isFinite(nextValue) ? nextValue : min));
   }
 
 
@@ -5057,6 +5069,7 @@
     if (!isQuestionStyleElement(element)) return;
     const nextValue = String(value ?? "");
     rememberQuestionStyle(element, property);
+    if (property === "background") rememberQuestionStyle(element, "background-color");
     if (element.style.getPropertyValue(property) === nextValue && element.style.getPropertyPriority(property) === "important") return;
     element.style.setProperty(property, nextValue, "important");
   }
@@ -5074,24 +5087,85 @@
     questionStylesState.originalStyles = new WeakMap();
   }
 
-  function isLikelyQuestionContinueButton(element) {
-    if (!isQuestionStyleVisible(element)) return false;
-    const text = String(element.textContent || element.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
-    if (!QUESTION_STYLE_CONTINUE_TEXT_PATTERN.test(text)) return false;
+  function getQuestionStyleInteractiveText(element) {
+    return String(element?.textContent || element?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isQuestionStyleClickableElement(element) {
+    if (!(element instanceof HTMLElement)) return false;
     const tagName = String(element.tagName || "").toLowerCase();
     const role = String(element.getAttribute?.("role") || "").toLowerCase();
+    const className = String(element.className || "");
     const style = window.getComputedStyle(element);
-    return tagName === "button" || role === "button" || style.cursor === "pointer" || element.tabIndex >= 0;
+    return tagName === "button"
+      || tagName === "a"
+      || role === "button"
+      || role === "link"
+      || style.cursor === "pointer"
+      || element.tabIndex >= 0
+      || /(?:^|[-_\s])(btn|button)(?:[-_\s]|$)/i.test(className);
+  }
+
+  function isQuestionActionTextMatch(element, textPattern) {
+    const text = getQuestionStyleInteractiveText(element);
+    return Boolean(text && text.length <= QUESTION_STYLE_ACTION_TEXT_MAX_LENGTH && textPattern.test(text));
+  }
+
+  function findQuestionActionSurface(element) {
+    if (!isQuestionStyleVisible(element)) return null;
+    let current = element;
+    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
+      if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
+      if (isQuestionStyleClickableElement(current) && isQuestionStyleVisible(current)) return current;
+    }
+    const rect = element.getBoundingClientRect();
+    if (elementHasVisibleBackground(element) && rect.width <= 340 && rect.height <= 120) return element;
+    return null;
+  }
+
+  function isLikelyQuestionActionButton(element, textPattern) {
+    return isQuestionActionTextMatch(element, textPattern) && Boolean(findQuestionActionSurface(element));
+  }
+
+  function addQuestionActionCandidate(buttons, seen, element, textPattern, limit) {
+    if (!(element instanceof HTMLElement) || !isQuestionActionTextMatch(element, textPattern)) return false;
+    const surface = findQuestionActionSurface(element);
+    if (!(surface instanceof HTMLElement) || seen.has(surface)) return false;
+    seen.add(surface);
+    buttons.push(surface);
+    return buttons.length >= limit;
+  }
+
+  function getQuestionActionButtonCandidates(textPattern, root = document, limit = 6) {
+    const searchRoot = root && typeof root.querySelectorAll === "function" ? root : document;
+    const buttons = [];
+    const seen = new Set();
+    for (const element of searchRoot.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
+      if (addQuestionActionCandidate(buttons, seen, element, textPattern, limit)) return buttons;
+    }
+    const walkerRoot = searchRoot === document ? document.body : searchRoot;
+    if (walkerRoot instanceof HTMLElement) {
+      const walker = document.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
+        acceptNode(node) {
+          if (!(node instanceof HTMLElement) || !isQuestionStyleElement(node)) return NodeFilter.FILTER_REJECT;
+          if (!node.children.length && isQuestionActionTextMatch(node, textPattern)) return NodeFilter.FILTER_ACCEPT;
+          return NodeFilter.FILTER_SKIP;
+        },
+      });
+      let scanned = 0;
+      for (let node = walker.nextNode(); node && scanned < 3000; node = walker.nextNode(), scanned += 1) {
+        if (addQuestionActionCandidate(buttons, seen, node, textPattern, limit)) break;
+      }
+    }
+    return buttons;
   }
 
   function getQuestionContinueButtonCandidates(root = document) {
-    const searchRoot = root && typeof root.querySelectorAll === "function" ? root : document;
-    const buttons = [];
-    for (const element of searchRoot.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (buttons.length >= 4) break;
-      if (element instanceof HTMLElement && isLikelyQuestionContinueButton(element)) buttons.push(element);
-    }
-    return buttons;
+    return getQuestionActionButtonCandidates(QUESTION_STYLE_CONTINUE_TEXT_PATTERN, root);
+  }
+
+  function getQuestionShopButtonCandidates(root = document) {
+    return getQuestionActionButtonCandidates(QUESTION_STYLE_SHOP_TEXT_PATTERN, root);
   }
 
   function getQuestionOptionCandidates(root) {
@@ -5191,17 +5265,8 @@
     const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
     if (isQuestionStyleVisible(direct)) return true;
     if (getQuestionContinueButtonCandidates().length > 0) return true;
-
-    let visibleInteractiveCount = 0;
-    for (const element of document.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (!isQuestionStyleElement(element)) continue;
-      const text = String(element.textContent || "").trim();
-      if (!text) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.width < 70 || rect.height < 30 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) continue;
-      visibleInteractiveCount += 1;
-      if (visibleInteractiveCount >= 2) return true;
-    }
+    if (getQuestionShopButtonCandidates().length > 0) return true;
+    if (getQuestionTopBarCandidates(1).length > 0) return true;
     return false;
   }
 
@@ -5279,7 +5344,8 @@
   function findQuestionStyleTargets() {
     const referenceTargets = findReferenceQuestionTargets();
     if (referenceTargets) return referenceTargets;
-    const root = findQuestionStyleRoot();
+    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+    const root = isQuestionStyleVisible(direct) ? direct : null;
     if (!root) return null;
     const options = getQuestionOptionCandidates(root);
     if (options.length < 2) return null;
@@ -5306,18 +5372,103 @@
     return Boolean(parsed && parsed.a > 0.01);
   }
 
-  function applyGlobalThemeButtonSurface(element, background, borderRadiusValue, baseBackground = "#000000") {
+  function isLikelyQuestionTopBar(element) {
+    if (!isQuestionStyleVisible(element) || !elementHasVisibleBackground(element)) return false;
+    const tagName = String(element.tagName || "").toLowerCase();
+    if (["button", "a", "canvas", "svg", "img", "input", "select", "textarea"].includes(tagName)) return false;
+    const rect = element.getBoundingClientRect();
+    const viewportWidth = Math.max(320, window.innerWidth || 0);
+    if (rect.top > 120 || rect.bottom < 12) return false;
+    if (rect.width < Math.min(280, viewportWidth * 0.45)) return false;
+    if (rect.height < 28 || rect.height > 120) return false;
+    const text = getQuestionStyleInteractiveText(element);
+    if (QUESTION_STYLE_CONTINUE_TEXT_PATTERN.test(text) || QUESTION_STYLE_SHOP_TEXT_PATTERN.test(text)) return false;
+    return true;
+  }
+
+  function getQuestionTopBarCandidates(limit = 4) {
+    const candidates = new Map();
+    const addCandidate = (element, score = 0) => {
+      if (!(element instanceof HTMLElement) || candidates.has(element) || !isLikelyQuestionTopBar(element)) return;
+      const rect = element.getBoundingClientRect();
+      const widthRatio = rect.width / Math.max(1, window.innerWidth || rect.width);
+      candidates.set(element, score + (1 - Math.min(1, Math.max(0, rect.top) / 120)) * 40 + widthRatio * 35 - Math.abs(rect.height - 56) / 4);
+    };
+
+    for (const element of document.querySelectorAll(".gAlRHP, .dujAvP, header, nav, [class*='top' i], [class*='bar' i], [class*='header' i]")) {
+      addCandidate(element, 35);
+    }
+
+    let scanned = 0;
+    for (const element of document.body?.querySelectorAll?.("*") || []) {
+      if (scanned >= 2500) break;
+      scanned += 1;
+      addCandidate(element, 0);
+    }
+
+    return [...candidates.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([element]) => element);
+  }
+
+  function applyQuestionTopBarSurface(element, background) {
     if (!isQuestionStyleElement(element)) return;
+    setQuestionInlineStyle(element, "background", background);
+    setQuestionInlineStyle(element, "background-color", background);
+    const descendants = Array.from(element.querySelectorAll("div,header,nav,section"))
+      .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
+    for (const child of descendants.slice(0, 8)) {
+      setQuestionInlineStyle(child, "background", background);
+      setQuestionInlineStyle(child, "background-color", background);
+    }
+  }
+
+  function isQuestionButtonPaintSurface(element) {
+    if (!(element instanceof HTMLElement) || !isQuestionStyleVisible(element)) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 520 || rect.height > 180) return false;
+    return isQuestionStyleClickableElement(element) || elementHasVisibleBackground(element);
+  }
+
+  function getQuestionButtonPaintTargets(element) {
+    const targets = new Set();
+    if (!isQuestionStyleElement(element)) return targets;
+    if (element instanceof HTMLElement) targets.add(element);
+
+    const actionSurface = findQuestionActionSurface(element);
+    if (actionSurface instanceof HTMLElement) targets.add(actionSurface);
+
+    let current = element.parentElement;
+    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
+      if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
+      if (isQuestionButtonPaintSurface(current)) targets.add(current);
+    }
+    return targets;
+  }
+
+  function paintQuestionButtonTarget(element, background, borderRadiusValue, baseBackground) {
     setQuestionInlineStyle(element, "background", background);
     setQuestionInlineStyle(element, "background-color", baseBackground);
     if (borderRadiusValue) setQuestionInlineStyle(element, "border-radius", borderRadiusValue);
-    const descendants = Array.from(element.querySelectorAll("button,[role='button'],a,div,span"))
-      .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
-    for (const child of descendants.slice(0, 12)) {
-      setQuestionInlineStyle(child, "background", background);
-      setQuestionInlineStyle(child, "background-color", baseBackground);
-      if (borderRadiusValue) setQuestionInlineStyle(child, "border-radius", borderRadiusValue);
+  }
+
+  function applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground = background) {
+    if (!isQuestionStyleElement(element)) return;
+    const targets = getQuestionButtonPaintTargets(element);
+    if (!targets.size && element instanceof HTMLElement) targets.add(element);
+    for (const target of targets) {
+      paintQuestionButtonTarget(target, background, borderRadiusValue, baseBackground);
+      const descendants = Array.from(target.querySelectorAll("button,[role='button'],a,div,span"))
+        .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
+      for (const child of descendants.slice(0, 12)) {
+        paintQuestionButtonTarget(child, background, borderRadiusValue, baseBackground);
+      }
     }
+  }
+
+  function applyGlobalThemeButtonSurface(element, background, borderRadiusValue, baseBackground = "#000000") {
+    applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground);
   }
 
   function getQuestionStyleScopeRoots(targets = null) {
@@ -5334,6 +5485,7 @@
     addRoot(questionStylesState.currentRoot);
     const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
     addRoot(direct);
+    for (const shellElement of document.querySelectorAll(QUESTION_STYLE_SHELL_SELECTOR)) addRoot(shellElement);
     return roots;
   }
 
@@ -5352,11 +5504,15 @@
     const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
     const continueBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
     const shopBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
-    const borderRadiusValue = globalTheme?.borderRadius || `${Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius))}px`;
+    const borderRadiusValue = globalTheme?.borderRadius || `${clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius)}px`;
     const scopeRoots = getQuestionStyleScopeRoots(targets);
 
-    for (const element of queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", topBarBackground);
+    const topBars = new Set([
+      ...queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP"),
+      ...getQuestionTopBarCandidates(),
+    ]);
+    for (const element of topBars) {
+      if (element instanceof HTMLElement) applyQuestionTopBarSurface(element, topBarBackground);
     }
     for (const element of queryQuestionStyleScope(scopeRoots, ".cZgLFG, .cChptk")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
@@ -5367,13 +5523,15 @@
     ]);
     for (const element of continueButtons) {
       if (!(element instanceof HTMLElement)) continue;
-      if (globalTheme) applyGlobalThemeButtonSurface(element, continueBackground, borderRadiusValue, pageBackground);
-      else setQuestionInlineStyle(element, "background", continueBackground);
+      applyQuestionButtonSurface(element, continueBackground, borderRadiusValue, globalTheme ? pageBackground : continueBackground);
     }
-    for (const element of queryQuestionStyleScope(scopeRoots, ".dBwWbX")) {
+    const shopButtons = new Set([
+      ...queryQuestionStyleScope(scopeRoots, ".dBwWbX"),
+      ...getQuestionShopButtonCandidates(),
+    ]);
+    for (const element of shopButtons) {
       if (!(element instanceof HTMLElement)) continue;
-      if (globalTheme) applyGlobalThemeButtonSurface(element, shopBackground, borderRadiusValue, pageBackground);
-      else setQuestionInlineStyle(element, "background", shopBackground);
+      applyQuestionButtonSurface(element, shopBackground, borderRadiusValue, globalTheme ? pageBackground : shopBackground);
     }
   }
 
@@ -5383,15 +5541,17 @@
 
     const targets = findQuestionStyleTargets();
     const hasContinueButton = getQuestionContinueButtonCandidates().length > 0;
-    if (!targets && !hasShell && !hasContinueButton) return false;
+    const hasShopButton = getQuestionShopButtonCandidates().length > 0;
+    const hasTopBar = getQuestionTopBarCandidates(1).length > 0;
+    if (!targets && !hasShell && !hasContinueButton && !hasShopButton && !hasTopBar) return false;
 
     const cfg = getStylesConfig();
     const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
     applyQuestionShellStyles(cfg, globalTheme, targets);
     if (!targets) return true;
-    const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
-    const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
-    const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
+    const questionFontSize = clampStylesNumber(cfg.questionFontSize, 12, 64, QUESTION_STYLES_DEFAULTS.questionFontSize);
+    const answerFontSize = clampStylesNumber(cfg.answerFontSize, 10, 48, QUESTION_STYLES_DEFAULTS.answerFontSize);
+    const borderRadius = clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius);
     const borderRadiusValue = globalTheme?.borderRadius || `${borderRadius}px`;
     const questionBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
 
