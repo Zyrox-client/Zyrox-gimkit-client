@@ -4690,16 +4690,17 @@
   }
 
 
-  const STYLES_MODULE_NAME = "Styles";
+  const LEGACY_STYLES_MODULE_NAME = "Styles";
+  const STYLES_MODULE_NAME = "Theme";
   const QUESTION_STYLES_DEFAULTS = {
-    topBarBackground: "#4252af",
-    pageBackground: "#f5f7fb",
-    correctBackground: "#0d6b33",
-    wrongBackground: "#771322",
-    continueButtonBackground: "#076296",
-    shopButtonBackground: "#a85c15",
-    questionBackground: "#303f9f",
-    questionText: "#ffffff",
+    topBarBackground: "#0f172a",
+    pageBackground: "#020617",
+    correctBackground: "#166534",
+    wrongBackground: "#7f1d1d",
+    continueButtonBackground: "#1d4ed8",
+    shopButtonBackground: "#7c2d12",
+    questionBackground: "#101827",
+    questionText: "#e0f2fe",
     option1Background: "#771322",
     option1Text: "#ffffff",
     option2Background: "#a85c15",
@@ -4708,11 +4709,11 @@
     option3Text: "#ffffff",
     option4Background: "#076296",
     option4Text: "#ffffff",
-    questionFontSize: 28,
-    answerFontSize: 20,
-    borderRadius: 0,
+    questionFontSize: 30,
+    answerFontSize: 22,
+    borderRadius: 18,
     useGlobalTheme: false,
-    stylePreset: "default",
+    stylePreset: "midnight",
   };
   const QUESTION_STYLES_PRESETS = {
     default: {
@@ -4874,6 +4875,13 @@
   function getStylesConfigStore() {
     if (!(state.moduleConfig instanceof Map)) return null;
     let cfg = state.moduleConfig.get(STYLES_MODULE_NAME);
+    if ((!cfg || typeof cfg !== "object") && state.moduleConfig.has(LEGACY_STYLES_MODULE_NAME)) {
+      cfg = state.moduleConfig.get(LEGACY_STYLES_MODULE_NAME);
+      if (cfg && typeof cfg === "object") {
+        state.moduleConfig.set(STYLES_MODULE_NAME, cfg);
+        state.moduleConfig.delete(LEGACY_STYLES_MODULE_NAME);
+      }
+    }
     if (!cfg || typeof cfg !== "object") {
       cfg = { keybind: null, ...QUESTION_STYLES_DEFAULTS };
       state.moduleConfig.set(STYLES_MODULE_NAME, cfg);
@@ -8146,7 +8154,7 @@
       details.style.overflow = "hidden";
       details.innerHTML = `
         <summary style="cursor:pointer;list-style:none;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <span>Advanced color and size settings</span>
+          <span style="font-size:12px;">Advanced color and size settings</span>
           <span class="styles-advanced-icon" aria-hidden="true" style="font-size:14px;opacity:.8;transition:transform .15s ease;">▸</span>
         </summary>
         <div class="styles-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
@@ -10216,7 +10224,9 @@
           : (Array.isArray(saved.moduleSettings) ? saved.moduleSettings : null);
         if (savedModuleConfig) {
           const migratedModuleConfig = savedModuleConfig.map(([name, cfg]) => {
-            const nextName = name === LEGACY_ANIMATION_SKIP_MODULE_NAME ? ANIMATION_SKIP_MODULE_NAME : name;
+            const nextName = name === LEGACY_ANIMATION_SKIP_MODULE_NAME
+              ? ANIMATION_SKIP_MODULE_NAME
+              : (name === LEGACY_STYLES_MODULE_NAME ? STYLES_MODULE_NAME : name);
             const nextCfg = (cfg && typeof cfg === "object") ? { ...cfg } : cfg;
             if (nextName === ABILITY_HUD_MODULE_NAME && nextCfg && typeof nextCfg === "object") {
               delete nextCfg.abilityHudEnabled; delete nextCfg.abilityHudPositionX; delete nextCfg.abilityHudPositionY; delete nextCfg.abilityHudZIndex; delete nextCfg.abilityHudOpacity;
@@ -10228,7 +10238,11 @@
         if (Array.isArray(saved.enabledModules)) {
           pendingEnabledModules = saved.enabledModules
             .filter((name) => typeof name === "string")
-            .map((name) => (name === LEGACY_ANIMATION_SKIP_MODULE_NAME ? ANIMATION_SKIP_MODULE_NAME : name));
+            .map((name) => {
+              if (name === LEGACY_ANIMATION_SKIP_MODULE_NAME) return ANIMATION_SKIP_MODULE_NAME;
+              if (name === LEGACY_STYLES_MODULE_NAME) return STYLES_MODULE_NAME;
+              return name;
+            });
         }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         setFooterText();
