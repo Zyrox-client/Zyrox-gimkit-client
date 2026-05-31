@@ -4692,20 +4692,20 @@
 
   const STYLES_MODULE_NAME = "Styles";
   const QUESTION_STYLES_DEFAULTS = {
-    questionBackground: "#000000",
+    questionBackground: "#303f9f",
     questionText: "#ffffff",
-    option1Background: "#1368ce",
+    option1Background: "#771322",
     option1Text: "#ffffff",
-    option2Background: "#d89e00",
+    option2Background: "#a85c15",
     option2Text: "#ffffff",
-    option3Background: "#26890c",
+    option3Background: "#0d6b33",
     option3Text: "#ffffff",
-    option4Background: "#c52222",
+    option4Background: "#076296",
     option4Text: "#ffffff",
     questionFontSize: 28,
     answerFontSize: 20,
-    borderRadius: 14,
-    topBarBackground: "#ffffff",
+    borderRadius: 0,
+    topBarBackground: "#4252af",
     pageBackground: "#f5f7fb",
     stylePreset: "default",
   };
@@ -4713,20 +4713,20 @@
     default: {
       label: "Default Gimkit",
       values: {
-        questionBackground: "#000000",
+        questionBackground: "#303f9f",
         questionText: "#ffffff",
-        option1Background: "#1368ce",
+        option1Background: "#771322",
         option1Text: "#ffffff",
-        option2Background: "#d89e00",
+        option2Background: "#a85c15",
         option2Text: "#ffffff",
-        option3Background: "#26890c",
+        option3Background: "#0d6b33",
         option3Text: "#ffffff",
-        option4Background: "#c52222",
+        option4Background: "#076296",
         option4Text: "#ffffff",
         questionFontSize: 28,
         answerFontSize: 20,
-        borderRadius: 14,
-        topBarBackground: "#ffffff",
+        borderRadius: 0,
+        topBarBackground: "#4252af",
         pageBackground: "#f5f7fb",
       },
     },
@@ -4786,8 +4786,28 @@
         questionFontSize: 28,
         answerFontSize: 21,
         borderRadius: 22,
-        topBarBackground: "#e0f2fe",
+        topBarBackground: "#6d5bd0",
         pageBackground: "#fff7ed",
+      },
+    },
+    forest: {
+      label: "Forest",
+      values: {
+        questionBackground: "#263a24",
+        questionText: "#f4f7e8",
+        option1Background: "#3f4f1f",
+        option1Text: "#f9fbe7",
+        option2Background: "#5f6f22",
+        option2Text: "#fffde7",
+        option3Background: "#2f6b3f",
+        option3Text: "#ecfdf5",
+        option4Background: "#174c3c",
+        option4Text: "#e0f2f1",
+        questionFontSize: 30,
+        answerFontSize: 22,
+        borderRadius: 12,
+        topBarBackground: "#1f3d2b",
+        pageBackground: "#102015",
       },
     },
   };
@@ -5071,7 +5091,6 @@
     if (targets.question) {
       setQuestionInlineStyle(targets.question, "background", isStylesHexColor(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground));
       applyQuestionTextInlineStyles(targets.question, isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText), questionFontSize);
-      setQuestionInlineStyle(targets.question, "border-radius", `${borderRadius}px`);
     }
 
     targets.options.forEach((option, index) => {
