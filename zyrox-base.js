@@ -4982,19 +4982,17 @@
   }
 
 
-  function getStylesSettingDefinition(settingId) {
-    const layout = getModuleLayoutConfig(STYLES_MODULE_NAME);
-    return layout?.settings?.find((setting) => setting?.id === settingId) || null;
+  function isStylesSettingId(settingId) {
+    return typeof settingId === "string" && Object.prototype.hasOwnProperty.call(QUESTION_STYLES_DEFAULTS, settingId);
   }
 
   function syncStylesConfigControl(control) {
     if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return false;
     const settingId = control.dataset?.settingId;
-    const setting = settingId ? getStylesSettingDefinition(settingId) : null;
-    if (!setting) return false;
+    if (!isStylesSettingId(settingId)) return false;
     const cfg = moduleCfg(STYLES_MODULE_NAME);
-    if (setting.type === "checkbox") cfg[settingId] = Boolean(control.checked);
-    else if (setting.type === "slider") cfg[settingId] = Number(control.value);
+    if (control instanceof HTMLInputElement && control.type === "checkbox") cfg[settingId] = Boolean(control.checked);
+    else if (control instanceof HTMLInputElement && control.type === "range") cfg[settingId] = Number(control.value);
     else cfg[settingId] = String(control.value ?? "");
     refreshQuestionStylesAfterConfigChange();
     saveSettings();
