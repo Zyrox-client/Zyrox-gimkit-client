@@ -4705,6 +4705,81 @@
     questionFontSize: 28,
     answerFontSize: 20,
     borderRadius: 14,
+    stylePreset: "default",
+  };
+  const QUESTION_STYLES_PRESETS = {
+    default: {
+      label: "Default Gimkit",
+      values: {
+        questionBackground: "#000000",
+        questionText: "#ffffff",
+        option1Background: "#1368ce",
+        option1Text: "#ffffff",
+        option2Background: "#d89e00",
+        option2Text: "#ffffff",
+        option3Background: "#26890c",
+        option3Text: "#ffffff",
+        option4Background: "#c52222",
+        option4Text: "#ffffff",
+        questionFontSize: 28,
+        answerFontSize: 20,
+        borderRadius: 14,
+      },
+    },
+    midnight: {
+      label: "Midnight",
+      values: {
+        questionBackground: "#101827",
+        questionText: "#e0f2fe",
+        option1Background: "#1d4ed8",
+        option1Text: "#ffffff",
+        option2Background: "#7c2d12",
+        option2Text: "#fff7ed",
+        option3Background: "#166534",
+        option3Text: "#ecfdf5",
+        option4Background: "#7f1d1d",
+        option4Text: "#fef2f2",
+        questionFontSize: 30,
+        answerFontSize: 22,
+        borderRadius: 18,
+      },
+    },
+    highContrast: {
+      label: "High Contrast",
+      values: {
+        questionBackground: "#ffffff",
+        questionText: "#000000",
+        option1Background: "#0000ff",
+        option1Text: "#ffffff",
+        option2Background: "#ffcc00",
+        option2Text: "#000000",
+        option3Background: "#008000",
+        option3Text: "#ffffff",
+        option4Background: "#ff0000",
+        option4Text: "#ffffff",
+        questionFontSize: 32,
+        answerFontSize: 24,
+        borderRadius: 8,
+      },
+    },
+    pastel: {
+      label: "Pastel",
+      values: {
+        questionBackground: "#f8fafc",
+        questionText: "#1f2937",
+        option1Background: "#93c5fd",
+        option1Text: "#10233f",
+        option2Background: "#fde68a",
+        option2Text: "#3f2a00",
+        option3Background: "#bbf7d0",
+        option3Text: "#12351f",
+        option4Background: "#fecaca",
+        option4Text: "#451a1a",
+        questionFontSize: 28,
+        answerFontSize: 21,
+        borderRadius: 22,
+      },
+    },
   };
   const QUESTION_STYLE_SCREEN_SELECTOR = '[style*="opacity:"][style*="translateY(0%)"]';
   const questionStylesState = {
@@ -4731,6 +4806,13 @@
   function getStylesConfig() {
     const cfg = getStylesConfigStore() || {};
     return { ...QUESTION_STYLES_DEFAULTS, ...cfg };
+  }
+
+  function applyStylesPresetToConfig(cfg, presetName) {
+    if (!cfg || typeof cfg !== "object") return;
+    const preset = QUESTION_STYLES_PRESETS[presetName];
+    if (!preset) return;
+    Object.assign(cfg, preset.values, { stylePreset: presetName });
   }
 
   function isStylesHexColor(value, fallback) {
@@ -4945,6 +5027,17 @@
     return { root, question, options };
   }
 
+  function applyQuestionTextInlineStyles(element, color, fontSizePx) {
+    if (!isQuestionStyleElement(element)) return;
+    setQuestionInlineStyle(element, "color", color);
+    setQuestionInlineStyle(element, "font-size", `${fontSizePx}px`);
+    const descendants = Array.from(element.querySelectorAll("*")).filter((child) => child instanceof HTMLElement && String(child.textContent || "").trim());
+    for (const child of descendants.slice(0, 24)) {
+      setQuestionInlineStyle(child, "color", color);
+      setQuestionInlineStyle(child, "font-size", `${fontSizePx}px`);
+    }
+  }
+
   function applyQuestionStyles() {
     const targets = findQuestionStyleTargets();
     if (!targets) return;
@@ -4955,16 +5048,14 @@
 
     if (targets.question) {
       setQuestionInlineStyle(targets.question, "background", isStylesHexColor(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground));
-      setQuestionInlineStyle(targets.question, "color", isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText));
-      setQuestionInlineStyle(targets.question, "font-size", `${questionFontSize}px`);
+      applyQuestionTextInlineStyles(targets.question, isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText), questionFontSize);
       setQuestionInlineStyle(targets.question, "border-radius", `${borderRadius}px`);
     }
 
     targets.options.forEach((option, index) => {
       const optionNumber = index + 1;
       setQuestionInlineStyle(option, "background", isStylesHexColor(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]));
-      setQuestionInlineStyle(option, "color", isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]));
-      setQuestionInlineStyle(option, "font-size", `${answerFontSize}px`);
+      applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
       setQuestionInlineStyle(option, "border-radius", `${borderRadius}px`);
     });
   }
@@ -7797,7 +7888,111 @@
       });
     }
 
-    if (moduleName === "ESP") {
+
+    if (moduleName === STYLES_MODULE_NAME) {
+      Object.assign(cfg, getStylesConfigStore() || QUESTION_STYLES_DEFAULTS);
+      if (!QUESTION_STYLES_PRESETS[cfg.stylePreset]) cfg.stylePreset = "custom";
+
+      const presetCard = document.createElement("div");
+      presetCard.className = "zyrox-setting-card";
+      presetCard.style.alignItems = "stretch";
+      presetCard.style.flexDirection = "column";
+      presetCard.style.gap = "8px";
+      const presetOptions = [
+        ...Object.entries(QUESTION_STYLES_PRESETS).map(([value, preset]) => ({ value, label: preset.label })),
+        { value: "custom", label: "Custom" },
+      ];
+      presetCard.innerHTML = `
+        <label style="font-weight:700;">Preset</label>
+        <select class="set-module-setting-select styles-preset-select" data-setting-id="stylePreset">
+          ${presetOptions.map((option) => `<option value="${option.value}" ${String(cfg.stylePreset) === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
+        </select>
+        <div style="font-size:11px;opacity:.72;line-height:1.35;">Choose a base theme, or expand Advanced to fine-tune every color and size.</div>
+      `;
+      configBody.appendChild(presetCard);
+
+      const details = document.createElement("details");
+      details.className = "zyrox-setting-card styles-advanced-settings";
+      details.style.display = "block";
+      details.style.padding = "0";
+      details.style.overflow = "hidden";
+      details.innerHTML = `
+        <summary style="cursor:pointer;list-style:none;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+          <span>Advanced color and size settings</span>
+          <span style="font-size:11px;opacity:.7;">click to expand</span>
+        </summary>
+        <div class="styles-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
+      `;
+      const advancedBody = details.querySelector(".styles-advanced-body");
+      const presetSelect = presetCard.querySelector(".styles-preset-select");
+      const styleSettings = Array.isArray(moduleLayout?.settings) ? moduleLayout.settings : [];
+
+      const makeAdvancedRow = (setting) => {
+        const row = document.createElement("div");
+        row.className = "zyrox-setting-card";
+        row.style.margin = "0";
+        if (setting.type === "color") {
+          row.innerHTML = `<label>${setting.label}</label><input type="color" class="styles-live-control" data-setting-id="${setting.id}" value="${cfg[setting.id] ?? setting.default ?? "#ffffff"}" />`;
+        } else if (setting.type === "slider") {
+          const unit = setting.unit ?? "";
+          const value = cfg[setting.id] ?? setting.default ?? setting.min ?? 0;
+          row.innerHTML = `
+            <label style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;">
+              <span>${setting.label}</span>
+              <span class="zyrox-slider-value" data-value-for="${setting.id}" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${value}${unit}</span>
+            </label>
+            <input type="range" class="styles-live-control" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
+          `;
+        }
+        return row;
+      };
+
+      for (const setting of styleSettings) {
+        const row = makeAdvancedRow(setting);
+        if (row.innerHTML.trim()) advancedBody.appendChild(row);
+      }
+      configBody.appendChild(details);
+
+      const syncAdvancedControlsFromCfg = () => {
+        for (const control of advancedBody.querySelectorAll("[data-setting-id]")) {
+          const id = control.dataset.settingId;
+          if (cfg[id] === undefined) continue;
+          control.value = String(cfg[id]);
+          const setting = styleSettings.find((entry) => entry.id === id);
+          const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
+          if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting?.unit ?? ""}`;
+        }
+      };
+
+      presetSelect?.addEventListener("change", (event) => {
+        const presetName = String(event.target.value || "custom");
+        if (presetName !== "custom") {
+          applyStylesPresetToConfig(cfg, presetName);
+          syncAdvancedControlsFromCfg();
+        } else {
+          cfg.stylePreset = "custom";
+        }
+        refreshQuestionStylesAfterConfigChange();
+        saveSettings();
+      });
+
+      const updateAdvancedSetting = (event) => {
+        const control = event.target?.closest?.("[data-setting-id]");
+        if (!(control instanceof HTMLInputElement)) return;
+        const id = control.dataset.settingId;
+        const setting = styleSettings.find((entry) => entry.id === id);
+        if (!setting) return;
+        cfg[id] = control.type === "range" ? Number(control.value) : String(control.value || "#ffffff");
+        cfg.stylePreset = "custom";
+        if (presetSelect) presetSelect.value = "custom";
+        const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
+        if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting.unit ?? ""}`;
+        refreshQuestionStylesAfterConfigChange();
+        saveSettings();
+      };
+      advancedBody.addEventListener("input", updateAdvancedSetting);
+      advancedBody.addEventListener("change", updateAdvancedSetting);
+    } else if (moduleName === "ESP") {
       const defaults = getEspRenderConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxEspConfig = { ...cfg };
