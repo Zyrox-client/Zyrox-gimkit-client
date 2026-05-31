@@ -1142,7 +1142,7 @@
       const nativeXMLSend = XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.send = function() {
         this.addEventListener("load", () => {
-          if (!this.responseURL.endsWith("/matchmaker/join")) return;
+          if (!String(this.responseURL || "").includes("/matchmaker/join")) return;
           try {
             const response = JSON.parse(this.responseText);
             manager.blueboatRoomId = response.roomId;
@@ -1163,20 +1163,28 @@
         this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
       });
       socket.addEventListener("message", (e) => {
-        const blueboatDecoded = decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null;
+        const firstByte = (() => {
+          try {
+            const bytes = e.data instanceof ArrayBuffer
+              ? new Uint8Array(e.data)
+              : (ArrayBuffer.isView(e.data) ? new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength) : null);
+            return bytes?.[0] ?? null;
+          } catch (_) {
+            return null;
+          }
+        })();
+        const blueboatDecoded = firstByte === 4
+          ? (() => {
+              try { return decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null; }
+              catch (_) { return null; }
+            })()
+          : null;
         if (blueboatDecoded) {
           const normalizedBlueboat = blueboatDecoded?.payload && typeof blueboatDecoded.payload === "object"
             ? { ...blueboatDecoded.payload, eventName: blueboatDecoded.eventName, payload: blueboatDecoded.payload, raw: blueboatDecoded.raw }
             : blueboatDecoded;
           this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalizedBlueboat }));
         }
-        const firstByte = (() => {
-          try {
-            return new Uint8Array(e.data)[0];
-          } catch (_) {
-            return null;
-          }
-        })();
         if (this.transportType === "unknown" && firstByte != null) {
           if (colyseusProtocolCodeSet.has(firstByte)) this.transportType = "colyseus";
           else this.transportType = "blueboat";
@@ -2564,6 +2572,18 @@
     statusText: "Idle",
   };
 
+  const quickFireState = {
+    enabled: false,
+    intervalId: null,
+    intervalMs: 50,
+    lastStatus: "Idle",
+    statusText: "Idle",
+  };
+
+  const quickFireInputState = {
+    leftMouseDown: false,
+  };
+
   const autoAimState = {
     enabled: false,
     rafId: null,
@@ -2600,6 +2620,17 @@
       showTargetRing: true,
     };
     const stored = window.__zyroxTriggerAssistConfig;
+    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+  }
+
+  function getQuickFireConfig() {
+    const defaults = {
+      enabled: true,
+      fireIntervalMs: 50,
+      onlyWhenMouseDown: true,
+      onlyWhenGameFocused: true,
+    };
+    const stored = window.__zyroxQuickFireConfig;
     return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
   }
 
@@ -3136,6 +3167,134 @@
     ctx.restore();
   }
 
+  function setQuickFireStatus(status) {
+    quickFireState.lastStatus = status;
+    quickFireState.statusText = status;
+  }
+
+  function isQuickFireMouseDown(pointer) {
+    const pointerButtons = Number(pointer?.buttons) || 0;
+    return Boolean(pointer?.isDown || pointer?.leftButtonDown?.() || (pointerButtons & 1) || quickFireInputState.leftMouseDown);
+  }
+
+  function getQuickFireBody(phaser, stores) {
+    return phaser?.mainCharacter?.body
+      ?? getMainCharacter(stores)?.body
+      ?? phaser?.scene?.characterManager?.characters?.get?.(phaser?.mainCharacter?.id)?.body
+      ?? phaser?.mainCharacter
+      ?? null;
+  }
+
+  function getQuickFirePointerWorld(pointer, scene) {
+    const directX = Number(pointer?.worldX);
+    const directY = Number(pointer?.worldY);
+    if (Number.isFinite(directX) && Number.isFinite(directY)) return { x: directX, y: directY };
+
+    const pointerX = Number(pointer?.x ?? pointer?.position?.x);
+    const pointerY = Number(pointer?.y ?? pointer?.position?.y);
+    if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return null;
+
+    const camera = scene?.cameras?.main ?? scene?.cameras?.cameras?.[0];
+    const worldPoint = camera?.getWorldPoint?.(pointerX, pointerY);
+    const worldX = Number(worldPoint?.x);
+    const worldY = Number(worldPoint?.y);
+    if (Number.isFinite(worldX) && Number.isFinite(worldY)) return { x: worldX, y: worldY };
+
+    const cameraPoint = pointer?.positionToCamera?.(camera);
+    const cameraX = Number(cameraPoint?.x);
+    const cameraY = Number(cameraPoint?.y);
+    if (Number.isFinite(cameraX) && Number.isFinite(cameraY)) return { x: cameraX, y: cameraY };
+    return null;
+  }
+
+  function getQuickFireGameObjects() {
+    const stores = espState.stores ?? window.stores;
+    const phaser = stores?.phaser;
+    const scene = phaser?.scene;
+    const input = scene?.input;
+    const mousePointer = input?.mousePointer ?? input?.activePointer ?? input?.manager?.activePointer ?? input?.pointers?.[0];
+    const body = getQuickFireBody(phaser, stores);
+    return { stores, phaser, scene, mousePointer, body };
+  }
+
+  function sendQuickFireMessage(angle, bodyX, bodyY) {
+    if (!socketManager?.socket) {
+      setQuickFireStatus("Waiting for socket");
+      return false;
+    }
+    const shouldUseColyseus = socketManager.transportType === "colyseus" && !socketManager.blueboatRoomId;
+    if (!socketManager.blueboatRoomId && !shouldUseColyseus) {
+      setQuickFireStatus("Waiting for room");
+      return false;
+    }
+    socketManager.sendMessage("FIRE", { angle, x: bodyX, y: bodyY });
+    return true;
+  }
+
+  function quickFireTick() {
+    if (!quickFireState.enabled) return;
+    const cfg = getQuickFireConfig();
+    if (!cfg.enabled) {
+      setQuickFireStatus("Disabled in config");
+      return;
+    }
+    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
+      setQuickFireStatus("Waiting for focus");
+      return;
+    }
+
+    const { scene, mousePointer, body } = getQuickFireGameObjects();
+    if (!mousePointer || !body) {
+      setQuickFireStatus("Waiting for game objects");
+      return;
+    }
+    if (cfg.onlyWhenMouseDown && !isQuickFireMouseDown(mousePointer)) {
+      setQuickFireStatus("Waiting for left click");
+      return;
+    }
+
+    const Vector2 = window.Phaser?.Math?.Vector2;
+    const angleBetween = window.Phaser?.Math?.Angle?.Between;
+    if (typeof Vector2 !== "function" || typeof angleBetween !== "function") {
+      setQuickFireStatus("Waiting for Phaser math");
+      return;
+    }
+
+    const bodyX = Number(body.x);
+    const bodyY = Number(body.y);
+    const pointerWorld = getQuickFirePointerWorld(mousePointer, scene);
+    const worldX = Number(pointerWorld?.x);
+    const worldY = Number(pointerWorld?.y);
+    if (![bodyX, bodyY, worldX, worldY].every(Number.isFinite)) {
+      setQuickFireStatus("Waiting for coordinates");
+      return;
+    }
+
+    const vector = new Vector2(worldX - bodyX, worldY - (bodyY - 3)).normalize();
+    const angle = angleBetween(0, 0, vector.x, vector.y);
+    if (sendQuickFireMessage(angle, bodyX, bodyY)) setQuickFireStatus("Fired");
+  }
+
+  function startQuickFire() {
+    stopQuickFire();
+    quickFireState.enabled = true;
+    setQuickFireStatus("Armed");
+    const cfg = getQuickFireConfig();
+    const intervalMs = Math.max(16, Math.min(250, Number(cfg.fireIntervalMs) || 50));
+    quickFireState.intervalMs = intervalMs;
+    quickFireState.intervalId = setInterval(quickFireTick, intervalMs);
+  }
+
+  function stopQuickFire() {
+    if (quickFireState.intervalId != null) {
+      clearInterval(quickFireState.intervalId);
+      quickFireState.intervalId = null;
+    }
+    quickFireState.enabled = false;
+    quickFireState.intervalMs = 50;
+    setQuickFireStatus("Idle");
+  }
+
   function triggerAssistTick() {
     if (!triggerAssistState.enabled) return;
     const cfg = getTriggerAssistConfig();
@@ -3247,6 +3406,7 @@
 
   window.addEventListener("blur", () => {
     autoAimInputState.leftMouseDown = false;
+    quickFireInputState.leftMouseDown = false;
     autoAimInputState.reroutedShotActive = false;
     autoAimState.target = null;
     releaseFireHold();
@@ -3254,6 +3414,7 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") {
       autoAimInputState.leftMouseDown = false;
+      quickFireInputState.leftMouseDown = false;
       autoAimInputState.reroutedShotActive = false;
       autoAimState.target = null;
       releaseFireHold();
@@ -3282,6 +3443,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = true;
+    quickFireInputState.leftMouseDown = true;
     autoAimInputState.reroutedShotActive = true;
     attemptFire(false, false, { x: crosshairState.mouseX, y: crosshairState.mouseY });
   }, true);
@@ -3292,15 +3454,20 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = false;
+    quickFireInputState.leftMouseDown = false;
     autoAimInputState.reroutedShotActive = false;
   }, true);
 
   window.addEventListener("mousedown", (event) => {
-    if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
+    if (event.button === 0 && !isEventInsideUi(event.target)) {
+      autoAimInputState.leftMouseDown = true;
+      quickFireInputState.leftMouseDown = true;
+    }
   }, { passive: true });
   window.addEventListener("mouseup", (event) => {
     if (event.button === 0) {
       autoAimInputState.leftMouseDown = false;
+      quickFireInputState.leftMouseDown = false;
       autoAimInputState.reroutedShotActive = false;
     }
   }, { passive: true });
@@ -6533,6 +6700,10 @@
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
     },
+    "Quick Fire": {
+      onEnable: startQuickFire,
+      onDisable: stopQuickFire,
+    },
     "Aimbot": {
       onEnable: startAutoAim,
       onDisable: stopAutoAim,
@@ -6584,6 +6755,7 @@
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
     "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
+    "Quick Fire": "Rapidly fires toward your cursor while left click is held.",
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
@@ -6771,6 +6943,16 @@
                 { id: "requireLOS",          label: "Require LOS (future)",     type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",        type: "checkbox", default: true },
                 { id: "showTargetRing",      label: "Show Target Ring",         type: "checkbox", default: true },
+              ],
+            },
+            {
+              name: "Quick Fire",
+              description: MODULE_DESCRIPTIONS["Quick Fire"],
+              settings: [
+                { id: "enabled",             label: "Enabled",              type: "checkbox", default: true },
+                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 50, min: 16, max: 250, step: 1, unit: "ms" },
+                { id: "onlyWhenMouseDown",   label: "Only While Left Click", type: "checkbox", default: true },
+                { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
               ],
             },
             {
@@ -8244,6 +8426,8 @@
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
     } else if (name === "Triggerbot (Autoshoot)") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
+    } else if (name === "Quick Fire") {
+      window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
     } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
     } else if (name === "Auto Answer") {
@@ -9361,6 +9545,10 @@
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
               }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
+              }
               saveSettings();
             });
             settingInput.addEventListener("change", (event) => {
@@ -9369,6 +9557,10 @@
               if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
+              }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             });
@@ -9420,6 +9612,10 @@
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
               }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
+              }
               saveSettings();
             });
           }
@@ -9454,6 +9650,10 @@
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
               }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
+              }
               saveSettings();
             });
           }
@@ -9472,6 +9672,10 @@
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
+              }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             };
@@ -9493,6 +9697,10 @@
               cfg[setting.id] = String(event.target.value ?? "");
               if (moduleName === STYLES_MODULE_NAME) {
                 refreshQuestionStylesAfterConfigChange();
+              }
+              if (moduleName === "Quick Fire") {
+                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
+                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             });
