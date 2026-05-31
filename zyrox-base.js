@@ -5001,17 +5001,18 @@
     return true;
   }
 
-  function attachStylesConfigLiveSync() {
-    configBody.__zyroxStylesConfigAbort?.abort?.();
+  function attachStylesConfigLiveSync(targetBody) {
+    if (!(targetBody instanceof HTMLElement)) return;
+    targetBody.__zyroxStylesConfigAbort?.abort?.();
     const controller = new AbortController();
-    configBody.__zyroxStylesConfigAbort = controller;
+    targetBody.__zyroxStylesConfigAbort = controller;
     const syncFromEvent = (event) => {
       const control = event.target?.closest?.("[data-setting-id]");
       if (!control) return;
       syncStylesConfigControl(control);
     };
-    configBody.addEventListener("input", syncFromEvent, { capture: true, signal: controller.signal });
-    configBody.addEventListener("change", syncFromEvent, { capture: true, signal: controller.signal });
+    targetBody.addEventListener("input", syncFromEvent, { capture: true, signal: controller.signal });
+    targetBody.addEventListener("change", syncFromEvent, { capture: true, signal: controller.signal });
   }
 
   function startQuestionStyles() {
@@ -7746,7 +7747,7 @@
     configBody.__zyroxStylesConfigAbort = null;
     const cfg = moduleCfg(moduleName);
     const moduleLayout = getModuleLayoutConfig(moduleName);
-    if (moduleName === STYLES_MODULE_NAME) attachStylesConfigLiveSync();
+    if (moduleName === STYLES_MODULE_NAME) attachStylesConfigLiveSync(configBody);
 
     configBody.innerHTML = `
       <div class="zyrox-config-row">
