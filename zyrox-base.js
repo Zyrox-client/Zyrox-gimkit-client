@@ -5074,21 +5074,36 @@
     element.style.setProperty(property, nextValue, "important");
   }
 
-  function restoreQuestionStyles() {
-    for (const element of questionStylesState.changedElements) {
-      const original = questionStylesState.originalStyles.get(element);
-      if (!original || !(element instanceof HTMLElement)) continue;
-      for (const [property, snapshot] of Object.entries(original)) {
-        if (snapshot?.value) element.style.setProperty(property, snapshot.value, snapshot.priority || "");
-        else element.style.removeProperty(property);
-      }
+  function restoreQuestionStyleElement(element) {
+    const original = questionStylesState.originalStyles.get(element);
+    if (!original || !(element instanceof HTMLElement)) return false;
+    for (const [property, snapshot] of Object.entries(original)) {
+      if (snapshot?.value) element.style.setProperty(property, snapshot.value, snapshot.priority || "");
+      else element.style.removeProperty(property);
     }
+    questionStylesState.changedElements.delete(element);
+    return true;
+  }
+
+  function restoreQuestionStyles() {
+    for (const element of questionStylesState.changedElements) restoreQuestionStyleElement(element);
     questionStylesState.changedElements.clear();
     questionStylesState.originalStyles = new WeakMap();
   }
 
+  function restoreExcludedQuestionNavigationStyles() {
+    for (const element of [...questionStylesState.changedElements]) {
+      if (isQuestionExcludedNavigationAction(element)) restoreQuestionStyleElement(element);
+    }
+  }
+
   function getQuestionStyleInteractiveText(element) {
     return String(element?.textContent || element?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isQuestionExcludedNavigationAction(element) {
+    return element instanceof HTMLElement
+      && Boolean(element.closest(".MuiListItem-root, .MuiDrawer-root, .MuiList-root"));
   }
 
   function isQuestionStyleClickableElement(element) {
@@ -5112,7 +5127,7 @@
   }
 
   function findQuestionActionSurface(element) {
-    if (!isQuestionStyleVisible(element)) return null;
+    if (!isQuestionStyleVisible(element) || isQuestionExcludedNavigationAction(element)) return null;
     let current = element;
     for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
       if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
@@ -5128,7 +5143,7 @@
   }
 
   function addQuestionActionCandidate(buttons, seen, element, textPattern, limit) {
-    if (!(element instanceof HTMLElement) || !isQuestionActionTextMatch(element, textPattern)) return false;
+    if (!(element instanceof HTMLElement) || isQuestionExcludedNavigationAction(element) || !isQuestionActionTextMatch(element, textPattern)) return false;
     const surface = findQuestionActionSurface(element);
     if (!(surface instanceof HTMLElement) || seen.has(surface)) return false;
     seen.add(surface);
@@ -5148,6 +5163,7 @@
       const walker = document.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
         acceptNode(node) {
           if (!(node instanceof HTMLElement) || !isQuestionStyleElement(node)) return NodeFilter.FILTER_REJECT;
+          if (isQuestionExcludedNavigationAction(node)) return NodeFilter.FILTER_REJECT;
           if (!node.children.length && isQuestionActionTextMatch(node, textPattern)) return NodeFilter.FILTER_ACCEPT;
           return NodeFilter.FILTER_SKIP;
         },
@@ -5425,7 +5441,7 @@
   }
 
   function isQuestionButtonPaintSurface(element) {
-    if (!(element instanceof HTMLElement) || !isQuestionStyleVisible(element)) return false;
+    if (!(element instanceof HTMLElement) || !isQuestionStyleVisible(element) || isQuestionExcludedNavigationAction(element)) return false;
     const rect = element.getBoundingClientRect();
     if (rect.width > 520 || rect.height > 180) return false;
     return isQuestionStyleClickableElement(element) || elementHasVisibleBackground(element);
@@ -5433,7 +5449,7 @@
 
   function getQuestionButtonPaintTargets(element) {
     const targets = new Set();
-    if (!isQuestionStyleElement(element)) return targets;
+    if (!isQuestionStyleElement(element) || isQuestionExcludedNavigationAction(element)) return targets;
     if (element instanceof HTMLElement) targets.add(element);
 
     const actionSurface = findQuestionActionSurface(element);
@@ -5544,6 +5560,8 @@
     const hasShopButton = getQuestionShopButtonCandidates().length > 0;
     const hasTopBar = getQuestionTopBarCandidates(1).length > 0;
     if (!targets && !hasShell && !hasContinueButton && !hasShopButton && !hasTopBar) return false;
+
+    restoreExcludedQuestionNavigationStyles();
 
     const cfg = getStylesConfig();
     const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
