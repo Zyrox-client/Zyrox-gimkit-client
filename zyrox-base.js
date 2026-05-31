@@ -4706,11 +4706,13 @@
     answerFontSize: 20,
     borderRadius: 14,
   };
+  const QUESTION_STYLE_SCREEN_SELECTOR = '[style*="opacity:"][style*="translateY(0%)"]';
   const questionStylesState = {
     observer: null,
     changedElements: new Set(),
     originalStyles: new WeakMap(),
     syncTimer: null,
+    currentRoot: null,
   };
 
   function getStylesConfig() {
@@ -4744,22 +4746,28 @@
       questionStylesState.changedElements.add(element);
     }
     if (!Object.prototype.hasOwnProperty.call(original, property)) {
-      original[property] = element.style[property] || "";
+      original[property] = {
+        value: element.style.getPropertyValue(property) || "",
+        priority: element.style.getPropertyPriority(property) || "",
+      };
     }
   }
 
   function setQuestionInlineStyle(element, property, value) {
     if (!isQuestionStyleElement(element)) return;
+    const nextValue = String(value ?? "");
     rememberQuestionStyle(element, property);
-    element.style[property] = value;
+    if (element.style.getPropertyValue(property) === nextValue && element.style.getPropertyPriority(property) === "important") return;
+    element.style.setProperty(property, nextValue, "important");
   }
 
   function restoreQuestionStyles() {
     for (const element of questionStylesState.changedElements) {
       const original = questionStylesState.originalStyles.get(element);
-      if (!original) continue;
-      for (const [property, value] of Object.entries(original)) {
-        if (element instanceof HTMLElement) element.style[property] = value;
+      if (!original || !(element instanceof HTMLElement)) continue;
+      for (const [property, snapshot] of Object.entries(original)) {
+        if (snapshot?.value) element.style.setProperty(property, snapshot.value, snapshot.priority || "");
+        else element.style.removeProperty(property);
       }
     }
     questionStylesState.changedElements.clear();
@@ -4814,7 +4822,7 @@
 
   function findQuestionStyleRoot() {
     const selectors = [
-      '[style^="opacity:"][style*="transform: translateY(0%)"]',
+      QUESTION_STYLE_SCREEN_SELECTOR,
       '[style*="translateY(0%)"]',
       '[class*="question" i]',
       '[class*="answer" i]',
@@ -4869,7 +4877,53 @@
     return best || root;
   }
 
+
+  function getElementChild(element, index) {
+    if (!isQuestionStyleElement(element)) return null;
+    const child = element.children?.[index];
+    return child instanceof HTMLElement ? child : null;
+  }
+
+  function findReferenceQuestionTargets() {
+    let root = questionStylesState.currentRoot;
+    if (!isQuestionStyleVisible(root)) root = null;
+    if (!root) {
+      const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+      root = isQuestionStyleVisible(direct) ? direct : null;
+    }
+    if (!root) return null;
+
+    const questionDisplay = getElementChild(getElementChild(getElementChild(getElementChild(root, 0), 0), 0), 0);
+    const optionsWrap = getElementChild(root, 1);
+    const options = [];
+    if (optionsWrap) {
+      for (const option of Array.from(optionsWrap.children || [])) {
+        if (!(option instanceof HTMLElement)) continue;
+        const optionDisplay = getElementChild(option, 0) || option;
+        if (isQuestionStyleVisible(optionDisplay)) options.push(optionDisplay);
+        if (options.length >= 4) break;
+      }
+    }
+    if (questionDisplay && options.length >= 2) {
+      questionStylesState.currentRoot = root;
+      return { root, question: questionDisplay, options };
+    }
+    return null;
+  }
+
+  function captureQuestionStyleRootFromNode(node) {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.matches?.(QUESTION_STYLE_SCREEN_SELECTOR)) {
+      questionStylesState.currentRoot = node;
+      return;
+    }
+    const found = node.querySelector?.(QUESTION_STYLE_SCREEN_SELECTOR);
+    if (found instanceof HTMLElement) questionStylesState.currentRoot = found;
+  }
+
   function findQuestionStyleTargets() {
+    const referenceTargets = findReferenceQuestionTargets();
+    if (referenceTargets) return referenceTargets;
     const root = findQuestionStyleRoot();
     if (!root) return null;
     const options = getQuestionOptionCandidates(root);
@@ -4887,18 +4941,18 @@
     const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
 
     if (targets.question) {
-      setQuestionInlineStyle(targets.question, "backgroundColor", isStylesHexColor(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground));
+      setQuestionInlineStyle(targets.question, "background", isStylesHexColor(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground));
       setQuestionInlineStyle(targets.question, "color", isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText));
-      setQuestionInlineStyle(targets.question, "fontSize", `${questionFontSize}px`);
-      setQuestionInlineStyle(targets.question, "borderRadius", `${borderRadius}px`);
+      setQuestionInlineStyle(targets.question, "font-size", `${questionFontSize}px`);
+      setQuestionInlineStyle(targets.question, "border-radius", `${borderRadius}px`);
     }
 
     targets.options.forEach((option, index) => {
       const optionNumber = index + 1;
-      setQuestionInlineStyle(option, "backgroundColor", isStylesHexColor(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]));
+      setQuestionInlineStyle(option, "background", isStylesHexColor(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]));
       setQuestionInlineStyle(option, "color", isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]));
-      setQuestionInlineStyle(option, "fontSize", `${answerFontSize}px`);
-      setQuestionInlineStyle(option, "borderRadius", `${borderRadius}px`);
+      setQuestionInlineStyle(option, "font-size", `${answerFontSize}px`);
+      setQuestionInlineStyle(option, "border-radius", `${borderRadius}px`);
     });
   }
 
@@ -4913,7 +4967,15 @@
 
   function startQuestionStyles() {
     if (questionStylesState.observer) questionStylesState.observer.disconnect();
-    questionStylesState.observer = new MutationObserver(() => syncQuestionStyles());
+    const existingRoot = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+    if (existingRoot instanceof HTMLElement) questionStylesState.currentRoot = existingRoot;
+    questionStylesState.observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.target instanceof HTMLElement) captureQuestionStyleRootFromNode(mutation.target);
+        for (const node of mutation.addedNodes) captureQuestionStyleRootFromNode(node);
+      }
+      syncQuestionStyles();
+    });
     const target = document.body || document.documentElement;
     if (target) questionStylesState.observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-testid"] });
     applyQuestionStyles();
@@ -4929,6 +4991,7 @@
       questionStylesState.syncTimer = null;
     }
     restoreQuestionStyles();
+    questionStylesState.currentRoot = null;
   }
 
   const ABILITY_HUD_MODULE_NAME = "Ability HUD";
