@@ -4749,14 +4749,14 @@
         shopButtonBackground: "#7c2d12",
         questionBackground: "#101827",
         questionText: "#e0f2fe",
-        option1Background: "#312e81",
-        option1Text: "#e0e7ff",
-        option2Background: "#334155",
-        option2Text: "#f8fafc",
-        option3Background: "#164e63",
-        option3Text: "#ecfeff",
-        option4Background: "#3b0764",
-        option4Text: "#f3e8ff",
+        option1Background: "#771322",
+        option1Text: "#ffffff",
+        option2Background: "#a85c15",
+        option2Text: "#ffffff",
+        option3Background: "#0d6b33",
+        option3Text: "#ffffff",
+        option4Background: "#076296",
+        option4Text: "#ffffff",
         questionFontSize: 30,
         answerFontSize: 22,
         borderRadius: 18,
@@ -4864,7 +4864,9 @@
     observer: null,
     changedElements: new Set(),
     originalStyles: new WeakMap(),
-    syncTimer: null,
+    syncQueued: false,
+    burstFrameId: null,
+    burstFramesRemaining: 0,
     currentRoot: null,
   };
 
@@ -4898,8 +4900,24 @@
     return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
   }
 
+  const ZYROX_OWN_UI_SELECTOR = [
+    ".zyrox-root",
+    ".zyrox-config-backdrop",
+    ".zyrox-config",
+    ".zyrox-settings",
+    ".zyrox-answer-popup",
+    ".zyrox-upgrade-hud",
+    ".zyrox-ability-hud",
+    "#zyrox-menu-shell",
+    "#zyrox-config-menu",
+    "#zyrox-settings-menu",
+    "#zyrox-config-backdrop",
+    "#zyrox-welcome-card",
+    "#zyrox-target-menu",
+  ].join(",");
+
   function isQuestionStyleElement(value) {
-    return value instanceof HTMLElement && !value.closest("#zyrox-menu-shell, #zyrox-config-menu, #zyrox-settings-menu, #zyrox-config-backdrop, #zyrox-welcome-card");
+    return value instanceof HTMLElement && !value.closest(ZYROX_OWN_UI_SELECTOR);
   }
 
   function isQuestionStyleVisible(element) {
@@ -4964,7 +4982,7 @@
       const rect = element.getBoundingClientRect();
       const text = String(element.textContent || "").trim();
       if (!text || rect.width < 70 || rect.height < 30) continue;
-      if (element.closest("#zyrox-menu-shell, #zyrox-config-menu, #zyrox-settings-menu")) continue;
+      if (element.closest(ZYROX_OWN_UI_SELECTOR)) continue;
       seen.add(element);
       options.push(element);
     }
@@ -5119,8 +5137,6 @@
   function applyQuestionShellStyles(cfg) {
     const topBarColor = isStylesHexColor(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
     const pageColor = isStylesHexColor(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
-    const correctColor = isStylesHexColor(cfg.correctBackground, QUESTION_STYLES_DEFAULTS.correctBackground);
-    const wrongColor = isStylesHexColor(cfg.wrongBackground, QUESTION_STYLES_DEFAULTS.wrongBackground);
     const continueColor = isStylesHexColor(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
     const shopColor = isStylesHexColor(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
     for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
@@ -5128,12 +5144,6 @@
     }
     for (const element of document.querySelectorAll(".cZgLFG, .cChptk")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", pageColor);
-    }
-    for (const element of document.querySelectorAll(".lgdHhp")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", correctColor);
-    }
-    for (const element of document.querySelectorAll(".cZjVxd")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", wrongColor);
     }
     for (const element of document.querySelectorAll(".ljtfrY, .dDfMyc")) {
       if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", continueColor);
@@ -5169,13 +5179,30 @@
     return Boolean(state.enabledModules.has(STYLES_MODULE_NAME) || state.modules.get(STYLES_MODULE_NAME)?.enabled);
   }
 
+  function runQuestionStylesBurst(frameCount = 6) {
+    if (!isQuestionStylesEnabled()) return;
+    questionStylesState.burstFramesRemaining = Math.max(questionStylesState.burstFramesRemaining || 0, frameCount);
+    if (questionStylesState.burstFrameId) return;
+    const tick = () => {
+      questionStylesState.burstFrameId = null;
+      if (!isQuestionStylesEnabled()) {
+        questionStylesState.burstFramesRemaining = 0;
+        return;
+      }
+      applyQuestionStyles();
+      questionStylesState.burstFramesRemaining -= 1;
+      if (questionStylesState.burstFramesRemaining > 0) {
+        questionStylesState.burstFrameId = requestAnimationFrame(tick);
+      }
+    };
+    questionStylesState.burstFrameId = requestAnimationFrame(tick);
+  }
+
   function refreshQuestionStylesAfterConfigChange() {
     if (!isQuestionStylesEnabled()) return;
     restoreQuestionStyles();
     applyQuestionStyles();
-    requestAnimationFrame(() => {
-      if (isQuestionStylesEnabled()) applyQuestionStyles();
-    });
+    runQuestionStylesBurst(8);
     setTimeout(() => {
       if (isQuestionStylesEnabled()) applyQuestionStyles();
     }, 75);
@@ -5183,11 +5210,17 @@
 
   function syncQuestionStyles() {
     if (!isQuestionStylesEnabled()) return;
-    if (questionStylesState.syncTimer) return;
-    questionStylesState.syncTimer = setTimeout(() => {
-      questionStylesState.syncTimer = null;
-      applyQuestionStyles();
-    }, 40);
+    if (!questionStylesState.syncQueued) {
+      questionStylesState.syncQueued = true;
+      queueMicrotask(() => {
+        questionStylesState.syncQueued = false;
+        if (!isQuestionStylesEnabled()) return;
+        applyQuestionStyles();
+        runQuestionStylesBurst(3);
+      });
+    } else {
+      runQuestionStylesBurst(3);
+    }
   }
 
 
@@ -5237,6 +5270,7 @@
     const target = document.body || document.documentElement;
     if (target) questionStylesState.observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "data-testid"] });
     applyQuestionStyles();
+    runQuestionStylesBurst(8);
   }
 
   function stopQuestionStyles() {
@@ -5244,10 +5278,12 @@
       questionStylesState.observer.disconnect();
       questionStylesState.observer = null;
     }
-    if (questionStylesState.syncTimer) {
-      clearTimeout(questionStylesState.syncTimer);
-      questionStylesState.syncTimer = null;
+    if (questionStylesState.burstFrameId) {
+      cancelAnimationFrame(questionStylesState.burstFrameId);
+      questionStylesState.burstFrameId = null;
     }
+    questionStylesState.syncQueued = false;
+    questionStylesState.burstFramesRemaining = 0;
     restoreQuestionStyles();
     questionStylesState.currentRoot = null;
   }
@@ -6257,8 +6293,6 @@
               settings: [
                 { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
                 { id: "pageBackground", label: "Page Background", type: "color", default: QUESTION_STYLES_DEFAULTS.pageBackground },
-                { id: "correctBackground", label: "Correct Screen", type: "color", default: QUESTION_STYLES_DEFAULTS.correctBackground },
-                { id: "wrongBackground", label: "Wrong Screen", type: "color", default: QUESTION_STYLES_DEFAULTS.wrongBackground },
                 { id: "continueButtonBackground", label: "Continue Button", type: "color", default: QUESTION_STYLES_DEFAULTS.continueButtonBackground },
                 { id: "shopButtonBackground", label: "Shop Button", type: "color", default: QUESTION_STYLES_DEFAULTS.shopButtonBackground },
                 { id: "questionBackground", label: "Question Background", type: "color", default: QUESTION_STYLES_DEFAULTS.questionBackground },
@@ -8009,7 +8043,10 @@
       presetCard.style.flexDirection = "column";
       presetCard.style.gap = "8px";
       const presetButtonsHtml = Object.entries(QUESTION_STYLES_PRESETS)
-        .map(([value, preset]) => `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;">${preset.label}</button>`)
+        .map(([value, preset]) => {
+          const swatchColor = isStylesHexColor(preset.values?.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
+          return `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;"><span class="preset-swatch" style="display:inline-block;width:10px;height:10px;border-radius:999px;margin-right:6px;border:1px solid rgba(255,255,255,.3);background:${swatchColor};vertical-align:-1px;"></span>${preset.label}</button>`;
+        })
         .join("");
       presetCard.innerHTML = `
         <label style="font-weight:700;">Presets</label>
