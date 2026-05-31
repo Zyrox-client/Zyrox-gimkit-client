@@ -4705,6 +4705,7 @@
     questionFontSize: 28,
     answerFontSize: 20,
     borderRadius: 14,
+    topBarBackground: "#ffffff",
     stylePreset: "default",
   };
   const QUESTION_STYLES_PRESETS = {
@@ -4724,6 +4725,7 @@
         questionFontSize: 28,
         answerFontSize: 20,
         borderRadius: 14,
+        topBarBackground: "#ffffff",
       },
     },
     midnight: {
@@ -4742,6 +4744,7 @@
         questionFontSize: 30,
         answerFontSize: 22,
         borderRadius: 18,
+        topBarBackground: "#0f172a",
       },
     },
     highContrast: {
@@ -4760,6 +4763,7 @@
         questionFontSize: 32,
         answerFontSize: 24,
         borderRadius: 8,
+        topBarBackground: "#000000",
       },
     },
     pastel: {
@@ -4778,6 +4782,7 @@
         questionFontSize: 28,
         answerFontSize: 21,
         borderRadius: 22,
+        topBarBackground: "#e0f2fe",
       },
     },
   };
@@ -5038,10 +5043,18 @@
     }
   }
 
+  function applyQuestionTopBarStyles(cfg) {
+    const topBarColor = isStylesHexColor(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
+    for (const element of document.querySelectorAll(".gAlRHP, .dujAvP")) {
+      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background-color", topBarColor);
+    }
+  }
+
   function applyQuestionStyles() {
+    const cfg = getStylesConfig();
+    applyQuestionTopBarStyles(cfg);
     const targets = findQuestionStyleTargets();
     if (!targets) return;
-    const cfg = getStylesConfig();
     const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
     const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
     const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
@@ -6163,6 +6176,7 @@
                 { id: "questionFontSize", label: "Question Font Size", type: "slider", min: 12, max: 64, step: 1, default: QUESTION_STYLES_DEFAULTS.questionFontSize, unit: "px" },
                 { id: "answerFontSize", label: "Answer Font Size", type: "slider", min: 10, max: 48, step: 1, default: QUESTION_STYLES_DEFAULTS.answerFontSize, unit: "px" },
                 { id: "borderRadius", label: "Border Radius", type: "slider", min: 0, max: 36, step: 1, default: QUESTION_STYLES_DEFAULTS.borderRadius, unit: "px" },
+                { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
               ],
             },
           ],
@@ -7915,11 +7929,15 @@
       details.innerHTML = `
         <summary style="cursor:pointer;list-style:none;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;">
           <span>Advanced color and size settings</span>
-          <span style="font-size:11px;opacity:.7;">click to expand</span>
+          <span class="styles-advanced-icon" aria-hidden="true" style="font-size:14px;opacity:.8;transition:transform .15s ease;">▸</span>
         </summary>
         <div class="styles-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
       `;
       const advancedBody = details.querySelector(".styles-advanced-body");
+      const advancedIcon = details.querySelector(".styles-advanced-icon");
+      details.addEventListener("toggle", () => {
+        if (advancedIcon) advancedIcon.textContent = details.open ? "▾" : "▸";
+      });
       const styleSettings = Array.isArray(moduleLayout?.settings) ? moduleLayout.settings : [];
 
       const makeAdvancedRow = (setting) => {
