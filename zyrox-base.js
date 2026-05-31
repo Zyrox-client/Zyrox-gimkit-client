@@ -4956,8 +4956,24 @@
     });
   }
 
+  function isQuestionStylesEnabled() {
+    return Boolean(state.enabledModules.has(STYLES_MODULE_NAME) || state.modules.get(STYLES_MODULE_NAME)?.enabled);
+  }
+
+  function refreshQuestionStylesAfterConfigChange() {
+    if (!isQuestionStylesEnabled()) return;
+    restoreQuestionStyles();
+    applyQuestionStyles();
+    requestAnimationFrame(() => {
+      if (isQuestionStylesEnabled()) applyQuestionStyles();
+    });
+    setTimeout(() => {
+      if (isQuestionStylesEnabled()) applyQuestionStyles();
+    }, 75);
+  }
+
   function syncQuestionStyles() {
-    if (!state.enabledModules.has(STYLES_MODULE_NAME) && !state.modules.get(STYLES_MODULE_NAME)?.enabled) return;
+    if (!isQuestionStylesEnabled()) return;
     if (questionStylesState.syncTimer) return;
     questionStylesState.syncTimer = setTimeout(() => {
       questionStylesState.syncTimer = null;
@@ -8524,8 +8540,17 @@
                 if (valueLabel) valueLabel.textContent = `${cfg.zoom}${valueUnit}`;
                 if (state.enabledModules.has(CAMERA_ZOOM_MODULE_NAME)) showCameraZoomToast(cfg.zoom);
               }
-              if (moduleName === STYLES_MODULE_NAME && state.enabledModules.has(STYLES_MODULE_NAME)) {
-                applyQuestionStyles();
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
+              }
+              saveSettings();
+            });
+            settingInput.addEventListener("change", (event) => {
+              const newVal = Number(event.target.value);
+              cfg[setting.id] = newVal;
+              if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
               }
               saveSettings();
             });
@@ -8574,8 +8599,8 @@
               if (moduleName === HIDE_POPUPS_MODULE_NAME) {
                 syncHidePopups();
               }
-              if (moduleName === STYLES_MODULE_NAME && state.enabledModules.has(STYLES_MODULE_NAME)) {
-                applyQuestionStyles();
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
               }
               saveSettings();
             });
@@ -8608,8 +8633,8 @@
                 if (setting.id === "abilityHudDisplayMode") openConfig(moduleName);
                 applyAbilityHudLiveConfig({ cfg });
               }
-              if (moduleName === STYLES_MODULE_NAME && state.enabledModules.has(STYLES_MODULE_NAME)) {
-                applyQuestionStyles();
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
               }
               saveSettings();
             });
@@ -8624,14 +8649,16 @@
           `;
           const settingInput = settingCard.querySelector(".set-module-setting-color");
           if (settingInput) {
-            settingInput.addEventListener("input", (event) => {
+            const updateColorSetting = (event) => {
               cfg[setting.id] = String(event.target.value || "#ffffff");
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
-              if (moduleName === STYLES_MODULE_NAME && state.enabledModules.has(STYLES_MODULE_NAME)) {
-                applyQuestionStyles();
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
               }
               saveSettings();
-            });
+            };
+            settingInput.addEventListener("input", updateColorSetting);
+            settingInput.addEventListener("change", updateColorSetting);
           }
         }
 
@@ -8646,8 +8673,8 @@
           if (settingInput) {
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value ?? "");
-              if (moduleName === STYLES_MODULE_NAME && state.enabledModules.has(STYLES_MODULE_NAME)) {
-                applyQuestionStyles();
+              if (moduleName === STYLES_MODULE_NAME) {
+                refreshQuestionStylesAfterConfigChange();
               }
               saveSettings();
             });
