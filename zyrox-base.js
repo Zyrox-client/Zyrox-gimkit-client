@@ -1142,7 +1142,7 @@
       const nativeXMLSend = XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.send = function() {
         this.addEventListener("load", () => {
-          if (!this.responseURL.endsWith("/matchmaker/join")) return;
+          if (!String(this.responseURL || "").includes("/matchmaker/join")) return;
           try {
             const response = JSON.parse(this.responseText);
             manager.blueboatRoomId = response.roomId;
@@ -1163,20 +1163,28 @@
         this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
       });
       socket.addEventListener("message", (e) => {
-        const blueboatDecoded = decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null;
+        const firstByte = (() => {
+          try {
+            const bytes = e.data instanceof ArrayBuffer
+              ? new Uint8Array(e.data)
+              : (ArrayBuffer.isView(e.data) ? new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength) : null);
+            return bytes?.[0] ?? null;
+          } catch (_) {
+            return null;
+          }
+        })();
+        const blueboatDecoded = firstByte === 4
+          ? (() => {
+              try { return decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null; }
+              catch (_) { return null; }
+            })()
+          : null;
         if (blueboatDecoded) {
           const normalizedBlueboat = blueboatDecoded?.payload && typeof blueboatDecoded.payload === "object"
             ? { ...blueboatDecoded.payload, eventName: blueboatDecoded.eventName, payload: blueboatDecoded.payload, raw: blueboatDecoded.raw }
             : blueboatDecoded;
           this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalizedBlueboat }));
         }
-        const firstByte = (() => {
-          try {
-            return new Uint8Array(e.data)[0];
-          } catch (_) {
-            return null;
-          }
-        })();
         if (this.transportType === "unknown" && firstByte != null) {
           if (colyseusProtocolCodeSet.has(firstByte)) this.transportType = "colyseus";
           else this.transportType = "blueboat";
@@ -2572,6 +2580,10 @@
     statusText: "Idle",
   };
 
+  const quickFireInputState = {
+    leftMouseDown: false,
+  };
+
   const autoAimState = {
     enabled: false,
     rafId: null,
@@ -3155,70 +3167,118 @@
     ctx.restore();
   }
 
+  function setQuickFireStatus(status) {
+    quickFireState.lastStatus = status;
+    quickFireState.statusText = status;
+  }
+
+  function isQuickFireMouseDown(pointer) {
+    const pointerButtons = Number(pointer?.buttons) || 0;
+    return Boolean(pointer?.isDown || pointer?.leftButtonDown?.() || (pointerButtons & 1) || quickFireInputState.leftMouseDown);
+  }
+
+  function getQuickFireBody(phaser, stores) {
+    return phaser?.mainCharacter?.body
+      ?? getMainCharacter(stores)?.body
+      ?? phaser?.scene?.characterManager?.characters?.get?.(phaser?.mainCharacter?.id)?.body
+      ?? phaser?.mainCharacter
+      ?? null;
+  }
+
+  function getQuickFirePointerWorld(pointer, scene) {
+    const directX = Number(pointer?.worldX);
+    const directY = Number(pointer?.worldY);
+    if (Number.isFinite(directX) && Number.isFinite(directY)) return { x: directX, y: directY };
+
+    const pointerX = Number(pointer?.x ?? pointer?.position?.x);
+    const pointerY = Number(pointer?.y ?? pointer?.position?.y);
+    if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return null;
+
+    const camera = scene?.cameras?.main ?? scene?.cameras?.cameras?.[0];
+    const worldPoint = camera?.getWorldPoint?.(pointerX, pointerY);
+    const worldX = Number(worldPoint?.x);
+    const worldY = Number(worldPoint?.y);
+    if (Number.isFinite(worldX) && Number.isFinite(worldY)) return { x: worldX, y: worldY };
+
+    const cameraPoint = pointer?.positionToCamera?.(camera);
+    const cameraX = Number(cameraPoint?.x);
+    const cameraY = Number(cameraPoint?.y);
+    if (Number.isFinite(cameraX) && Number.isFinite(cameraY)) return { x: cameraX, y: cameraY };
+    return null;
+  }
+
+  function getQuickFireGameObjects() {
+    const stores = espState.stores ?? window.stores;
+    const phaser = stores?.phaser;
+    const scene = phaser?.scene;
+    const input = scene?.input;
+    const mousePointer = input?.mousePointer ?? input?.activePointer ?? input?.manager?.activePointer ?? input?.pointers?.[0];
+    const body = getQuickFireBody(phaser, stores);
+    return { stores, phaser, scene, mousePointer, body };
+  }
+
+  function sendQuickFireMessage(angle, bodyX, bodyY) {
+    if (!socketManager?.socket) {
+      setQuickFireStatus("Waiting for socket");
+      return false;
+    }
+    const shouldUseColyseus = socketManager.transportType === "colyseus" && !socketManager.blueboatRoomId;
+    if (!socketManager.blueboatRoomId && !shouldUseColyseus) {
+      setQuickFireStatus("Waiting for room");
+      return false;
+    }
+    socketManager.sendMessage("FIRE", { angle, x: bodyX, y: bodyY });
+    return true;
+  }
+
   function quickFireTick() {
     if (!quickFireState.enabled) return;
     const cfg = getQuickFireConfig();
     if (!cfg.enabled) {
-      quickFireState.lastStatus = "Disabled in config";
-      quickFireState.statusText = quickFireState.lastStatus;
+      setQuickFireStatus("Disabled in config");
       return;
     }
     if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
-      quickFireState.lastStatus = "Waiting for focus";
-      quickFireState.statusText = quickFireState.lastStatus;
+      setQuickFireStatus("Waiting for focus");
       return;
     }
 
-    const stores = espState.stores ?? window.stores;
-    const phaser = stores?.phaser;
-    const scene = phaser?.scene;
-    const mousePointer = scene?.input?.mousePointer ?? scene?.input?.activePointer;
-    const body = phaser?.mainCharacter?.body;
+    const { scene, mousePointer, body } = getQuickFireGameObjects();
     if (!mousePointer || !body) {
-      quickFireState.lastStatus = "Waiting for game objects";
-      quickFireState.statusText = quickFireState.lastStatus;
+      setQuickFireStatus("Waiting for game objects");
       return;
     }
-    if (cfg.onlyWhenMouseDown) {
-      const pointerButtons = Number(mousePointer.buttons) || 0;
-      const isLeftDown = Boolean(mousePointer.isDown || mousePointer.leftButtonDown?.() || (pointerButtons & 1));
-      if (!isLeftDown) {
-        quickFireState.lastStatus = "Waiting for left click";
-        quickFireState.statusText = quickFireState.lastStatus;
-        return;
-      }
+    if (cfg.onlyWhenMouseDown && !isQuickFireMouseDown(mousePointer)) {
+      setQuickFireStatus("Waiting for left click");
+      return;
     }
 
     const Vector2 = window.Phaser?.Math?.Vector2;
     const angleBetween = window.Phaser?.Math?.Angle?.Between;
     if (typeof Vector2 !== "function" || typeof angleBetween !== "function") {
-      quickFireState.lastStatus = "Waiting for Phaser math";
-      quickFireState.statusText = quickFireState.lastStatus;
+      setQuickFireStatus("Waiting for Phaser math");
       return;
     }
 
     const bodyX = Number(body.x);
     const bodyY = Number(body.y);
-    const worldX = Number(mousePointer.worldX);
-    const worldY = Number(mousePointer.worldY);
+    const pointerWorld = getQuickFirePointerWorld(mousePointer, scene);
+    const worldX = Number(pointerWorld?.x);
+    const worldY = Number(pointerWorld?.y);
     if (![bodyX, bodyY, worldX, worldY].every(Number.isFinite)) {
-      quickFireState.lastStatus = "Waiting for coordinates";
-      quickFireState.statusText = quickFireState.lastStatus;
+      setQuickFireStatus("Waiting for coordinates");
       return;
     }
 
     const vector = new Vector2(worldX - bodyX, worldY - (bodyY - 3)).normalize();
     const angle = angleBetween(0, 0, vector.x, vector.y);
-    socketManager.sendMessage("FIRE", { angle, x: bodyX, y: bodyY });
-    quickFireState.lastStatus = "Fired";
-    quickFireState.statusText = quickFireState.lastStatus;
+    if (sendQuickFireMessage(angle, bodyX, bodyY)) setQuickFireStatus("Fired");
   }
 
   function startQuickFire() {
     stopQuickFire();
     quickFireState.enabled = true;
-    quickFireState.lastStatus = "Armed";
-    quickFireState.statusText = quickFireState.lastStatus;
+    setQuickFireStatus("Armed");
     const cfg = getQuickFireConfig();
     const intervalMs = Math.max(16, Math.min(250, Number(cfg.fireIntervalMs) || 50));
     quickFireState.intervalMs = intervalMs;
@@ -3232,8 +3292,7 @@
     }
     quickFireState.enabled = false;
     quickFireState.intervalMs = 50;
-    quickFireState.lastStatus = "Idle";
-    quickFireState.statusText = "Idle";
+    setQuickFireStatus("Idle");
   }
 
   function triggerAssistTick() {
@@ -3347,6 +3406,7 @@
 
   window.addEventListener("blur", () => {
     autoAimInputState.leftMouseDown = false;
+    quickFireInputState.leftMouseDown = false;
     autoAimInputState.reroutedShotActive = false;
     autoAimState.target = null;
     releaseFireHold();
@@ -3354,6 +3414,7 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") {
       autoAimInputState.leftMouseDown = false;
+      quickFireInputState.leftMouseDown = false;
       autoAimInputState.reroutedShotActive = false;
       autoAimState.target = null;
       releaseFireHold();
@@ -3382,6 +3443,7 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = true;
+    quickFireInputState.leftMouseDown = true;
     autoAimInputState.reroutedShotActive = true;
     attemptFire(false, false, { x: crosshairState.mouseX, y: crosshairState.mouseY });
   }, true);
@@ -3392,15 +3454,20 @@
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = false;
+    quickFireInputState.leftMouseDown = false;
     autoAimInputState.reroutedShotActive = false;
   }, true);
 
   window.addEventListener("mousedown", (event) => {
-    if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
+    if (event.button === 0 && !isEventInsideUi(event.target)) {
+      autoAimInputState.leftMouseDown = true;
+      quickFireInputState.leftMouseDown = true;
+    }
   }, { passive: true });
   window.addEventListener("mouseup", (event) => {
     if (event.button === 0) {
       autoAimInputState.leftMouseDown = false;
+      quickFireInputState.leftMouseDown = false;
       autoAimInputState.reroutedShotActive = false;
     }
   }, { passive: true });
