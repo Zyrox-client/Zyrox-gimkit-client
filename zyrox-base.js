@@ -1227,22 +1227,27 @@
     }
     sendMessage(channel, data) {
       if (!this.socket) return;
-      const shouldUseColyseus = this.transportType === "colyseus" && !this.blueboatRoomId;
-      if (!this.blueboatRoomId && !shouldUseColyseus) return;
+      const socketUrl = String(this.socket?.url || "");
+      const inferredTransport = this.transportType !== "unknown"
+        ? this.transportType
+        : (socketUrl.includes("/socket.io/") ? "blueboat" : "colyseus");
+      if (this.transportType === "unknown") this.transportType = inferredTransport;
       let encoded;
-      if (shouldUseColyseus) {
-        const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
-        const channelEncoded = msgpackEncode(channel);
-        const packetEncoded = msgpackEncode(data);
-        encoded = new Uint8Array(header.length + channelEncoded.byteLength + packetEncoded.byteLength);
-        encoded.set(header, 0);
-        encoded.set(new Uint8Array(channelEncoded), header.length);
-        encoded.set(new Uint8Array(packetEncoded), header.length + channelEncoded.byteLength);
-        this.socket.send(encoded);
-      } else {
+      if (inferredTransport === "blueboat") {
+        if (!this.blueboatRoomId) return;
         encoded = blueboat.encode(channel, data, this.blueboatRoomId);
         this.socket.send(encoded);
+        return;
       }
+
+      const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
+      const channelEncoded = msgpackEncode(channel);
+      const packetEncoded = msgpackEncode(data);
+      encoded = new Uint8Array(header.length + channelEncoded.byteLength + packetEncoded.byteLength);
+      encoded.set(header, 0);
+      encoded.set(new Uint8Array(channelEncoded), header.length);
+      encoded.set(new Uint8Array(packetEncoded), header.length + channelEncoded.byteLength);
+      this.socket.send(encoded);
     }
     decodeColyseus(event) {
       const bytes = new Uint8Array(event.data);
@@ -3222,8 +3227,11 @@
       setQuickFireStatus("Waiting for socket");
       return false;
     }
-    const shouldUseColyseus = socketManager.transportType === "colyseus" && !socketManager.blueboatRoomId;
-    if (!socketManager.blueboatRoomId && !shouldUseColyseus) {
+    const socketUrl = String(socketManager.socket?.url || "");
+    const transport = socketManager.transportType !== "unknown"
+      ? socketManager.transportType
+      : (socketUrl.includes("/socket.io/") ? "blueboat" : "colyseus");
+    if (transport === "blueboat" && !socketManager.blueboatRoomId) {
       setQuickFireStatus("Waiting for room");
       return false;
     }
@@ -3437,6 +3445,13 @@
     if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) return false;
     return true;
   }
+
+  window.addEventListener("pointerdown", (event) => {
+    if (event.button === 0 && !isEventInsideUi(event.target)) quickFireInputState.leftMouseDown = true;
+  }, { capture: true, passive: true });
+  window.addEventListener("pointerup", (event) => {
+    if (event.button === 0) quickFireInputState.leftMouseDown = false;
+  }, { capture: true, passive: true });
 
   window.addEventListener("mousedown", (event) => {
     if (!shouldRerouteManualShot(event)) return;
