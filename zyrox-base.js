@@ -4970,12 +4970,15 @@
     return `linear-gradient(${background}, ${background})`;
   }
 
+  function composeGlobalThemeLayeredBackground(overlayBackground, baseBackground = "#000000") {
+    const baseLayer = cssBackgroundLayer(baseBackground) || baseBackground;
+    const overlayLayer = cssBackgroundLayer(overlayBackground);
+    return overlayLayer ? `${overlayLayer}, ${baseLayer}` : baseLayer;
+  }
+
   function composeGlobalThemeButtonBackground(globalTheme) {
     if (!globalTheme) return "";
-    const baseBackground = globalTheme.inactiveBackground || "#000000";
-    const overlayLayer = cssBackgroundLayer(globalTheme.activeBackground);
-    const baseLayer = cssBackgroundLayer(baseBackground) || baseBackground;
-    return overlayLayer ? `${overlayLayer}, ${baseLayer}` : baseBackground;
+    return composeGlobalThemeLayeredBackground(globalTheme.activeBackground, globalTheme.inactiveBackground || "#000000");
   }
 
   function getStylesGlobalThemeValues() {
@@ -4999,7 +5002,7 @@
       activeBackground,
       inactiveBackground,
       buttonBackground: composeGlobalThemeButtonBackground({ activeBackground, inactiveBackground }),
-      categoryBackground: darkenCssBackground(categoryBackground, 0.62),
+      categoryBackground: composeGlobalThemeLayeredBackground(activeBackground || darkenCssBackground(categoryBackground, 0.62), "#000000"),
       borderRadius: activeComputed?.borderRadius || radiusFallback,
     };
   }
@@ -5066,6 +5069,7 @@
     if (!isQuestionStyleElement(element)) return;
     const nextValue = String(value ?? "");
     rememberQuestionStyle(element, property);
+    if (property === "background") rememberQuestionStyle(element, "background-color");
     if (element.style.getPropertyValue(property) === nextValue && element.style.getPropertyPriority(property) === "important") return;
     element.style.setProperty(property, nextValue, "important");
   }
@@ -5420,17 +5424,46 @@
     }
   }
 
-  function applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground = background) {
-    if (!isQuestionStyleElement(element)) return;
+  function isQuestionButtonPaintSurface(element) {
+    if (!(element instanceof HTMLElement) || !isQuestionStyleVisible(element)) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 520 || rect.height > 180) return false;
+    return isQuestionStyleClickableElement(element) || elementHasVisibleBackground(element);
+  }
+
+  function getQuestionButtonPaintTargets(element) {
+    const targets = new Set();
+    if (!isQuestionStyleElement(element)) return targets;
+    if (element instanceof HTMLElement) targets.add(element);
+
+    const actionSurface = findQuestionActionSurface(element);
+    if (actionSurface instanceof HTMLElement) targets.add(actionSurface);
+
+    let current = element.parentElement;
+    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
+      if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
+      if (isQuestionButtonPaintSurface(current)) targets.add(current);
+    }
+    return targets;
+  }
+
+  function paintQuestionButtonTarget(element, background, borderRadiusValue, baseBackground) {
     setQuestionInlineStyle(element, "background", background);
     setQuestionInlineStyle(element, "background-color", baseBackground);
     if (borderRadiusValue) setQuestionInlineStyle(element, "border-radius", borderRadiusValue);
-    const descendants = Array.from(element.querySelectorAll("button,[role='button'],a,div,span"))
-      .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
-    for (const child of descendants.slice(0, 12)) {
-      setQuestionInlineStyle(child, "background", background);
-      setQuestionInlineStyle(child, "background-color", baseBackground);
-      if (borderRadiusValue) setQuestionInlineStyle(child, "border-radius", borderRadiusValue);
+  }
+
+  function applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground = background) {
+    if (!isQuestionStyleElement(element)) return;
+    const targets = getQuestionButtonPaintTargets(element);
+    if (!targets.size && element instanceof HTMLElement) targets.add(element);
+    for (const target of targets) {
+      paintQuestionButtonTarget(target, background, borderRadiusValue, baseBackground);
+      const descendants = Array.from(target.querySelectorAll("button,[role='button'],a,div,span"))
+        .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
+      for (const child of descendants.slice(0, 12)) {
+        paintQuestionButtonTarget(child, background, borderRadiusValue, baseBackground);
+      }
     }
   }
 
@@ -5452,6 +5485,7 @@
     addRoot(questionStylesState.currentRoot);
     const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
     addRoot(direct);
+    for (const shellElement of document.querySelectorAll(QUESTION_STYLE_SHELL_SELECTOR)) addRoot(shellElement);
     return roots;
   }
 
