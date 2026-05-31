@@ -4873,6 +4873,7 @@
     '[style*="cursor: pointer" i]',
   ].join(",");
   const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /^(continue|next|ok|okay)$/i;
+  const QUESTION_STYLE_SHOP_TEXT_PATTERN = /^(shop|open shop|store)$/i;
   const questionStylesState = {
     observer: null,
     changedElements: new Set(),
@@ -5006,6 +5007,13 @@
     return isStylesHexColor(value, fallback);
   }
 
+  function clampStylesNumber(value, min, max, fallback) {
+    const parsed = Number(value);
+    const fallbackNumber = Number(fallback);
+    const nextValue = Number.isFinite(parsed) ? parsed : fallbackNumber;
+    return Math.max(min, Math.min(max, Number.isFinite(nextValue) ? nextValue : min));
+  }
+
 
   function getZyroxOwnUiSelector() {
     return [
@@ -5074,24 +5082,36 @@
     questionStylesState.originalStyles = new WeakMap();
   }
 
-  function isLikelyQuestionContinueButton(element) {
+  function getQuestionStyleInteractiveText(element) {
+    return String(element?.textContent || element?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isLikelyQuestionActionButton(element, textPattern) {
     if (!isQuestionStyleVisible(element)) return false;
-    const text = String(element.textContent || element.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
-    if (!QUESTION_STYLE_CONTINUE_TEXT_PATTERN.test(text)) return false;
+    const text = getQuestionStyleInteractiveText(element);
+    if (!textPattern.test(text)) return false;
     const tagName = String(element.tagName || "").toLowerCase();
     const role = String(element.getAttribute?.("role") || "").toLowerCase();
     const style = window.getComputedStyle(element);
     return tagName === "button" || role === "button" || style.cursor === "pointer" || element.tabIndex >= 0;
   }
 
-  function getQuestionContinueButtonCandidates(root = document) {
+  function getQuestionActionButtonCandidates(textPattern, root = document, limit = 4) {
     const searchRoot = root && typeof root.querySelectorAll === "function" ? root : document;
     const buttons = [];
     for (const element of searchRoot.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (buttons.length >= 4) break;
-      if (element instanceof HTMLElement && isLikelyQuestionContinueButton(element)) buttons.push(element);
+      if (buttons.length >= limit) break;
+      if (element instanceof HTMLElement && isLikelyQuestionActionButton(element, textPattern)) buttons.push(element);
     }
     return buttons;
+  }
+
+  function getQuestionContinueButtonCandidates(root = document) {
+    return getQuestionActionButtonCandidates(QUESTION_STYLE_CONTINUE_TEXT_PATTERN, root);
+  }
+
+  function getQuestionShopButtonCandidates(root = document) {
+    return getQuestionActionButtonCandidates(QUESTION_STYLE_SHOP_TEXT_PATTERN, root);
   }
 
   function getQuestionOptionCandidates(root) {
@@ -5191,17 +5211,7 @@
     const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
     if (isQuestionStyleVisible(direct)) return true;
     if (getQuestionContinueButtonCandidates().length > 0) return true;
-
-    let visibleInteractiveCount = 0;
-    for (const element of document.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (!isQuestionStyleElement(element)) continue;
-      const text = String(element.textContent || "").trim();
-      if (!text) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.width < 70 || rect.height < 30 || rect.bottom <= 0 || rect.right <= 0 || rect.top >= window.innerHeight || rect.left >= window.innerWidth) continue;
-      visibleInteractiveCount += 1;
-      if (visibleInteractiveCount >= 2) return true;
-    }
+    if (getQuestionShopButtonCandidates().length > 0) return true;
     return false;
   }
 
@@ -5279,7 +5289,8 @@
   function findQuestionStyleTargets() {
     const referenceTargets = findReferenceQuestionTargets();
     if (referenceTargets) return referenceTargets;
-    const root = findQuestionStyleRoot();
+    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
+    const root = isQuestionStyleVisible(direct) ? direct : null;
     if (!root) return null;
     const options = getQuestionOptionCandidates(root);
     if (options.length < 2) return null;
@@ -5306,7 +5317,7 @@
     return Boolean(parsed && parsed.a > 0.01);
   }
 
-  function applyGlobalThemeButtonSurface(element, background, borderRadiusValue, baseBackground = "#000000") {
+  function applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground = background) {
     if (!isQuestionStyleElement(element)) return;
     setQuestionInlineStyle(element, "background", background);
     setQuestionInlineStyle(element, "background-color", baseBackground);
@@ -5318,6 +5329,10 @@
       setQuestionInlineStyle(child, "background-color", baseBackground);
       if (borderRadiusValue) setQuestionInlineStyle(child, "border-radius", borderRadiusValue);
     }
+  }
+
+  function applyGlobalThemeButtonSurface(element, background, borderRadiusValue, baseBackground = "#000000") {
+    applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground);
   }
 
   function getQuestionStyleScopeRoots(targets = null) {
@@ -5352,7 +5367,7 @@
     const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
     const continueBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
     const shopBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
-    const borderRadiusValue = globalTheme?.borderRadius || `${Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius))}px`;
+    const borderRadiusValue = globalTheme?.borderRadius || `${clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius)}px`;
     const scopeRoots = getQuestionStyleScopeRoots(targets);
 
     for (const element of queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP")) {
@@ -5367,13 +5382,15 @@
     ]);
     for (const element of continueButtons) {
       if (!(element instanceof HTMLElement)) continue;
-      if (globalTheme) applyGlobalThemeButtonSurface(element, continueBackground, borderRadiusValue, pageBackground);
-      else setQuestionInlineStyle(element, "background", continueBackground);
+      applyQuestionButtonSurface(element, continueBackground, borderRadiusValue, globalTheme ? pageBackground : continueBackground);
     }
-    for (const element of queryQuestionStyleScope(scopeRoots, ".dBwWbX")) {
+    const shopButtons = new Set([
+      ...queryQuestionStyleScope(scopeRoots, ".dBwWbX"),
+      ...getQuestionShopButtonCandidates(),
+    ]);
+    for (const element of shopButtons) {
       if (!(element instanceof HTMLElement)) continue;
-      if (globalTheme) applyGlobalThemeButtonSurface(element, shopBackground, borderRadiusValue, pageBackground);
-      else setQuestionInlineStyle(element, "background", shopBackground);
+      applyQuestionButtonSurface(element, shopBackground, borderRadiusValue, globalTheme ? pageBackground : shopBackground);
     }
   }
 
@@ -5389,9 +5406,9 @@
     const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
     applyQuestionShellStyles(cfg, globalTheme, targets);
     if (!targets) return true;
-    const questionFontSize = Math.max(12, Math.min(64, Number(cfg.questionFontSize) || QUESTION_STYLES_DEFAULTS.questionFontSize));
-    const answerFontSize = Math.max(10, Math.min(48, Number(cfg.answerFontSize) || QUESTION_STYLES_DEFAULTS.answerFontSize));
-    const borderRadius = Math.max(0, Math.min(36, Number(cfg.borderRadius) || QUESTION_STYLES_DEFAULTS.borderRadius));
+    const questionFontSize = clampStylesNumber(cfg.questionFontSize, 12, 64, QUESTION_STYLES_DEFAULTS.questionFontSize);
+    const answerFontSize = clampStylesNumber(cfg.answerFontSize, 10, 48, QUESTION_STYLES_DEFAULTS.answerFontSize);
+    const borderRadius = clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius);
     const borderRadiusValue = globalTheme?.borderRadius || `${borderRadius}px`;
     const questionBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
 
