@@ -1470,21 +1470,24 @@
   const GAME_FINDER_MODULE_NAME = "Game Finder";
   const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
-  const GAME_FINDER_MIN_DELAY_MS = 5;
+  const GAME_FINDER_MIN_DELAY_MS = 0;
   const GAME_FINDER_MAX_DELAY_MS = 500;
-  const GAME_FINDER_DEFAULT_DELAY_MS = 25;
+  const GAME_FINDER_DEFAULT_DELAY_MS = 0;
   const GAME_FINDER_RETRY_DELAY_MS = 2000;
   const gameFinderState = {
-    enabled: false,
+    mounted: false,
+    scanning: false,
     scanId: 0,
     delayMs: GAME_FINDER_DEFAULT_DELAY_MS,
-    enterCode: false,
+    button: null,
+    input: null,
+    wrapper: null,
+    inputOriginalStyle: null,
+    observer: null,
+    attachScheduled: false,
+    attachTimer: null,
+    foundCode: null,
   };
-
-  function gameFinderLog(message, extra) {
-    if (extra === undefined) console.log(`${GAME_FINDER_LOG_PREFIX} ${message}`);
-    else console.log(`${GAME_FINDER_LOG_PREFIX} ${message}`, extra);
-  }
 
   function gameFinderWarn(message, extra) {
     if (extra === undefined) console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`);
@@ -1492,7 +1495,9 @@
   }
 
   function gameFinderDelay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    const delay = Number(ms) || 0;
+    if (delay <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, delay));
   }
 
   function randomGameFinderPin() {
@@ -1502,14 +1507,14 @@
   function normalizeGameFinderDelay(value) {
     const delay = Number(value);
     if (!Number.isFinite(delay)) return GAME_FINDER_DEFAULT_DELAY_MS;
-    return Math.max(GAME_FINDER_MIN_DELAY_MS, Math.min(GAME_FINDER_MAX_DELAY_MS, delay));
+    const clamped = Math.max(GAME_FINDER_MIN_DELAY_MS, Math.min(GAME_FINDER_MAX_DELAY_MS, delay));
+    return clamped <= 1 ? 0 : clamped;
   }
 
   function syncGameFinderConfig() {
     const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
     gameFinderState.delayMs = normalizeGameFinderDelay(cfg.delay);
-    gameFinderState.enterCode = Boolean(cfg.enterCode);
-    return { delayMs: gameFinderState.delayMs, enterCode: gameFinderState.enterCode };
+    return { delayMs: gameFinderState.delayMs };
   }
 
   function syncGameFinderDelayFromConfig() {
@@ -1523,16 +1528,6 @@
   function setGameFinderDelay(value) {
     gameFinderState.delayMs = normalizeGameFinderDelay(value);
     return gameFinderState.delayMs;
-  }
-
-  function setGameFinderEnterCode(value) {
-    gameFinderState.enterCode = Boolean(value);
-    return gameFinderState.enterCode;
-  }
-
-  function shouldGameFinderEnterCode() {
-    syncGameFinderConfig();
-    return gameFinderState.enterCode;
   }
 
   function isVisibleGameFinderInput(input) {
@@ -1609,18 +1604,218 @@
       gameFinderWarn(`Tried to enter code:${code}, but the input value is still ${input.value || "empty"}.`, { input });
       return false;
     }
-    gameFinderLog(`Entered found code:${code} into the Game Code input.`, { input });
     return true;
   }
 
-  function disableGameFinderAfterFound() {
-    const moduleInstance = state?.modules?.get?.(GAME_FINDER_MODULE_NAME);
-    const item = state?.moduleItems?.get?.(GAME_FINDER_MODULE_NAME);
-    if (moduleInstance?.enabled) moduleInstance.disable();
-    else stopGameFinder();
-    item?.classList?.remove?.("active");
-    state?.enabledModules?.delete?.(GAME_FINDER_MODULE_NAME);
-    if (typeof saveSettings === "function") saveSettings();
+  function updateGameFinderButton() {
+    const button = gameFinderState.button;
+    if (!button) return;
+    button.classList.toggle("zyrox-game-finder-active", gameFinderState.scanning);
+    button.setAttribute("aria-pressed", String(gameFinderState.scanning));
+    button.setAttribute("aria-label", gameFinderState.scanning ? "Stop Game Finder" : "Start Game Finder");
+    button.title = gameFinderState.scanning
+      ? "Game Finder is enabled. Press to stop trying random codes."
+      : "Press to enable Game Finder and try random codes.";
+  }
+
+  function ensureGameFinderStyle() {
+    if (document.getElementById("zyrox-game-finder-style")) return;
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) return;
+    const style = document.createElement("style");
+    style.id = "zyrox-game-finder-style";
+    style.textContent = `
+      .zyrox-game-finder-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .zyrox-game-finder-wrap > input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .zyrox-game-finder-button {
+        --zyrox-game-finder-size: 44px;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--zyrox-game-finder-size);
+        height: var(--zyrox-game-finder-size);
+        min-width: var(--zyrox-game-finder-size);
+        flex: 0 0 var(--zyrox-game-finder-size);
+        margin-left: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 4px;
+        background: #08245c;
+        color: #fff;
+        cursor: pointer;
+        box-shadow: 0 8px 18px rgba(8, 36, 92, 0.32);
+        vertical-align: middle;
+      }
+      .zyrox-game-finder-button::before {
+        content: "";
+        width: 0;
+        height: 0;
+        margin-left: 3px;
+        border-top: calc(var(--zyrox-game-finder-size) * 0.18) solid transparent;
+        border-bottom: calc(var(--zyrox-game-finder-size) * 0.18) solid transparent;
+        border-left: calc(var(--zyrox-game-finder-size) * 0.28) solid currentColor;
+      }
+      .zyrox-game-finder-button:hover { background: #0b327f; }
+      .zyrox-game-finder-button.zyrox-game-finder-active {
+        background: #0f4bb8;
+        box-shadow: 0 8px 18px rgba(15, 75, 184, 0.34);
+      }
+    `;
+    styleHost.appendChild(style);
+  }
+
+  function isGameFinderButtonAttached() {
+    const input = gameFinderState.input;
+    const button = gameFinderState.button;
+    const wrapper = gameFinderState.wrapper;
+    return Boolean(
+      input?.isConnected
+        && button?.isConnected
+        && wrapper?.isConnected
+        && wrapper.contains(input)
+        && wrapper.contains(button)
+        && button.previousElementSibling === input
+        && isVisibleGameFinderInput(input)
+    );
+  }
+
+  function scheduleGameFinderAttach(delayMs = 0) {
+    if (!gameFinderState.mounted || gameFinderState.attachScheduled) return;
+    gameFinderState.attachScheduled = true;
+
+    const run = () => {
+      gameFinderState.attachTimer = null;
+      gameFinderState.attachScheduled = false;
+      if (gameFinderState.mounted) attachGameFinderButton();
+    };
+
+    const delay = Math.max(0, Number(delayMs) || 0);
+    if (delay > 0 || typeof requestAnimationFrame !== "function") {
+      gameFinderState.attachTimer = setTimeout(run, delay || 50);
+      return;
+    }
+    requestAnimationFrame(run);
+  }
+
+  function rememberGameFinderInputStyle(input) {
+    if (gameFinderState.input === input && gameFinderState.inputOriginalStyle) return;
+    gameFinderState.inputOriginalStyle = {
+      width: input.style.getPropertyValue("width"),
+      widthPriority: input.style.getPropertyPriority("width"),
+      flex: input.style.getPropertyValue("flex"),
+      flexPriority: input.style.getPropertyPriority("flex"),
+      minWidth: input.style.getPropertyValue("min-width"),
+      minWidthPriority: input.style.getPropertyPriority("min-width"),
+    };
+  }
+
+  function restoreGameFinderInputStyle() {
+    const input = gameFinderState.input;
+    const original = gameFinderState.inputOriginalStyle;
+    if (!input || !original) return;
+    for (const [property, valueKey, priorityKey] of [
+      ["width", "width", "widthPriority"],
+      ["flex", "flex", "flexPriority"],
+      ["min-width", "minWidth", "minWidthPriority"],
+    ]) {
+      if (original[valueKey]) input.style.setProperty(property, original[valueKey], original[priorityKey] || "");
+      else input.style.removeProperty(property);
+    }
+    gameFinderState.inputOriginalStyle = null;
+  }
+
+  function syncGameFinderButtonSize(input, button) {
+    const rect = input.getBoundingClientRect();
+    const side = Math.max(32, Math.round(rect.height || input.offsetHeight || 50));
+    button.style.setProperty("--zyrox-game-finder-size", `${side}px`);
+  }
+
+  function cleanupGameFinderWrapper() {
+    const wrapper = gameFinderState.wrapper;
+    const input = gameFinderState.input;
+    if (wrapper?.isConnected && input?.isConnected && wrapper.contains(input)) {
+      wrapper.parentElement?.insertBefore(input, wrapper);
+    }
+    restoreGameFinderInputStyle();
+    wrapper?.remove?.();
+    gameFinderState.wrapper = null;
+  }
+
+  function ensureGameFinderWrapper(input) {
+    if (gameFinderState.input && gameFinderState.input !== input) cleanupGameFinderWrapper();
+    if (gameFinderState.wrapper?.isConnected && gameFinderState.wrapper.contains(input)) return gameFinderState.wrapper;
+
+    const parent = input.parentElement;
+    if (!parent) return null;
+    const wrapper = document.createElement("div");
+    wrapper.className = "zyrox-game-finder-wrap";
+    parent.insertBefore(wrapper, input);
+    rememberGameFinderInputStyle(input);
+    input.style.setProperty("width", "auto", "important");
+    input.style.setProperty("flex", "1 1 auto");
+    input.style.setProperty("min-width", "0");
+    wrapper.appendChild(input);
+    gameFinderState.wrapper = wrapper;
+    return wrapper;
+  }
+
+  function attachGameFinderButton() {
+    if (!gameFinderState.mounted || !document.body) return;
+    const input = findGameCodeInput();
+    if (!input) return;
+
+    ensureGameFinderStyle();
+    const wrapper = ensureGameFinderWrapper(input);
+    if (!wrapper) return;
+    gameFinderState.input = input;
+
+    let button = gameFinderState.button;
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "zyrox-game-finder-button";
+      button.textContent = "";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleGameFinderScan();
+      });
+      gameFinderState.button = button;
+    }
+
+    syncGameFinderButtonSize(input, button);
+    if (button.parentElement !== wrapper || button.previousElementSibling !== input) {
+      wrapper.appendChild(button);
+    }
+    updateGameFinderButton();
+  }
+
+  function observeGameFinderInput() {
+    if (gameFinderState.observer) return;
+    const observerTarget = document.body || document.documentElement;
+    if (!observerTarget) {
+      document.addEventListener("DOMContentLoaded", () => {
+        if (!gameFinderState.mounted) return;
+        observeGameFinderInput();
+        scheduleGameFinderAttach();
+      }, { once: true });
+      return;
+    }
+    gameFinderState.observer = new MutationObserver(() => {
+      if (!gameFinderState.mounted || isGameFinderButtonAttached()) return;
+      scheduleGameFinderAttach(150);
+    });
+    gameFinderState.observer.observe(observerTarget, { childList: true, subtree: true });
   }
 
   async function checkGameFinderPin(pin) {
@@ -1651,44 +1846,67 @@
   }
 
   async function runGameFinderScanLoop(scanId) {
-    while (gameFinderState.enabled && gameFinderState.scanId === scanId) {
+    while (gameFinderState.scanning && gameFinderState.scanId === scanId) {
       const pin = randomGameFinderPin();
+      const delayMs = gameFinderState.delayMs;
+      const delayPromise = delayMs > 0 ? gameFinderDelay(delayMs) : null;
       const result = await checkGameFinderPin(pin);
 
-      if (gameFinderState.enabled && gameFinderState.scanId === scanId && result) {
-        const namePicker = result.useRandomNamePicker ? "on" : "off";
-        gameFinderLog(`code:${pin} | name picker: ${namePicker}`);
-        if (shouldGameFinderEnterCode()) {
-          await enterFoundGameCode(pin);
-          disableGameFinderAfterFound();
-          return;
-        }
+      if (gameFinderState.scanning && gameFinderState.scanId === scanId && result) {
+        await enterFoundGameCode(pin);
+        gameFinderState.foundCode = String(pin).padStart(6, "0");
+        stopGameFinderScan();
+        return;
       }
 
-      await gameFinderDelay(gameFinderState.delayMs);
+      if (delayPromise) await delayPromise;
     }
   }
 
-  function startGameFinder() {
-    if (gameFinderState.enabled) {
-      gameFinderWarn("Already running.");
-      return;
-    }
-    gameFinderState.enabled = true;
+  function startGameFinderScan() {
+    if (gameFinderState.scanning) return;
+    gameFinderState.scanning = true;
     gameFinderState.scanId += 1;
+    gameFinderState.foundCode = null;
     syncGameFinderConfig();
-    gameFinderLog(`Started scanning random Gimkit game codes with ${gameFinderState.delayMs}ms delay.`);
+    updateGameFinderButton();
     runGameFinderScanLoop(gameFinderState.scanId);
   }
 
-  function stopGameFinder() {
-    if (!gameFinderState.enabled) {
-      gameFinderWarn("Already stopped.");
-      return;
-    }
-    gameFinderState.enabled = false;
+  function stopGameFinderScan() {
+    if (!gameFinderState.scanning) return;
+    gameFinderState.scanning = false;
     gameFinderState.scanId += 1;
-    gameFinderLog("Stopped scanning random Gimkit game codes.");
+    updateGameFinderButton();
+  }
+
+  function toggleGameFinderScan() {
+    if (gameFinderState.scanning) stopGameFinderScan();
+    else startGameFinderScan();
+  }
+
+  function startGameFinder() {
+    gameFinderState.mounted = true;
+    syncGameFinderConfig();
+    observeGameFinderInput();
+    scheduleGameFinderAttach();
+  }
+
+  function stopGameFinder() {
+    gameFinderState.mounted = false;
+    stopGameFinderScan();
+    if (gameFinderState.attachTimer) {
+      clearTimeout(gameFinderState.attachTimer);
+      gameFinderState.attachTimer = null;
+    }
+    gameFinderState.attachScheduled = false;
+    gameFinderState.button?.remove?.();
+    gameFinderState.button = null;
+    cleanupGameFinderWrapper();
+    gameFinderState.input = null;
+    gameFinderState.inputOriginalStyle = null;
+    gameFinderState.observer?.disconnect?.();
+    gameFinderState.observer = null;
   }
 
   socketManager.addEventListener("deviceChanges", event => {
@@ -6994,7 +7212,7 @@
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
-    [GAME_FINDER_MODULE_NAME]: "Scans random Gimkit join codes and logs active games in the console.",
+    [GAME_FINDER_MODULE_NAME]: "Adds a button next to the game code field that tries random Gimkit join codes and fills in the first active code it finds.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
@@ -7034,8 +7252,7 @@
               name: GAME_FINDER_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
-                { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 5, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
-                { id: "enterCode", label: "Enter Code", type: "checkbox", default: false },
+                { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 1, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
               ],
             },
             {
@@ -9804,6 +10021,7 @@
               if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
                 const nextDelay = setGameFinderDelay(newVal);
                 cfg[setting.id] = nextDelay;
+                event.target.value = String(nextDelay);
                 if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
               }
               saveSettings();
@@ -9822,6 +10040,7 @@
               if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
                 const nextDelay = setGameFinderDelay(newVal);
                 cfg[setting.id] = nextDelay;
+                event.target.value = String(nextDelay);
                 if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
               }
               saveSettings();
@@ -9877,9 +10096,6 @@
               if (moduleName === "Quick Fire") {
                 window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
                 if (quickFireState.enabled) startQuickFire();
-              }
-              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "enterCode") {
-                setGameFinderEnterCode(cfg[setting.id]);
               }
               saveSettings();
             });
