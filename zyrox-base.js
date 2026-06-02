@@ -1484,6 +1484,8 @@
     button: null,
     input: null,
     observer: null,
+    attachScheduled: false,
+    attachTimer: null,
     foundCode: null,
   };
 
@@ -1617,6 +1619,8 @@
 
   function ensureGameFinderStyle() {
     if (document.getElementById("zyrox-game-finder-style")) return;
+    const styleHost = document.head || document.documentElement;
+    if (!styleHost) return;
     const style = document.createElement("style");
     style.id = "zyrox-game-finder-style";
     style.textContent = `
@@ -1639,11 +1643,40 @@
         box-shadow: 0 8px 18px rgba(34, 197, 94, 0.3);
       }
     `;
-    document.head?.appendChild(style);
+    styleHost.appendChild(style);
+  }
+
+  function isGameFinderButtonAttached() {
+    const input = gameFinderState.input;
+    const button = gameFinderState.button;
+    return Boolean(
+      input?.isConnected
+        && button?.isConnected
+        && button.previousElementSibling === input
+        && isVisibleGameFinderInput(input)
+    );
+  }
+
+  function scheduleGameFinderAttach(delayMs = 0) {
+    if (!gameFinderState.mounted || gameFinderState.attachScheduled) return;
+    gameFinderState.attachScheduled = true;
+
+    const run = () => {
+      gameFinderState.attachTimer = null;
+      gameFinderState.attachScheduled = false;
+      if (gameFinderState.mounted) attachGameFinderButton();
+    };
+
+    const delay = Math.max(0, Number(delayMs) || 0);
+    if (delay > 0 || typeof requestAnimationFrame !== "function") {
+      gameFinderState.attachTimer = setTimeout(run, delay || 50);
+      return;
+    }
+    requestAnimationFrame(run);
   }
 
   function attachGameFinderButton() {
-    if (!gameFinderState.mounted) return;
+    if (!gameFinderState.mounted || !document.body) return;
     const input = findGameCodeInput();
     if (!input) return;
 
@@ -1671,8 +1704,20 @@
 
   function observeGameFinderInput() {
     if (gameFinderState.observer) return;
-    gameFinderState.observer = new MutationObserver(() => attachGameFinderButton());
-    gameFinderState.observer.observe(document.documentElement, { childList: true, subtree: true });
+    const observerTarget = document.body || document.documentElement;
+    if (!observerTarget) {
+      document.addEventListener("DOMContentLoaded", () => {
+        if (!gameFinderState.mounted) return;
+        observeGameFinderInput();
+        scheduleGameFinderAttach();
+      }, { once: true });
+      return;
+    }
+    gameFinderState.observer = new MutationObserver(() => {
+      if (!gameFinderState.mounted || isGameFinderButtonAttached()) return;
+      scheduleGameFinderAttach(150);
+    });
+    gameFinderState.observer.observe(observerTarget, { childList: true, subtree: true });
   }
 
   async function checkGameFinderPin(pin) {
@@ -1743,13 +1788,18 @@
   function startGameFinder() {
     gameFinderState.mounted = true;
     syncGameFinderConfig();
-    attachGameFinderButton();
     observeGameFinderInput();
+    scheduleGameFinderAttach();
   }
 
   function stopGameFinder() {
     gameFinderState.mounted = false;
     stopGameFinderScan();
+    if (gameFinderState.attachTimer) {
+      clearTimeout(gameFinderState.attachTimer);
+      gameFinderState.attachTimer = null;
+    }
+    gameFinderState.attachScheduled = false;
     gameFinderState.button?.remove?.();
     gameFinderState.button = null;
     gameFinderState.input = null;
