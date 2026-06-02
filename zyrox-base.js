@@ -1470,9 +1470,9 @@
   const GAME_FINDER_MODULE_NAME = "Game Finder";
   const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
-  const GAME_FINDER_MIN_DELAY_MS = 1;
+  const GAME_FINDER_MIN_DELAY_MS = 0;
   const GAME_FINDER_MAX_DELAY_MS = 500;
-  const GAME_FINDER_DEFAULT_DELAY_MS = 5;
+  const GAME_FINDER_DEFAULT_DELAY_MS = 0;
   const GAME_FINDER_RETRY_DELAY_MS = 2000;
   const GAME_FINDER_BUTTON_LABEL = "Find Game";
   const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
@@ -1483,6 +1483,8 @@
     delayMs: GAME_FINDER_DEFAULT_DELAY_MS,
     button: null,
     input: null,
+    wrapper: null,
+    inputOriginalStyle: null,
     observer: null,
     attachScheduled: false,
     attachTimer: null,
@@ -1495,7 +1497,9 @@
   }
 
   function gameFinderDelay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    const delay = Number(ms) || 0;
+    if (delay <= 0) return Promise.resolve();
+    return new Promise((resolve) => setTimeout(resolve, delay));
   }
 
   function randomGameFinderPin() {
@@ -1505,7 +1509,8 @@
   function normalizeGameFinderDelay(value) {
     const delay = Number(value);
     if (!Number.isFinite(delay)) return GAME_FINDER_DEFAULT_DELAY_MS;
-    return Math.max(GAME_FINDER_MIN_DELAY_MS, Math.min(GAME_FINDER_MAX_DELAY_MS, delay));
+    const clamped = Math.max(GAME_FINDER_MIN_DELAY_MS, Math.min(GAME_FINDER_MAX_DELAY_MS, delay));
+    return clamped <= 1 ? 0 : clamped;
   }
 
   function syncGameFinderConfig() {
@@ -1622,6 +1627,17 @@
     const style = document.createElement("style");
     style.id = "zyrox-game-finder-style";
     style.textContent = `
+      .zyrox-game-finder-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .zyrox-game-finder-wrap > input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
       .zyrox-game-finder-button {
         --zyrox-game-finder-size: 44px;
         position: relative;
@@ -1631,10 +1647,11 @@
         width: var(--zyrox-game-finder-size);
         height: var(--zyrox-game-finder-size);
         min-width: var(--zyrox-game-finder-size);
-        margin-left: 8px;
+        flex: 0 0 var(--zyrox-game-finder-size);
+        margin-left: 0;
         padding: 0;
         border: 0;
-        border-radius: 10px;
+        border-radius: 4px;
         background: #08245c;
         color: #fff;
         cursor: pointer;
@@ -1662,9 +1679,13 @@
   function isGameFinderButtonAttached() {
     const input = gameFinderState.input;
     const button = gameFinderState.button;
+    const wrapper = gameFinderState.wrapper;
     return Boolean(
       input?.isConnected
         && button?.isConnected
+        && wrapper?.isConnected
+        && wrapper.contains(input)
+        && wrapper.contains(button)
         && button.previousElementSibling === input
         && isVisibleGameFinderInput(input)
     );
@@ -1688,10 +1709,66 @@
     requestAnimationFrame(run);
   }
 
+  function rememberGameFinderInputStyle(input) {
+    if (gameFinderState.input === input && gameFinderState.inputOriginalStyle) return;
+    gameFinderState.inputOriginalStyle = {
+      width: input.style.getPropertyValue("width"),
+      widthPriority: input.style.getPropertyPriority("width"),
+      flex: input.style.getPropertyValue("flex"),
+      flexPriority: input.style.getPropertyPriority("flex"),
+      minWidth: input.style.getPropertyValue("min-width"),
+      minWidthPriority: input.style.getPropertyPriority("min-width"),
+    };
+  }
+
+  function restoreGameFinderInputStyle() {
+    const input = gameFinderState.input;
+    const original = gameFinderState.inputOriginalStyle;
+    if (!input || !original) return;
+    for (const [property, valueKey, priorityKey] of [
+      ["width", "width", "widthPriority"],
+      ["flex", "flex", "flexPriority"],
+      ["min-width", "minWidth", "minWidthPriority"],
+    ]) {
+      if (original[valueKey]) input.style.setProperty(property, original[valueKey], original[priorityKey] || "");
+      else input.style.removeProperty(property);
+    }
+    gameFinderState.inputOriginalStyle = null;
+  }
+
   function syncGameFinderButtonSize(input, button) {
     const rect = input.getBoundingClientRect();
-    const side = Math.max(32, Math.round(rect.height || input.offsetHeight || 44));
+    const side = Math.max(36, Math.round((rect.height || input.offsetHeight || 50) - 6));
     button.style.setProperty("--zyrox-game-finder-size", `${side}px`);
+  }
+
+  function cleanupGameFinderWrapper() {
+    const wrapper = gameFinderState.wrapper;
+    const input = gameFinderState.input;
+    if (wrapper?.isConnected && input?.isConnected && wrapper.contains(input)) {
+      wrapper.parentElement?.insertBefore(input, wrapper);
+    }
+    restoreGameFinderInputStyle();
+    wrapper?.remove?.();
+    gameFinderState.wrapper = null;
+  }
+
+  function ensureGameFinderWrapper(input) {
+    if (gameFinderState.input && gameFinderState.input !== input) cleanupGameFinderWrapper();
+    if (gameFinderState.wrapper?.isConnected && gameFinderState.wrapper.contains(input)) return gameFinderState.wrapper;
+
+    const parent = input.parentElement;
+    if (!parent) return null;
+    const wrapper = document.createElement("div");
+    wrapper.className = "zyrox-game-finder-wrap";
+    parent.insertBefore(wrapper, input);
+    rememberGameFinderInputStyle(input);
+    input.style.setProperty("width", "auto", "important");
+    input.style.setProperty("flex", "1 1 auto");
+    input.style.setProperty("min-width", "0");
+    wrapper.appendChild(input);
+    gameFinderState.wrapper = wrapper;
+    return wrapper;
   }
 
   function attachGameFinderButton() {
@@ -1700,6 +1777,8 @@
     if (!input) return;
 
     ensureGameFinderStyle();
+    const wrapper = ensureGameFinderWrapper(input);
+    if (!wrapper) return;
     gameFinderState.input = input;
 
     let button = gameFinderState.button;
@@ -1717,8 +1796,8 @@
     }
 
     syncGameFinderButtonSize(input, button);
-    if (button.parentElement !== input.parentElement || button.previousElementSibling !== input) {
-      input.insertAdjacentElement("afterend", button);
+    if (button.parentElement !== wrapper || button.previousElementSibling !== input) {
+      wrapper.appendChild(button);
     }
     updateGameFinderButton();
   }
@@ -1771,7 +1850,8 @@
   async function runGameFinderScanLoop(scanId) {
     while (gameFinderState.scanning && gameFinderState.scanId === scanId) {
       const pin = randomGameFinderPin();
-      const delayPromise = gameFinderDelay(gameFinderState.delayMs);
+      const delayMs = gameFinderState.delayMs;
+      const delayPromise = delayMs > 0 ? gameFinderDelay(delayMs) : null;
       const result = await checkGameFinderPin(pin);
 
       if (gameFinderState.scanning && gameFinderState.scanId === scanId && result) {
@@ -1781,7 +1861,7 @@
         return;
       }
 
-      await delayPromise;
+      if (delayPromise) await delayPromise;
     }
   }
 
@@ -1824,7 +1904,9 @@
     gameFinderState.attachScheduled = false;
     gameFinderState.button?.remove?.();
     gameFinderState.button = null;
+    cleanupGameFinderWrapper();
     gameFinderState.input = null;
+    gameFinderState.inputOriginalStyle = null;
     gameFinderState.observer?.disconnect?.();
     gameFinderState.observer = null;
   }
@@ -9941,6 +10023,7 @@
               if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
                 const nextDelay = setGameFinderDelay(newVal);
                 cfg[setting.id] = nextDelay;
+                event.target.value = String(nextDelay);
                 if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
               }
               saveSettings();
@@ -9959,6 +10042,7 @@
               if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
                 const nextDelay = setGameFinderDelay(newVal);
                 cfg[setting.id] = nextDelay;
+                event.target.value = String(nextDelay);
                 if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
               }
               saveSettings();
