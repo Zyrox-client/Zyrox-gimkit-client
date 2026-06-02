@@ -1467,6 +1467,96 @@
     },
   });
 
+  const GAME_FINDER_MODULE_NAME = "Game Finder";
+  const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
+  const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
+  const GAME_FINDER_DELAY_MS = 50;
+  const GAME_FINDER_RETRY_DELAY_MS = 2000;
+  const gameFinderState = {
+    enabled: false,
+    scanId: 0,
+  };
+
+  function gameFinderLog(message, extra) {
+    if (extra === undefined) console.log(`${GAME_FINDER_LOG_PREFIX} ${message}`);
+    else console.log(`${GAME_FINDER_LOG_PREFIX} ${message}`, extra);
+  }
+
+  function gameFinderWarn(message, extra) {
+    if (extra === undefined) console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`);
+    else console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`, extra);
+  }
+
+  function gameFinderDelay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function randomGameFinderPin() {
+    return Math.floor(Math.random() * (1_000_000 - 100_000) + 100_000);
+  }
+
+  async function checkGameFinderPin(pin) {
+    try {
+      const response = await fetch(GAME_FINDER_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/plain, */*",
+        },
+        body: JSON.stringify({ code: String(pin) }),
+      });
+
+      const remaining = parseInt(response.headers.get("x-ratelimit-remaining") ?? "999", 10);
+      const resetTs = parseInt(response.headers.get("x-ratelimit-reset") ?? "0", 10);
+      if (remaining <= 1 && resetTs > 0) {
+        const waitMs = Math.max(500, resetTs * 1000 - Date.now() + 200);
+        gameFinderWarn(`Rate limit nearly reached; waiting ${Math.round(waitMs)}ms.`);
+        await gameFinderDelay(waitMs);
+      }
+
+      const data = await response.json();
+      return data?.code === 404 ? null : data;
+    } catch (_) {
+      await gameFinderDelay(GAME_FINDER_RETRY_DELAY_MS);
+      return null;
+    }
+  }
+
+  async function runGameFinderScanLoop(scanId) {
+    while (gameFinderState.enabled && gameFinderState.scanId === scanId) {
+      const pin = randomGameFinderPin();
+      const result = await checkGameFinderPin(pin);
+
+      if (gameFinderState.enabled && gameFinderState.scanId === scanId && result) {
+        const namePicker = result.useRandomNamePicker ? "on" : "off";
+        gameFinderLog(`code:${pin} | name picker: ${namePicker}`);
+      }
+
+      await gameFinderDelay(GAME_FINDER_DELAY_MS);
+    }
+  }
+
+  function startGameFinder() {
+    if (gameFinderState.enabled) {
+      gameFinderWarn("Already running.");
+      return;
+    }
+    gameFinderState.enabled = true;
+    gameFinderState.scanId += 1;
+    gameFinderLog("Started scanning random Gimkit game codes.");
+    runGameFinderScanLoop(gameFinderState.scanId);
+  }
+
+  function stopGameFinder() {
+    if (!gameFinderState.enabled) {
+      gameFinderWarn("Already stopped.");
+      return;
+    }
+    gameFinderState.enabled = false;
+    gameFinderState.scanId += 1;
+    gameFinderLog("Stopped scanning random Gimkit game codes.");
+  }
+
   socketManager.addEventListener("deviceChanges", event => {
     for (const { id, data } of event.detail || []) {
       for (const key in data || {}) {
@@ -6703,6 +6793,10 @@
       onEnable: startAnimationSkip,
       onDisable: stopAnimationSkip,
     },
+    [GAME_FINDER_MODULE_NAME]: {
+      onEnable: startGameFinder,
+      onDisable: stopGameFinder,
+    },
     "ESP": {
       onEnable: startEsp,
       onDisable: stopEsp,
@@ -6766,6 +6860,7 @@
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
+    [GAME_FINDER_MODULE_NAME]: "Scans random Gimkit join codes and logs active games in the console.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
@@ -6800,6 +6895,10 @@
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
                 { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 8000, step: 50, default: 1500 },
               ],
+            },
+            {
+              name: GAME_FINDER_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
             },
             {
               name: ANTI_AFK_MODULE_NAME,
