@@ -1519,6 +1519,47 @@
     return gameFinderState.delayMs;
   }
 
+  function shouldGameFinderEnterCode() {
+    const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
+    return Boolean(cfg.enterCode);
+  }
+
+  function findGameCodeInput() {
+    return document.querySelector('input[placeholder="Game Code"]')
+      || document.querySelector('input[inputmode="numeric"][pattern="[0-9]*"]')
+      || document.querySelector('input[type="number"]');
+  }
+
+  function setNativeInputValue(input, value) {
+    const prototype = Object.getPrototypeOf(input);
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    if (descriptor?.set) descriptor.set.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function enterFoundGameCode(pin) {
+    const input = findGameCodeInput();
+    if (!input) {
+      gameFinderWarn(`Found code:${pin}, but the Game Code input was not found.`);
+      return false;
+    }
+    setNativeInputValue(input, String(pin));
+    gameFinderLog(`Entered found code:${pin} into the Game Code input.`);
+    return true;
+  }
+
+  function disableGameFinderAfterFound() {
+    const moduleInstance = state?.modules?.get?.(GAME_FINDER_MODULE_NAME);
+    const item = state?.moduleItems?.get?.(GAME_FINDER_MODULE_NAME);
+    if (moduleInstance?.enabled) moduleInstance.disable();
+    else stopGameFinder();
+    item?.classList?.remove?.("active");
+    state?.enabledModules?.delete?.(GAME_FINDER_MODULE_NAME);
+    if (typeof saveSettings === "function") saveSettings();
+  }
+
   async function checkGameFinderPin(pin) {
     try {
       const response = await fetch(GAME_FINDER_API_URL, {
@@ -1554,6 +1595,11 @@
       if (gameFinderState.enabled && gameFinderState.scanId === scanId && result) {
         const namePicker = result.useRandomNamePicker ? "on" : "off";
         gameFinderLog(`code:${pin} | name picker: ${namePicker}`);
+        if (shouldGameFinderEnterCode()) {
+          enterFoundGameCode(pin);
+          disableGameFinderAfterFound();
+          return;
+        }
       }
 
       await gameFinderDelay(gameFinderState.delayMs);
@@ -6926,6 +6972,7 @@
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
                 { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 5, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
+                { id: "enterCode", label: "Enter Code", type: "checkbox", default: false },
               ],
             },
             {
