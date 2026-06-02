@@ -1470,9 +1470,9 @@
   const GAME_FINDER_MODULE_NAME = "Game Finder";
   const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
-  const GAME_FINDER_MIN_DELAY_MS = 5;
+  const GAME_FINDER_MIN_DELAY_MS = 1;
   const GAME_FINDER_MAX_DELAY_MS = 500;
-  const GAME_FINDER_DEFAULT_DELAY_MS = 25;
+  const GAME_FINDER_DEFAULT_DELAY_MS = 5;
   const GAME_FINDER_RETRY_DELAY_MS = 2000;
   const GAME_FINDER_BUTTON_LABEL = "Find Game";
   const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
@@ -1609,12 +1609,10 @@
     if (!button) return;
     button.classList.toggle("zyrox-game-finder-active", gameFinderState.scanning);
     button.setAttribute("aria-pressed", String(gameFinderState.scanning));
+    button.setAttribute("aria-label", gameFinderState.scanning ? "Stop Game Finder" : "Start Game Finder");
     button.title = gameFinderState.scanning
       ? "Game Finder is enabled. Press to stop trying random codes."
       : "Press to enable Game Finder and try random codes.";
-    button.textContent = gameFinderState.scanning
-      ? GAME_FINDER_BUTTON_ACTIVE_LABEL
-      : (gameFinderState.foundCode ? `Found ${gameFinderState.foundCode}` : GAME_FINDER_BUTTON_LABEL);
   }
 
   function ensureGameFinderStyle() {
@@ -1625,22 +1623,37 @@
     style.id = "zyrox-game-finder-style";
     style.textContent = `
       .zyrox-game-finder-button {
+        --zyrox-game-finder-size: 44px;
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: var(--zyrox-game-finder-size);
+        height: var(--zyrox-game-finder-size);
+        min-width: var(--zyrox-game-finder-size);
         margin-left: 8px;
-        padding: 10px 14px;
+        padding: 0;
         border: 0;
         border-radius: 10px;
-        background: linear-gradient(135deg, #2f6bff, #8b5cf6);
+        background: #08245c;
         color: #fff;
-        font: 700 13px/1.1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         cursor: pointer;
-        box-shadow: 0 8px 18px rgba(47, 107, 255, 0.28);
-        white-space: nowrap;
+        box-shadow: 0 8px 18px rgba(8, 36, 92, 0.32);
         vertical-align: middle;
       }
-      .zyrox-game-finder-button:hover { filter: brightness(1.08); }
+      .zyrox-game-finder-button::before {
+        content: "";
+        width: 0;
+        height: 0;
+        margin-left: 3px;
+        border-top: calc(var(--zyrox-game-finder-size) * 0.18) solid transparent;
+        border-bottom: calc(var(--zyrox-game-finder-size) * 0.18) solid transparent;
+        border-left: calc(var(--zyrox-game-finder-size) * 0.28) solid currentColor;
+      }
+      .zyrox-game-finder-button:hover { background: #0b327f; }
       .zyrox-game-finder-button.zyrox-game-finder-active {
-        background: linear-gradient(135deg, #16a34a, #22c55e);
-        box-shadow: 0 8px 18px rgba(34, 197, 94, 0.3);
+        background: #0f4bb8;
+        box-shadow: 0 8px 18px rgba(15, 75, 184, 0.34);
       }
     `;
     styleHost.appendChild(style);
@@ -1675,6 +1688,12 @@
     requestAnimationFrame(run);
   }
 
+  function syncGameFinderButtonSize(input, button) {
+    const rect = input.getBoundingClientRect();
+    const side = Math.max(32, Math.round(rect.height || input.offsetHeight || 44));
+    button.style.setProperty("--zyrox-game-finder-size", `${side}px`);
+  }
+
   function attachGameFinderButton() {
     if (!gameFinderState.mounted || !document.body) return;
     const input = findGameCodeInput();
@@ -1688,6 +1707,7 @@
       button = document.createElement("button");
       button.type = "button";
       button.className = "zyrox-game-finder-button";
+      button.textContent = "";
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1696,6 +1716,7 @@
       gameFinderState.button = button;
     }
 
+    syncGameFinderButtonSize(input, button);
     if (button.parentElement !== input.parentElement || button.previousElementSibling !== input) {
       input.insertAdjacentElement("afterend", button);
     }
@@ -1750,6 +1771,7 @@
   async function runGameFinderScanLoop(scanId) {
     while (gameFinderState.scanning && gameFinderState.scanId === scanId) {
       const pin = randomGameFinderPin();
+      const delayPromise = gameFinderDelay(gameFinderState.delayMs);
       const result = await checkGameFinderPin(pin);
 
       if (gameFinderState.scanning && gameFinderState.scanId === scanId && result) {
@@ -1759,7 +1781,7 @@
         return;
       }
 
-      await gameFinderDelay(gameFinderState.delayMs);
+      await delayPromise;
     }
   }
 
@@ -7150,7 +7172,7 @@
               name: GAME_FINDER_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
-                { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 5, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
+                { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 1, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
               ],
             },
             {
