@@ -1467,6 +1467,143 @@
     },
   });
 
+  const GAME_FINDER_MODULE_NAME = "Game Finder";
+  const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
+  const GAME_FINDER_API_PATH = "/api/matchmaker/find-info-from-code";
+  const GAME_FINDER_CODE_PATTERN = /\b\d{6}\b/g;
+  const gameFinderState = {
+    enabled: false,
+    fetchHookInstalled: false,
+    originalFetch: null,
+    observer: null,
+    scanTimerId: null,
+    loggedCodes: new Set(),
+  };
+
+  function gameFinderLog(message, extra) {
+    if (extra === undefined) console.log(`${GAME_FINDER_LOG_PREFIX} ${message}`);
+    else console.log(`${GAME_FINDER_LOG_PREFIX} ${message}`, extra);
+  }
+
+  function gameFinderWarn(message, extra) {
+    if (extra === undefined) console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`);
+    else console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`, extra);
+  }
+
+  function normalizeGameFinderCode(value) {
+    const match = String(value ?? "").match(/\d{6}/);
+    return match ? match[0] : null;
+  }
+
+  function logFoundGameCode(code, details = {}) {
+    if (!gameFinderState.enabled) return;
+    const normalized = normalizeGameFinderCode(code);
+    if (!normalized || gameFinderState.loggedCodes.has(normalized)) return;
+    gameFinderState.loggedCodes.add(normalized);
+    const namePicker = details.useRandomNamePicker == null ? "unknown" : (details.useRandomNamePicker ? "on" : "off");
+    gameFinderLog(`code:${normalized} | name picker: ${namePicker}`, details);
+  }
+
+  function isValidGameFinderResponse(data) {
+    if (!data || typeof data !== "object") return false;
+    if (data.code === 404 || data.error === 404 || data.status === 404) return false;
+    return true;
+  }
+
+  function extractGameFinderCodeFromRequest(input, init) {
+    try {
+      const url = typeof input === "string" ? input : input?.url;
+      const body = init?.body ?? input?.body;
+      if (body) {
+        if (typeof body === "string") {
+          try {
+            const parsed = JSON.parse(body);
+            const code = normalizeGameFinderCode(parsed?.code);
+            if (code) return code;
+          } catch (_) {
+            const code = normalizeGameFinderCode(body);
+            if (code) return code;
+          }
+        } else if (body instanceof URLSearchParams) {
+          const code = normalizeGameFinderCode(body.get("code"));
+          if (code) return code;
+        }
+      }
+      return normalizeGameFinderCode(url);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function inspectGameFinderResponse(response, code) {
+    if (!gameFinderState.enabled || !code || !response) return;
+    try {
+      const data = await response.clone().json();
+      if (!isValidGameFinderResponse(data)) return;
+      logFoundGameCode(code, data);
+    } catch (_) {
+      // Ignore non-JSON or consumed responses; normal page behavior must not be affected.
+    }
+  }
+
+  function installGameFinderFetchHook() {
+    if (gameFinderState.fetchHookInstalled) return;
+    gameFinderState.fetchHookInstalled = true;
+    gameFinderState.originalFetch = window.fetch;
+    window.fetch = function zyroxGameFinderFetch(input, init) {
+      const url = String(typeof input === "string" ? input : input?.url || "");
+      const code = url.includes(GAME_FINDER_API_PATH) ? extractGameFinderCodeFromRequest(input, init) : null;
+      const result = gameFinderState.originalFetch.apply(this, arguments);
+      if (code) {
+        Promise.resolve(result).then((response) => inspectGameFinderResponse(response, code)).catch(() => {});
+      }
+      return result;
+    };
+  }
+
+  function collectGameFinderCodesFromText(text, target) {
+    if (!gameFinderState.enabled || typeof text !== "string") return;
+    const matches = text.match(GAME_FINDER_CODE_PATTERN);
+    if (!matches) return;
+    for (const code of matches) {
+      logFoundGameCode(code, { source: target || "page" });
+    }
+  }
+
+  function scanGameFinderPageCodes() {
+    if (!gameFinderState.enabled) return;
+    collectGameFinderCodesFromText(`${location.pathname} ${location.search} ${location.hash}`, "url");
+    const inputs = document.querySelectorAll?.("input, textarea") || [];
+    for (const input of inputs) collectGameFinderCodesFromText(input.value, "input");
+  }
+
+  function startGameFinder() {
+    gameFinderState.enabled = true;
+    gameFinderState.loggedCodes.clear();
+    installGameFinderFetchHook();
+    scanGameFinderPageCodes();
+    if (!gameFinderState.observer && document.documentElement) {
+      gameFinderState.observer = new MutationObserver(() => scanGameFinderPageCodes());
+      gameFinderState.observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["value"] });
+    }
+    if (gameFinderState.scanTimerId) clearInterval(gameFinderState.scanTimerId);
+    gameFinderState.scanTimerId = setInterval(scanGameFinderPageCodes, 1000);
+    gameFinderLog("Enabled. Logging observed Gimkit game codes in the console.");
+  }
+
+  function stopGameFinder() {
+    gameFinderState.enabled = false;
+    if (gameFinderState.scanTimerId) {
+      clearInterval(gameFinderState.scanTimerId);
+      gameFinderState.scanTimerId = null;
+    }
+    if (gameFinderState.observer) {
+      gameFinderState.observer.disconnect();
+      gameFinderState.observer = null;
+    }
+    gameFinderWarn("Disabled.");
+  }
+
   socketManager.addEventListener("deviceChanges", event => {
     for (const { id, data } of event.detail || []) {
       for (const key in data || {}) {
@@ -6703,6 +6840,10 @@
       onEnable: startAnimationSkip,
       onDisable: stopAnimationSkip,
     },
+    [GAME_FINDER_MODULE_NAME]: {
+      onEnable: startGameFinder,
+      onDisable: stopGameFinder,
+    },
     "ESP": {
       onEnable: startEsp,
       onDisable: stopEsp,
@@ -6766,6 +6907,7 @@
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
+    [GAME_FINDER_MODULE_NAME]: "Logs observed Gimkit game codes from the join page and matchmaker checks in the console.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
@@ -6800,6 +6942,10 @@
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
                 { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 8000, step: 50, default: 1500 },
               ],
+            },
+            {
+              name: GAME_FINDER_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
             },
             {
               name: ANTI_AFK_MODULE_NAME,
