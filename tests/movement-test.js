@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Zyrox movement packet monitor
+// @name         Zyrox movement packet editor
 // @namespace    https://github.com/zyrox
-// @version      0.1.0
-// @description  Shows a live floating window with the latest Colyseus INPUT movement packet values.
+// @version      0.2.0
+// @description  Shows and edits outgoing Colyseus INPUT movement packet values before they reach the server.
 // @author       Zyrox
 // @match        https://www.gimkit.com/join*
 // @run-at       document-start
@@ -31,11 +31,15 @@
 
   const state = {
     packetCount: 0,
+    modifiedPacketCount: 0,
     decodeErrors: 0,
     lastPacketAt: 0,
     lastPacket: null,
-    lastBody: [],
+    lastOriginalBody: [],
+    lastSentBody: [],
+    lastChangedIndexes: [],
     lastError: "",
+    overrides: {},
     renderQueued: false,
     uiReady: false,
     dragging: null,
@@ -49,6 +53,7 @@
     tableBody: null,
     raw: null,
     error: null,
+    rows: [],
   };
 
   function toArrayBuffer(input) {
@@ -159,6 +164,93 @@
     return { value: read(), offset };
   }
 
+  function utf8Bytes(value) {
+    return Array.from(new TextEncoder().encode(value));
+  }
+
+  function pushUint16(bytes, value) {
+    bytes.push((value >> 8) & 0xff, value & 0xff);
+  }
+
+  function pushUint32(bytes, value) {
+    bytes.push((value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff);
+  }
+
+  function msgpackEncode(value) {
+    const bytes = [];
+
+    const write = (item) => {
+      if (item === null || item === undefined) {
+        bytes.push(0xc0);
+        return;
+      }
+
+      if (typeof item === "boolean") {
+        bytes.push(item ? 0xc3 : 0xc2);
+        return;
+      }
+
+      if (typeof item === "number") {
+        if (Number.isInteger(item) && Number.isFinite(item)) {
+          if (item >= 0 && item < 0x80) bytes.push(item);
+          else if (item >= 0 && item <= 0xff) bytes.push(0xcc, item);
+          else if (item >= 0 && item <= 0xffff) { bytes.push(0xcd); pushUint16(bytes, item); }
+          else if (item >= 0 && item <= 0xffffffff) { bytes.push(0xce); pushUint32(bytes, item); }
+          else if (item >= -32 && item < 0) bytes.push(0x100 + item);
+          else if (item >= -128 && item < 0) bytes.push(0xd0, item & 0xff);
+          else if (item >= -32768 && item < 0) { bytes.push(0xd1); pushUint16(bytes, item & 0xffff); }
+          else if (item >= -2147483648 && item < 0) { bytes.push(0xd2); pushUint32(bytes, item >>> 0); }
+          else writeFloat64(item);
+          return;
+        }
+
+        writeFloat64(item);
+        return;
+      }
+
+      if (typeof item === "string") {
+        const encoded = utf8Bytes(item);
+        if (encoded.length < 32) bytes.push(0xa0 | encoded.length);
+        else if (encoded.length <= 0xff) bytes.push(0xd9, encoded.length);
+        else if (encoded.length <= 0xffff) { bytes.push(0xda); pushUint16(bytes, encoded.length); }
+        else { bytes.push(0xdb); pushUint32(bytes, encoded.length); }
+        bytes.push(...encoded);
+        return;
+      }
+
+      if (Array.isArray(item)) {
+        if (item.length < 16) bytes.push(0x90 | item.length);
+        else if (item.length <= 0xffff) { bytes.push(0xdc); pushUint16(bytes, item.length); }
+        else { bytes.push(0xdd); pushUint32(bytes, item.length); }
+        item.forEach(write);
+        return;
+      }
+
+      if (typeof item === "object") {
+        const keys = Object.keys(item);
+        if (keys.length < 16) bytes.push(0x80 | keys.length);
+        else if (keys.length <= 0xffff) { bytes.push(0xde); pushUint16(bytes, keys.length); }
+        else { bytes.push(0xdf); pushUint32(bytes, keys.length); }
+        keys.forEach((key) => {
+          write(key);
+          write(item[key]);
+        });
+        return;
+      }
+
+      bytes.push(0xc0);
+    };
+
+    const writeFloat64 = (number) => {
+      const buffer = new ArrayBuffer(8);
+      new DataView(buffer).setFloat64(0, number);
+      bytes.push(0xcb, ...new Uint8Array(buffer));
+    };
+
+    write(value);
+    return Uint8Array.from(bytes);
+  }
+
   function decodeColyseusInputPacket(data) {
     const buffer = toArrayBuffer(data);
     if (!buffer) return null;
@@ -179,6 +271,55 @@
     };
   }
 
+  function encodeColyseusInputPacket(body) {
+    const channelBytes = msgpackEncode(INPUT_CHANNEL);
+    const bodyBytes = msgpackEncode(body);
+    const packet = new Uint8Array(1 + channelBytes.length + bodyBytes.length);
+    packet[0] = ROOM_DATA;
+    packet.set(channelBytes, 1);
+    packet.set(bodyBytes, 1 + channelBytes.length);
+    return packet.buffer;
+  }
+
+  function parseOverride(rawValue, currentValue) {
+    const trimmed = rawValue.trim();
+    if (!trimmed) return { active: false };
+
+    if (typeof currentValue === "number") {
+      const value = Number(trimmed);
+      if (!Number.isFinite(value)) return { active: false, error: "Number overrides must be finite." };
+      return { active: true, value };
+    }
+
+    if (typeof currentValue === "boolean") {
+      if (/^(true|1)$/i.test(trimmed)) return { active: true, value: true };
+      if (/^(false|0)$/i.test(trimmed)) return { active: true, value: false };
+      return { active: false, error: "Boolean overrides must be true/false." };
+    }
+
+    try {
+      return { active: true, value: JSON.parse(trimmed) };
+    } catch (_) {
+      return { active: true, value: trimmed };
+    }
+  }
+
+  function applyOverrides(body) {
+    const nextBody = body.slice();
+    const changedIndexes = [];
+    const errors = [];
+
+    nextBody.forEach((currentValue, index) => {
+      const parsed = parseOverride(state.overrides[index] || "", currentValue);
+      if (parsed.error) errors.push(`${FIELD_LABELS[index] || `body[${index}]`}: ${parsed.error}`);
+      if (!parsed.active) return;
+      nextBody[index] = parsed.value;
+      if (!Object.is(currentValue, parsed.value)) changedIndexes.push(index);
+    });
+
+    return { body: nextBody, changedIndexes, errors };
+  }
+
   function ensureUi() {
     if (state.uiReady) return;
     if (!document.documentElement) return;
@@ -192,7 +333,7 @@
           top: 72px;
           right: 18px;
           z-index: 2147483647;
-          width: 275px;
+          width: 355px;
           color: #eaf2ff;
           background: rgba(10, 15, 28, 0.94);
           border: 1px solid rgba(90, 173, 255, 0.55);
@@ -250,10 +391,32 @@
           letter-spacing: 0.08em;
           background: rgba(255, 255, 255, 0.04);
         }
-        #zyrox-movement-test td:last-child {
+        #zyrox-movement-test .zmt-value {
           color: #ffffff;
           font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
           text-align: right;
+        }
+        #zyrox-movement-test .zmt-changed .zmt-value {
+          color: #7dffbf;
+        }
+        #zyrox-movement-test .zmt-override {
+          width: 86px;
+          box-sizing: border-box;
+          padding: 4px 6px;
+          color: #ffffff;
+          background: rgba(255, 255, 255, 0.08);
+          border: 1px solid rgba(255, 255, 255, 0.16);
+          border-radius: 6px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 11px;
+          outline: none;
+        }
+        #zyrox-movement-test .zmt-override:focus {
+          border-color: rgba(125, 255, 191, 0.72);
+          box-shadow: 0 0 0 2px rgba(125, 255, 191, 0.12);
+        }
+        #zyrox-movement-test .zmt-override.zmt-invalid {
+          border-color: rgba(255, 91, 123, 0.8);
         }
         #zyrox-movement-test .zmt-raw {
           margin: 0 8px 8px;
@@ -275,10 +438,10 @@
           font-size: 11px;
         }
       </style>
-      <div class="zmt-title"><span>Movement INPUT</span><span class="zmt-pill">LIVE</span></div>
+      <div class="zmt-title"><span>Movement INPUT editor</span><span class="zmt-pill">LIVE</span></div>
       <div class="zmt-status">Waiting for Colyseus INPUT packets...</div>
       <table>
-        <thead><tr><th>Item</th><th>Value</th></tr></thead>
+        <thead><tr><th>Item</th><th>Value sent</th><th>Set to</th></tr></thead>
         <tbody></tbody>
       </table>
       <pre class="zmt-raw">[]</pre>
@@ -298,6 +461,39 @@
     document.addEventListener("pointerup", stopDrag);
     state.uiReady = true;
     renderNow();
+  }
+
+  function ensureRows(length) {
+    if (!state.uiReady) return;
+
+    while (dom.rows.length < length) {
+      const index = dom.rows.length;
+      const row = document.createElement("tr");
+      const labelCell = document.createElement("td");
+      const valueCell = document.createElement("td");
+      const inputCell = document.createElement("td");
+      const input = document.createElement("input");
+
+      labelCell.textContent = FIELD_LABELS[index] || `body[${index}]`;
+      valueCell.className = "zmt-value";
+      input.className = "zmt-override";
+      input.placeholder = "blank = off";
+      input.spellcheck = false;
+      input.value = state.overrides[index] || "";
+      input.addEventListener("input", () => {
+        state.overrides[index] = input.value;
+        queueRender();
+      });
+
+      inputCell.appendChild(input);
+      row.append(labelCell, valueCell, inputCell);
+      dom.tableBody.appendChild(row);
+      dom.rows.push({ row, valueCell, input });
+    }
+
+    while (dom.rows.length > length) {
+      dom.rows.pop().row.remove();
+    }
   }
 
   function startDrag(event) {
@@ -335,44 +531,68 @@
     state.renderQueued = false;
     if (!state.uiReady) return;
 
-    const body = state.lastBody;
-    dom.status.textContent = state.lastPacket
-      ? `${state.packetCount} packets • ${formatAge(state.lastPacketAt)} • ${state.lastPacket.transport}/${state.lastPacket.channel}`
-      : "Waiting for Colyseus INPUT packets...";
+    const body = state.lastSentBody;
+    const changed = new Set(state.lastChangedIndexes);
+    const overrideErrors = [];
+    ensureRows(Math.max(body.length, FIELD_LABELS.length));
 
-    dom.tableBody.innerHTML = body.map((value, index) => {
-      const label = FIELD_LABELS[index] || `body[${index}]`;
-      return `<tr><td>${label}</td><td>${formatValue(value)}</td></tr>`;
-    }).join("") || `<tr><td colspan="2">No packet captured yet</td></tr>`;
+    dom.rows.forEach(({ row, valueCell, input }, index) => {
+      const value = body[index];
+      const parsed = parseOverride(input.value, state.lastOriginalBody[index]);
+      if (parsed.error) overrideErrors.push(`${FIELD_LABELS[index] || `body[${index}]`}: ${parsed.error}`);
+      valueCell.textContent = value === undefined ? "—" : formatValue(value);
+      row.classList.toggle("zmt-changed", changed.has(index));
+      input.classList.toggle("zmt-invalid", Boolean(parsed.error));
+    });
+
+    dom.status.textContent = state.lastPacket
+      ? `${state.packetCount} packets • ${state.modifiedPacketCount} modified • ${formatAge(state.lastPacketAt)} • ${state.lastPacket.transport}/${state.lastPacket.channel}`
+      : "Waiting for Colyseus INPUT packets... Fill a Set to box to override that body item.";
 
     dom.raw.textContent = JSON.stringify(state.lastPacket || { transport: "colyseus", channel: INPUT_CHANNEL, body: [] }, null, 2);
-    dom.error.style.display = state.lastError ? "block" : "none";
-    dom.error.textContent = state.lastError;
+    dom.error.style.display = state.lastError || overrideErrors.length ? "block" : "none";
+    dom.error.textContent = [state.lastError, ...overrideErrors].filter(Boolean).join("\n");
   }
 
-  function handleSend(data) {
+  function inspectAndMaybeModify(data) {
     const packet = decodeColyseusInputPacket(data);
-    if (!packet) return;
+    if (!packet) return data;
+
+    const originalBody = packet.body.slice();
+    const overrideResult = applyOverrides(originalBody);
+    const shouldModify = overrideResult.changedIndexes.length > 0;
+    const sentBody = overrideResult.body;
 
     state.packetCount += 1;
+    if (shouldModify) state.modifiedPacketCount += 1;
     state.lastPacketAt = Date.now();
-    state.lastPacket = packet;
-    state.lastBody = packet.body.slice();
-    state.lastError = "";
+    state.lastOriginalBody = originalBody;
+    state.lastSentBody = sentBody.slice();
+    state.lastChangedIndexes = overrideResult.changedIndexes;
+    state.lastPacket = {
+      transport: packet.transport,
+      channel: packet.channel,
+      body: sentBody,
+      originalBody: shouldModify ? originalBody : undefined,
+    };
+    state.lastError = overrideResult.errors.join("\n");
     queueRender();
+
+    return shouldModify ? encodeColyseusInputPacket(sentBody) : data;
   }
 
   WebSocket.prototype.send = function sendPatched(data) {
+    let dataToSend = data;
     try {
-      handleSend(data);
+      dataToSend = inspectAndMaybeModify(data);
     } catch (error) {
       state.decodeErrors += 1;
-      state.lastError = `Decode error #${state.decodeErrors}: ${error?.message || error}`;
+      state.lastError = `Decode/edit error #${state.decodeErrors}: ${error?.message || error}`;
       queueRender();
-      console.warn(`${LOG_PREFIX} failed to decode outgoing packet`, error);
+      console.warn(`${LOG_PREFIX} failed to decode or edit outgoing packet`, error);
     }
 
-    return state.originalSend.apply(this, arguments);
+    return state.originalSend.call(this, dataToSend);
   };
 
   unsafe.__zyroxMovementTest = {
@@ -392,5 +612,5 @@
     ensureUi();
   }
 
-  console.log(`${LOG_PREFIX} ready - watching outgoing Colyseus INPUT packets.`);
+  console.log(`${LOG_PREFIX} ready - watching and editing outgoing Colyseus INPUT packets.`);
 })();
