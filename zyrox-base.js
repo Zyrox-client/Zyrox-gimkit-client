@@ -1474,6 +1474,8 @@
   const GAME_FINDER_MAX_DELAY_MS = 500;
   const GAME_FINDER_DEFAULT_DELAY_MS = 5;
   const GAME_FINDER_RETRY_DELAY_MS = 2000;
+  const GAME_FINDER_BUTTON_LABEL = "Find Game";
+  const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
   const gameFinderState = {
     mounted: false,
     scanning: false,
