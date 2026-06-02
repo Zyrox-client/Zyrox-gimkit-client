@@ -1470,7 +1470,7 @@
   const GAME_FINDER_MODULE_NAME = "Game Finder";
   const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
-  const GAME_FINDER_DELAY_MS = 50;
+  const GAME_FINDER_DEFAULT_DELAY_MS = 150;
   const GAME_FINDER_RETRY_DELAY_MS = 2000;
   const gameFinderState = {
     enabled: false,
@@ -1493,6 +1493,13 @@
 
   function randomGameFinderPin() {
     return Math.floor(Math.random() * (1_000_000 - 100_000) + 100_000);
+  }
+
+  function getGameFinderDelay() {
+    const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
+    const delay = Number(cfg.delay);
+    if (!Number.isFinite(delay)) return GAME_FINDER_DEFAULT_DELAY_MS;
+    return Math.max(25, Math.min(500, delay));
   }
 
   async function checkGameFinderPin(pin) {
@@ -1532,7 +1539,7 @@
         gameFinderLog(`code:${pin} | name picker: ${namePicker}`);
       }
 
-      await gameFinderDelay(GAME_FINDER_DELAY_MS);
+      await gameFinderDelay(getGameFinderDelay());
     }
   }
 
@@ -1543,7 +1550,7 @@
     }
     gameFinderState.enabled = true;
     gameFinderState.scanId += 1;
-    gameFinderLog("Started scanning random Gimkit game codes.");
+    gameFinderLog(`Started scanning random Gimkit game codes with ${getGameFinderDelay()}ms delay.`);
     runGameFinderScanLoop(gameFinderState.scanId);
   }
 
@@ -6899,6 +6906,9 @@
             {
               name: GAME_FINDER_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
+              settings: [
+                { id: "delay", label: "Delay", type: "slider", min: 25, max: 500, step: 5, default: 150, unit: "ms" },
+              ],
             },
             {
               name: ANTI_AFK_MODULE_NAME,
