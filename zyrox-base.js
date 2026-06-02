@@ -1738,7 +1738,7 @@
 
   function syncGameFinderButtonSize(input, button) {
     const rect = input.getBoundingClientRect();
-    const side = Math.max(36, Math.round((rect.height || input.offsetHeight || 50) - 6));
+    const side = Math.max(32, Math.round(rect.height || input.offsetHeight || 50));
     button.style.setProperty("--zyrox-game-finder-size", `${side}px`);
   }
 
