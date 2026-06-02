@@ -313,10 +313,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         sentQuestionIds: new Set(),
         isPardyMode: false,
         pardyCurrentQuestionId: null,
-        pardyQuestionStatus: null,
-        pardyAskQuestionId: null,
-        pardyAskReadyAt: 0,
-        pardyAskTimerId: null,
         lastPardyAnsweredQuestionId: null,
         lastPardySkipReason: null,
       };
@@ -366,9 +362,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       function resetAnsweredCache() {
         state.sentQuestionIds.clear();
         state.lastPardyAnsweredQuestionId = null;
-        state.pardyAskQuestionId = null;
-        state.pardyAskReadyAt = 0;
-        if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
       }
 
       function normalizeSpecialGameTypes(value) {
@@ -389,7 +382,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         if (!enabled) return;
         if (!state.isPardyMode) {
           state.isPardyMode = true;
-          console.log(LOG, "Detected PARDY game type from", source || "game state", "- using PARDY answer flow when Auto Answer is enabled");
+          console.log(LOG, "Detected PARDY game type from", source || "game state", "- enabling PARDY auto-answer mode");
+          startAutoAnswer(_baseSpeed, "PARDY detected");
         }
       }
 
@@ -408,35 +402,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         if (state.pardyCurrentQuestionId !== normalizedQuestionId) {
           state.pardyCurrentQuestionId = normalizedQuestionId;
           state.currentQuestionId = questionId;
-          state.pardyQuestionStatus = null;
-          state.pardyAskQuestionId = null;
-          state.pardyAskReadyAt = 0;
-          if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
           state.lastPardySkipReason = null;
           console.log(LOG, "PARDY current question set", normalizedQuestionId);
         }
-      }
-
-      function applyPardyQuestionStatus(questionStatus) {
-        if (questionStatus == null) return;
-        const normalizedStatus = String(questionStatus).toLowerCase();
-        state.pardyQuestionStatus = normalizedStatus;
-        console.log(LOG, "PARDY question status", normalizedStatus);
-        if (normalizedStatus !== "ask") return;
-        const questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
-        if (!questionId) { logPardySkip("questionStatus ask received before currentQuestionId"); return; }
-        state.pardyAskQuestionId = questionId;
-        state.pardyAskReadyAt = Date.now() + Math.max(0, Number(_pardyDelay) || 0);
-        state.lastPardySkipReason = null;
-        if (state.pardyAskTimerId) clearTimeout(state.pardyAskTimerId);
-        if (_running) {
-          state.pardyAskTimerId = setTimeout(() => {
-            state.pardyAskTimerId = null;
-            answerQuestion();
-          }, Math.max(0, state.pardyAskReadyAt - Date.now()));
-        } else {
-          state.pardyAskTimerId = null;
-        }
+        answerQuestion();
       }
 
       function getNextUnansweredQuestion() {
@@ -478,8 +447,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
             setPardyMode(true, "PARDY_MODE_STATE");
             const questionId = readStateUpdateValue(data?.value, "currentQuestionId");
             if (questionId != null) applyPardyQuestionId(questionId);
-            const questionStatus = readStateUpdateValue(data?.value, "questionStatus");
-            if (questionStatus != null) applyPardyQuestionStatus(questionStatus);
           } else if (type === "PLAYER_QUESTION_LIST") {
             state.questionIdList = data?.value?.questionList || [];
             if (Number.isInteger(data?.value?.questionIndex)) setCurrentQuestionIndex(data.value.questionIndex);
@@ -522,7 +489,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       }
 
       function answerQuestion() {
-        if (!_running) return;
         if (socketManager.transportType === "colyseus") {
           if (state.currentQuestionId == null || state.answerDeviceId == null) return;
           const question = findQuestionById(state.currentQuestionId);
@@ -540,8 +506,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           if (state.isPardyMode) {
             questionId = normalizeQuestionId(state.pardyCurrentQuestionId);
             if (!questionId) { logPardySkip("no PARDY currentQuestionId STATE_UPDATE yet"); return; }
-            if (state.pardyQuestionStatus !== "ask" || state.pardyAskQuestionId !== questionId) { logPardySkip("waiting for PARDY questionStatus ask"); return; }
-            if (Date.now() < state.pardyAskReadyAt) { logPardySkip("waiting for PARDY answer delay"); return; }
             if (state.sentQuestionIds.has(questionId) || state.lastPardyAnsweredQuestionId === questionId) return;
             question = findQuestionById(questionId);
             if (!question) { logPardySkip(`question ${questionId} is not loaded yet`); return; }
@@ -559,7 +523,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
             if (state.isPardyMode) logPardySkip(`no answer found for question ${questionId}`);
             return;
           }
-          socketManager.sendMessage("QUESTION_ANSWERED", { questionId: rawQuestionId ?? questionId, answer });
+          socketManager.sendMessage("QUESTION_ANSWERED", { answer, questionId: rawQuestionId ?? questionId });
           state.sentQuestionIds.add(questionId);
           if (state.isPardyMode) state.lastPardyAnsweredQuestionId = questionId;
           state.lastPardySkipReason = null;
@@ -594,7 +558,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       let _timerId = null;
       let _running = false;
       let _baseSpeed = 1000;
-      let _pardyDelay = 1500;
       const BLUEBOAT_EXTRA_DELAY_MS = 500;
 
       function getCurrentDelay() {
@@ -611,11 +574,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         }, delay);
       }
 
-      function startAutoAnswer(speed = 1000, source = "module toggle", options = {}) {
-        const cfg = window.__zyroxAutoAnswerConfig || {};
-        _baseSpeed = Math.max(200, Number(speed ?? cfg.speed) || 1000);
-        const pardyDelayNumber = Number(options?.pardyDelay ?? cfg.triviaDelay);
-        _pardyDelay = Math.max(0, Math.min(8000, Number.isFinite(pardyDelayNumber) ? pardyDelayNumber : _pardyDelay));
+      function startAutoAnswer(speed = 1000, source = "module toggle") {
+        _baseSpeed = Math.max(200, Number(speed) || 1000);
         const wasRunning = _running;
         _running = true;
         if (_timerId) clearTimeout(_timerId);
@@ -624,13 +584,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       }
 
       window.__zyroxAutoAnswer = {
-        start(speed = 1000, options = {}) {
-          startAutoAnswer(speed, "module toggle", options);
+        start(speed = 1000) {
+          startAutoAnswer(speed);
         },
         stop() {
           _running = false;
           if (_timerId) { clearTimeout(_timerId); _timerId = null; }
-          if (state.pardyAskTimerId) { clearTimeout(state.pardyAskTimerId); state.pardyAskTimerId = null; }
         },
       };
       console.log(LOG, "Page context ready, waiting for module toggle.");
@@ -717,7 +676,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   function readUserscriptVersion() {
     
-    const CLIENT_VERSION = "2.9.5";
+    const CLIENT_VERSION = "2.3.8";
     return CLIENT_VERSION;
   }
 
@@ -1134,7 +1093,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const nativeXMLSend = XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.send = function() {
         this.addEventListener("load", () => {
-          if (!String(this.responseURL || "").includes("/matchmaker/join")) return;
+          if (!this.responseURL.endsWith("/matchmaker/join")) return;
           try {
             const response = JSON.parse(this.responseText);
             manager.blueboatRoomId = response.roomId;
@@ -1149,34 +1108,23 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       this.socket = socket;
       const socketUrl = String(socket?.url || "");
       const looksLikeColyseus = socketUrl.includes("gimkitconnect.com") && !socketUrl.includes("/socket.io/");
-      this.transportType = looksLikeColyseus ? "colyseus" : "unknown";
-      this.addEventListener("colyseusMessage", (e) => {
-        if (e.detail.type !== "DEVICES_STATES_CHANGES") return;
-        this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
-      });
+      if (window.Phaser || looksLikeColyseus) {
+        this.transportType = "colyseus";
+        this.addEventListener("colyseusMessage", (e) => {
+          if (e.detail.type !== "DEVICES_STATES_CHANGES") return;
+          this.dispatchEvent(new CustomEvent("deviceChanges", { detail: parseChangePacket(e.detail.message) }));
+        });
+      } else {
+        this.transportType = "blueboat";
+      }
       socket.addEventListener("message", (e) => {
         const firstByte = (() => {
           try {
-            const bytes = e.data instanceof ArrayBuffer
-              ? new Uint8Array(e.data)
-              : (ArrayBuffer.isView(e.data) ? new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength) : null);
-            return bytes?.[0] ?? null;
+            return new Uint8Array(e.data)[0];
           } catch (_) {
             return null;
           }
         })();
-        const blueboatDecoded = firstByte === 4
-          ? (() => {
-              try { return decodeBlueboatBinaryPacket(e.data) || blueboat.decode(e.data) || null; }
-              catch (_) { return null; }
-            })()
-          : null;
-        if (blueboatDecoded) {
-          const normalizedBlueboat = blueboatDecoded?.payload && typeof blueboatDecoded.payload === "object"
-            ? { ...blueboatDecoded.payload, eventName: blueboatDecoded.eventName, payload: blueboatDecoded.payload, raw: blueboatDecoded.raw }
-            : blueboatDecoded;
-          this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalizedBlueboat }));
-        }
         if (this.transportType === "unknown" && firstByte != null) {
           if (colyseusProtocolCodeSet.has(firstByte)) this.transportType = "colyseus";
           else this.transportType = "blueboat";
@@ -1192,7 +1140,19 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
             }
           }
         } else {
-          // already emitted above via universal Blueboat decode path
+          decoded = decodeBlueboatBinaryPacket(e.data);
+          if (!decoded) {
+            const fallback = blueboat.decode(e.data);
+            if (fallback) this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: fallback }));
+          } else {
+            const payload = decoded.payload;
+            if (payload && typeof payload === "object") {
+              const normalized = { ...payload, eventName: decoded.eventName, payload, raw: decoded.raw };
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: normalized }));
+            } else {
+              this.dispatchEvent(new CustomEvent("blueboatMessage", { detail: { payload, eventName: decoded.eventName, raw: decoded.raw } }));
+            }
+          }
         }
       });
     }
@@ -1212,34 +1172,24 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         if (decoded?.roomId) this.blueboatRoomId = decoded.roomId;
         if (decoded?.room) this.blueboatRoomId = decoded.room;
       }
-      const outbound = safeDecodeBlueboat(data);
-      if (outbound) {
-        this.dispatchEvent(new CustomEvent("blueboatSend", { detail: outbound }));
-      }
     }
     sendMessage(channel, data) {
       if (!this.socket) return;
-      const socketUrl = String(this.socket?.url || "");
-      const inferredTransport = this.transportType !== "unknown"
-        ? this.transportType
-        : (socketUrl.includes("/socket.io/") ? "blueboat" : "colyseus");
-      if (this.transportType === "unknown") this.transportType = inferredTransport;
+      if (!this.blueboatRoomId && this.transportType === "blueboat") return;
       let encoded;
-      if (inferredTransport === "blueboat") {
-        if (!this.blueboatRoomId) return;
+      if (this.transportType === "colyseus") {
+        const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
+        const channelEncoded = msgpackEncode(channel);
+        const packetEncoded = msgpackEncode(data);
+        encoded = new Uint8Array(header.length + channelEncoded.byteLength + packetEncoded.byteLength);
+        encoded.set(header, 0);
+        encoded.set(new Uint8Array(channelEncoded), header.length);
+        encoded.set(new Uint8Array(packetEncoded), header.length + channelEncoded.byteLength);
+        this.socket.send(encoded);
+      } else {
         encoded = blueboat.encode(channel, data, this.blueboatRoomId);
         this.socket.send(encoded);
-        return;
       }
-
-      const header = new Uint8Array([colyseusProtocol.ROOM_DATA]);
-      const channelEncoded = msgpackEncode(channel);
-      const packetEncoded = msgpackEncode(data);
-      encoded = new Uint8Array(header.length + channelEncoded.byteLength + packetEncoded.byteLength);
-      encoded.set(header, 0);
-      encoded.set(new Uint8Array(channelEncoded), header.length);
-      encoded.set(new Uint8Array(packetEncoded), header.length + channelEncoded.byteLength);
-      this.socket.send(encoded);
     }
     decodeColyseus(event) {
       const bytes = new Uint8Array(event.data);
@@ -1360,6 +1310,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         if (typeof fieldValue !== "string") continue;
         const answer = fieldValue.trim();
         if (!answer) continue;
+        console.log(answer);
         applyDrawItAnswerReveal(answer);
         if (answerPopupState.enabled) showAnswerPopup(answer);
       }
@@ -1372,8 +1323,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     container: null,
     balance: 0,
     config: {
+      hudLocation: "topRight",
       displayTitle: true,
       hudSize: 100,
+      hudPosition: null,
     },
   };
 
@@ -1459,296 +1412,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     },
   });
 
-  const GAME_FINDER_MODULE_NAME = "Game Finder";
-  const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
-  const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
-  const GAME_FINDER_MIN_DELAY_MS = 5;
-  const GAME_FINDER_MAX_DELAY_MS = 500;
-  const GAME_FINDER_DEFAULT_DELAY_MS = 25;
-  const GAME_FINDER_RETRY_DELAY_MS = 2000;
-  const GAME_FINDER_BUTTON_LABEL = "Find Game";
-  const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
-  const gameFinderState = {
-    mounted: false,
-    scanning: false,
-    scanId: 0,
-    delayMs: GAME_FINDER_DEFAULT_DELAY_MS,
-    button: null,
-    input: null,
-    observer: null,
-    foundCode: null,
-  };
-
-  function gameFinderWarn(message, extra) {
-    if (extra === undefined) console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`);
-    else console.warn(`${GAME_FINDER_LOG_PREFIX} ${message}`, extra);
-  }
-
-  function gameFinderDelay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  function randomGameFinderPin() {
-    return Math.floor(Math.random() * (1_000_000 - 100_000) + 100_000);
-  }
-
-  function normalizeGameFinderDelay(value) {
-    const delay = Number(value);
-    if (!Number.isFinite(delay)) return GAME_FINDER_DEFAULT_DELAY_MS;
-    return Math.max(GAME_FINDER_MIN_DELAY_MS, Math.min(GAME_FINDER_MAX_DELAY_MS, delay));
-  }
-
-  function syncGameFinderConfig() {
-    const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
-    gameFinderState.delayMs = normalizeGameFinderDelay(cfg.delay);
-    return { delayMs: gameFinderState.delayMs };
-  }
-
-  function syncGameFinderDelayFromConfig() {
-    return syncGameFinderConfig().delayMs;
-  }
-
-  function getGameFinderDelay() {
-    return syncGameFinderDelayFromConfig();
-  }
-
-  function setGameFinderDelay(value) {
-    gameFinderState.delayMs = normalizeGameFinderDelay(value);
-    return gameFinderState.delayMs;
-  }
-
-  function isVisibleGameFinderInput(input) {
-    if (window.HTMLInputElement && !(input instanceof window.HTMLInputElement)) return false;
-    const rect = input.getBoundingClientRect();
-    const style = window.getComputedStyle(input);
-    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-  }
-
-  function findGameCodeInput() {
-    const selectors = [
-      'input[placeholder="Game Code"]',
-      'input[placeholder*="Game" i][placeholder*="Code" i]',
-      'input[aria-label*="Game" i][aria-label*="Code" i]',
-      'input[inputmode="numeric"][pattern="[0-9]*"]',
-      'input[type="number"]',
-    ];
-    for (const selector of selectors) {
-      const input = [...document.querySelectorAll(selector)].find(isVisibleGameFinderInput);
-      if (input) return input;
-    }
-    return [...document.querySelectorAll("input")].find((input) => {
-      if (!isVisibleGameFinderInput(input)) return false;
-      const type = (input.getAttribute("type") || "text").toLowerCase();
-      const inputMode = (input.getAttribute("inputmode") || "").toLowerCase();
-      return type === "number" || inputMode === "numeric";
-    }) || null;
-  }
-
-  function setNativeInputValue(input, value) {
-    const previousValue = input.value;
-    const ownDescriptor = Object.getOwnPropertyDescriptor(input, "value");
-    const prototype = window.HTMLInputElement?.prototype || Object.getPrototypeOf(input);
-    const prototypeDescriptor = Object.getOwnPropertyDescriptor(prototype, "value");
-    const setter = prototypeDescriptor?.set || ownDescriptor?.set;
-
-    input.focus?.();
-    if (setter) setter.call(input, value);
-    else input.value = value;
-    input.setAttribute("value", value);
-
-    if (input._valueTracker && typeof input._valueTracker.setValue === "function") {
-      input._valueTracker.setValue(previousValue);
-    }
-
-    const inputEvent = typeof InputEvent === "function"
-      ? new InputEvent("input", { bubbles: true, inputType: "insertText", data: value })
-      : new Event("input", { bubbles: true });
-    input.dispatchEvent(inputEvent);
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: value.at(-1) || "0" }));
-  }
-
-  async function waitForGameCodeInput(timeoutMs = 2000) {
-    const startedAt = Date.now();
-    let input = findGameCodeInput();
-    while (!input && Date.now() - startedAt < timeoutMs) {
-      await gameFinderDelay(100);
-      input = findGameCodeInput();
-    }
-    return input;
-  }
-
-  async function enterFoundGameCode(pin) {
-    const code = String(pin).padStart(6, "0");
-    const input = await waitForGameCodeInput();
-    if (!input) {
-      gameFinderWarn(`Found code:${code}, but the Game Code input was not found.`);
-      return false;
-    }
-    setNativeInputValue(input, code);
-    const entered = input.value === code;
-    if (!entered) {
-      gameFinderWarn(`Tried to enter code:${code}, but the input value is still ${input.value || "empty"}.`, { input });
-      return false;
-    }
-    return true;
-  }
-
-  function updateGameFinderButton() {
-    const button = gameFinderState.button;
-    if (!button) return;
-    button.classList.toggle("zyrox-game-finder-active", gameFinderState.scanning);
-    button.setAttribute("aria-pressed", String(gameFinderState.scanning));
-    button.title = gameFinderState.scanning
-      ? "Game Finder is enabled. Press to stop trying random codes."
-      : "Press to enable Game Finder and try random codes.";
-    button.textContent = gameFinderState.scanning
-      ? GAME_FINDER_BUTTON_ACTIVE_LABEL
-      : (gameFinderState.foundCode ? `Found ${gameFinderState.foundCode}` : GAME_FINDER_BUTTON_LABEL);
-  }
-
-  function ensureGameFinderStyle() {
-    if (document.getElementById("zyrox-game-finder-style")) return;
-    const style = document.createElement("style");
-    style.id = "zyrox-game-finder-style";
-    style.textContent = `
-      .zyrox-game-finder-button {
-        margin-left: 8px;
-        padding: 10px 14px;
-        border: 0;
-        border-radius: 10px;
-        background: linear-gradient(135deg, #2f6bff, #8b5cf6);
-        color: #fff;
-        font: 700 13px/1.1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        cursor: pointer;
-        box-shadow: 0 8px 18px rgba(47, 107, 255, 0.28);
-        white-space: nowrap;
-        vertical-align: middle;
-      }
-      .zyrox-game-finder-button:hover { filter: brightness(1.08); }
-      .zyrox-game-finder-button.zyrox-game-finder-active {
-        background: linear-gradient(135deg, #16a34a, #22c55e);
-        box-shadow: 0 8px 18px rgba(34, 197, 94, 0.3);
-      }
-    `;
-    document.head?.appendChild(style);
-  }
-
-  function attachGameFinderButton() {
-    if (!gameFinderState.mounted) return;
-    const input = findGameCodeInput();
-    if (!input) return;
-
-    ensureGameFinderStyle();
-    gameFinderState.input = input;
-
-    let button = gameFinderState.button;
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = "zyrox-game-finder-button";
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleGameFinderScan();
-      });
-      gameFinderState.button = button;
-    }
-
-    if (button.parentElement !== input.parentElement || button.previousElementSibling !== input) {
-      input.insertAdjacentElement("afterend", button);
-    }
-    updateGameFinderButton();
-  }
-
-  function observeGameFinderInput() {
-    if (gameFinderState.observer) return;
-    gameFinderState.observer = new MutationObserver(() => attachGameFinderButton());
-    gameFinderState.observer.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  async function checkGameFinderPin(pin) {
-    try {
-      const response = await fetch(GAME_FINDER_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/plain, */*",
-        },
-        body: JSON.stringify({ code: String(pin) }),
-      });
-
-      const remaining = parseInt(response.headers.get("x-ratelimit-remaining") ?? "999", 10);
-      const resetTs = parseInt(response.headers.get("x-ratelimit-reset") ?? "0", 10);
-      if (remaining <= 1 && resetTs > 0) {
-        const waitMs = Math.max(500, resetTs * 1000 - Date.now() + 200);
-        gameFinderWarn(`Rate limit nearly reached; waiting ${Math.round(waitMs)}ms.`);
-        await gameFinderDelay(waitMs);
-      }
-
-      const data = await response.json();
-      return data?.code === 404 ? null : data;
-    } catch (_) {
-      await gameFinderDelay(GAME_FINDER_RETRY_DELAY_MS);
-      return null;
-    }
-  }
-
-  async function runGameFinderScanLoop(scanId) {
-    while (gameFinderState.scanning && gameFinderState.scanId === scanId) {
-      const pin = randomGameFinderPin();
-      const result = await checkGameFinderPin(pin);
-
-      if (gameFinderState.scanning && gameFinderState.scanId === scanId && result) {
-        await enterFoundGameCode(pin);
-        gameFinderState.foundCode = String(pin).padStart(6, "0");
-        stopGameFinderScan();
-        return;
-      }
-
-      await gameFinderDelay(gameFinderState.delayMs);
-    }
-  }
-
-  function startGameFinderScan() {
-    if (gameFinderState.scanning) return;
-    gameFinderState.scanning = true;
-    gameFinderState.scanId += 1;
-    gameFinderState.foundCode = null;
-    syncGameFinderConfig();
-    updateGameFinderButton();
-    runGameFinderScanLoop(gameFinderState.scanId);
-  }
-
-  function stopGameFinderScan() {
-    if (!gameFinderState.scanning) return;
-    gameFinderState.scanning = false;
-    gameFinderState.scanId += 1;
-    updateGameFinderButton();
-  }
-
-  function toggleGameFinderScan() {
-    if (gameFinderState.scanning) stopGameFinderScan();
-    else startGameFinderScan();
-  }
-
-  function startGameFinder() {
-    gameFinderState.mounted = true;
-    syncGameFinderConfig();
-    attachGameFinderButton();
-    observeGameFinderInput();
-  }
-
-  function stopGameFinder() {
-    gameFinderState.mounted = false;
-    stopGameFinderScan();
-    gameFinderState.button?.remove?.();
-    gameFinderState.button = null;
-    gameFinderState.input = null;
-    gameFinderState.observer?.disconnect?.();
-    gameFinderState.observer = null;
-  }
-
   socketManager.addEventListener("deviceChanges", event => {
     for (const { id, data } of event.detail || []) {
       for (const key in data || {}) {
@@ -1779,26 +1442,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         break;
     }
   });
-
-  const extractDrawItAnswerCandidates = (stateUpdateData) => {
-    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
-    const answers = [];
-    for (const row of rows) {
-      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
-      for (const item of row.value) {
-        const directKey = item?.key;
-        const nestedKey = item?.value?.key;
-        const fieldKey = directKey ?? nestedKey;
-        const directValue = item?.value;
-        const nestedValue = item?.value?.value;
-        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
-        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
-        const answer = fieldValue.trim();
-        if (answer) answers.push(answer);
-      }
-    }
-    return answers;
-  };
 
   socketManager.addEventListener("blueboatMessage", (event) => {
     if (event.detail?.key !== "STATE_UPDATE") return;
@@ -1858,20 +1501,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     rafId: null,
     running: false,
   };
-  const cameraZoomState = {
-    enabled: false,
-    originalZoom: null,
-    cameraRef: null,
-    baselineByCamera: new WeakMap(),
-    toastTimeoutId: null,
-    toastEl: null,
-    lastToastValue: null,
-  };
-  const CAMERA_ZOOM_MODULE_NAME = "Zoom (FOV)";
-  const CAMERA_ZOOM_MIN = 0.3;
-  const CAMERA_ZOOM_MAX = 2.0;
-  const CAMERA_ZOOM_STEP = 0.05;
-  const CAMERA_ZOOM_DEFAULT = 0.8;
 
   function espLog(message, extra) {
     if (extra !== undefined) console.log(`${ESP_LOG} ${message}`, extra);
@@ -1921,109 +1550,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     espLog(`Canvas resized to ${espState.canvas.width}x${espState.canvas.height}`);
   }
 
-  function clampCameraZoom(value) {
-    return Math.min(CAMERA_ZOOM_MAX, Math.max(CAMERA_ZOOM_MIN, Number(value) || CAMERA_ZOOM_DEFAULT));
-  }
-
-  function resolvePrimaryCamera() {
-    return window?.stores?.phaser?.scene?.cameras?.cameras?.[0] || null;
-  }
-
-  function ensureCameraZoomToast() {
-    if (cameraZoomState.toastEl?.isConnected) return cameraZoomState.toastEl;
-    const toast = document.createElement("div");
-    toast.style.cssText = "position:fixed;left:50%;bottom:36px;transform:translate(-50%,8px);background:rgba(8,12,20,.82);border:1px solid rgba(255,255,255,.22);color:#fff;padding:6px 10px;border-radius:8px;font:600 12px Inter,system-ui,sans-serif;z-index:2147483647;opacity:0;pointer-events:none;transition:opacity .15s ease,transform .15s ease;";
-    document.documentElement.appendChild(toast);
-    cameraZoomState.toastEl = toast;
-    return toast;
-  }
-
-  function showCameraZoomToast(zoomValue) {
-    const rounded = Math.round(clampCameraZoom(zoomValue) * 100) / 100;
-    if (cameraZoomState.lastToastValue === rounded) return;
-    cameraZoomState.lastToastValue = rounded;
-    const toast = ensureCameraZoomToast();
-    toast.textContent = `Zoom: ${rounded.toFixed(2)}x`;
-    toast.style.opacity = "1";
-    toast.style.transform = "translate(-50%,0)";
-    if (cameraZoomState.toastTimeoutId) clearTimeout(cameraZoomState.toastTimeoutId);
-    cameraZoomState.toastTimeoutId = setTimeout(() => {
-      toast.style.opacity = "0";
-      toast.style.transform = "translate(-50%,8px)";
-    }, 900);
-  }
-
-  function applyCameraZoomTick() {
-    const cfgStore = state?.moduleConfig instanceof Map ? state.moduleConfig : null;
-    const cfg = (cfgStore?.get(CAMERA_ZOOM_MODULE_NAME) && typeof cfgStore.get(CAMERA_ZOOM_MODULE_NAME) === "object")
-      ? cfgStore.get(CAMERA_ZOOM_MODULE_NAME)
-      : { zoom: CAMERA_ZOOM_DEFAULT };
-    const desiredZoom = clampCameraZoom(cfg.zoom ?? CAMERA_ZOOM_DEFAULT);
-    if (Number(cfg.zoom) !== desiredZoom) cfg.zoom = desiredZoom;
-    const camera = resolvePrimaryCamera();
-    if (!camera) return;
-    if (camera !== cameraZoomState.cameraRef) {
-      cameraZoomState.cameraRef = camera;
-      const baselineZoom = Number(camera?.zoom ?? 1);
-      if (Number.isFinite(baselineZoom) && baselineZoom > 0) {
-        cameraZoomState.originalZoom = baselineZoom;
-        cameraZoomState.baselineByCamera.set(camera, baselineZoom);
-      } else {
-        cameraZoomState.originalZoom = 1;
-      }
-    }
-    const baselineZoomRaw = cameraZoomState.baselineByCamera.get(camera);
-    const baselineZoom = Number.isFinite(baselineZoomRaw) && baselineZoomRaw > 0 ? baselineZoomRaw : Number(camera?.zoom ?? 1) || 1;
-    const targetZoom = baselineZoom * desiredZoom;
-    const currentZoom = Number(camera?.zoom ?? 1) || 1;
-    if (Math.abs(currentZoom - targetZoom) > 1e-4) {
-      if (typeof camera?.setZoom === "function") camera.setZoom(targetZoom);
-      else camera.zoom = targetZoom;
-    }
-  }
-
-  function startCameraZoom() {
-    if (cameraZoomState.enabled) return;
-    cameraZoomState.enabled = true;
-    cameraZoomState.cameraRef = null;
-    cameraZoomState.originalZoom = null;
-    cameraZoomState.lastToastValue = null;
-    startUnifiedRenderLoop();
-  }
-
-  function hideCameraZoomToast() {
-    if (cameraZoomState.toastTimeoutId) {
-      clearTimeout(cameraZoomState.toastTimeoutId);
-      cameraZoomState.toastTimeoutId = null;
-    }
-    if (cameraZoomState.toastEl?.isConnected) {
-      cameraZoomState.toastEl.style.opacity = "0";
-      cameraZoomState.toastEl.style.transform = "translate(-50%,8px)";
-    }
-  }
-
-  function stopCameraZoom() {
-    if (!cameraZoomState.enabled) return;
-    cameraZoomState.enabled = false;
-    hideCameraZoomToast();
-    const camera = resolvePrimaryCamera();
-    const restoreZoom = Number(
-      camera && cameraZoomState.baselineByCamera.has(camera)
-        ? cameraZoomState.baselineByCamera.get(camera)
-        : cameraZoomState.originalZoom,
-    );
-    if (camera === cameraZoomState.cameraRef && Number.isFinite(restoreZoom) && restoreZoom > 0.2 && restoreZoom < 5) {
-      const currentZoom = Number(camera.zoom ?? 1) || 1;
-      if (Math.abs(currentZoom - restoreZoom) > 1e-4) {
-        if (typeof camera?.setZoom === "function") camera.setZoom(restoreZoom);
-        else camera.zoom = restoreZoom;
-      }
-    }
-    cameraZoomState.originalZoom = null;
-    cameraZoomState.cameraRef = null;
-    stopUnifiedRenderLoopIfIdle();
-  }
-
   async function resolveEspStores() {
     if (espState.stores) return espState.stores;
     if (espState.storesPromise) return espState.storesPromise;
@@ -2036,10 +1562,30 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
       const response = await fetch(moduleScript.src);
       const text = await response.text();
-      const gameScriptUrl = text.match(/FixSpinePlugin-[^.]+\.js/)?.[0];
-      if (!gameScriptUrl) throw new Error("Failed to find game script URL");
+      const gameScriptPath =
+        text.match(/["'](\/assets\/FixSpinePlugin-[^"']+\.js(?:\?[^"']*)?)["']/)?.[1] ||
+        text.match(/FixSpinePlugin-[^.]+\.js(?:\?\S+)?/)?.[0];
+      if (!gameScriptPath) throw new Error("Failed to find game script URL");
 
-      const gameScript = await import(`/assets/${gameScriptUrl}`);
+      const gameAssetUrl = gameScriptPath.startsWith("http")
+        ? gameScriptPath
+        : new URL(gameScriptPath.startsWith("/") ? gameScriptPath : `/assets/${gameScriptPath}`, moduleScript.src).href;
+
+      let gameScript;
+      try {
+        gameScript = await import(/* webpackIgnore: true */ gameAssetUrl);
+      } catch (importError) {
+        espLog("Direct module import failed; retrying via blob fallback", importError);
+        const fallbackResponse = await fetch(gameAssetUrl);
+        const fallbackText = await fallbackResponse.text();
+        const blobUrl = URL.createObjectURL(new Blob([fallbackText], { type: "text/javascript" }));
+        try {
+          gameScript = await import(/* webpackIgnore: true */ blobUrl);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      }
+
       const stores = Object.values(gameScript).find((value) => value && value.assignment);
       if (!stores) throw new Error("Failed to resolve stores export");
 
@@ -2353,8 +1899,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const stableId = String(characterId ?? `${Math.round(pos.x)}:${Math.round(pos.y)}`);
       activeIds.add(stableId);
       const angle = Math.atan2(pos.y - camY, pos.x - camX);
-      const worldDistance = Math.hypot(pos.x - camX, pos.y - camY);
-      const screenDistance = worldDistance * zoom;
+      const distance = Math.hypot(pos.x - camX, pos.y - camY) * zoom;
       const rawX = (pos.x - camX) * zoom + canvas.width / 2;
       const rawY = (pos.y - camY) * zoom + canvas.height / 2;
       const prev = espState.seenPlayers.get(stableId);
@@ -2411,7 +1956,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const arrowSize = Math.max(6, Number(isTeammate ? espCfg.teammateArrowSize : espCfg.arrowSize) || 14);
 
       if (onScreen && showHitbox) {
-        const boxSize = Math.max(24, hitboxSize * zoom);
+        const boxSize = Math.max(24, hitboxSize / zoom);
         ctx.beginPath();
         ctx.lineWidth = hitboxWidth;
         ctx.strokeStyle = hitboxColor;
@@ -2421,8 +1966,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const shouldDrawOffscreen = !onScreen && offscreenStyle !== "none";
       const shouldDrawTracer = offscreenStyle === "tracers" && (alwaysTracer || !onScreen);
 
-      let labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, screenDistance) + canvas.width / 2;
-      let labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, screenDistance) + canvas.height / 2;
+      let labelX = onScreen ? screenX : Math.cos(angle) * Math.min(250, distance) + canvas.width / 2;
+      let labelY = onScreen ? (screenY - 18) : Math.sin(angle) * Math.min(250, distance) + canvas.height / 2;
 
       if (shouldDrawOffscreen || shouldDrawTracer) {
         const margin = 20;
@@ -2496,7 +2041,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       ctx.font = `${nameSize}px ${espCfg.font || "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const labelText = formatEspLabel(getCharacterName(character, characterId), worldDistance, nameDistanceVisibility, distanceStyle);
+      const labelText = formatEspLabel(getCharacterName(character, characterId), distance, nameDistanceVisibility, distanceStyle);
       const textWidth = Math.max(1, ctx.measureText(labelText).width);
       const pad = Math.max(8, nameSize * 0.35);
       const halfText = textWidth / 2;
@@ -2685,7 +2230,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           const camX = Number(camera?.midPoint?.x);
           const camY = Number(camera?.midPoint?.y);
           const zoom = Number(camera?.zoom ?? 1) || 1;
-          const hitRadius = (Math.max(20, 120 * zoom) / 2) * 3;
+          const hitRadius = (Math.max(20, 120 / zoom) / 2) * 3;
           if (Number.isFinite(camX) && Number.isFinite(camY)) {
             for (const { character } of getCharacterEntries(stores)) {
               if (!character || character === me) continue;
@@ -2859,18 +2404,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     statusText: "Idle",
   };
 
-  const quickFireState = {
-    enabled: false,
-    intervalId: null,
-    intervalMs: 50,
-    lastStatus: "Idle",
-    statusText: "Idle",
-  };
-
-  const quickFireInputState = {
-    leftMouseDown: false,
-  };
-
   const autoAimState = {
     enabled: false,
     rafId: null,
@@ -2907,17 +2440,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       showTargetRing: true,
     };
     const stored = window.__zyroxTriggerAssistConfig;
-    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
-  }
-
-  function getQuickFireConfig() {
-    const defaults = {
-      enabled: true,
-      fireIntervalMs: 50,
-      onlyWhenMouseDown: true,
-      onlyWhenGameFocused: true,
-    };
-    const stored = window.__zyroxQuickFireConfig;
     return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
   }
 
@@ -3035,32 +2557,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     }));
   }
 
-
-  function syncPhaserPointer(x, y) {
-    try {
-      const stores = espState.stores ?? window.stores;
-      const scene = stores?.phaser?.scene;
-      const input = scene?.input;
-      const pointer = input?.activePointer || input?.mousePointer;
-      if (!pointer) return;
-      const nx = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
-      const ny = Math.max(0, Math.min(window.innerHeight, Number(y) || 0));
-      pointer.x = nx;
-      pointer.y = ny;
-      pointer.position?.set?.(nx, ny);
-      pointer.prevPosition?.set?.(nx, ny);
-      if (typeof scene?.cameras?.main?.getWorldPoint === "function") {
-        const worldPoint = scene.cameras.main.getWorldPoint(nx, ny);
-        if (worldPoint) {
-          pointer.worldX = worldPoint.x;
-          pointer.worldY = worldPoint.y;
-        }
-      }
-    } catch (_) {}
-  }
-
   function syncAimPointer(canvas, x, y, buttons = 0) {
-    syncPhaserPointer(x, y);
     fireCanvasPointerEvent("pointermove", canvas, x, y);
     fireCanvasMouseEvent("mousemove", canvas, x, y, buttons);
     const clientX = Math.max(0, Math.min(window.innerWidth, Number(x) || 0));
@@ -3150,7 +2647,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const screen = projectWorldToScreen(player, snapshot.camera, width, height);
       if (!screen) continue;
       if (screen.x < -margin || screen.x > width + margin || screen.y < -margin || screen.y > height + margin) continue;
-      const boxSize = Math.max(24, baseHitbox * Math.max(0.01, Number(screen.zoom) || 1));
+      const boxSize = Math.max(24, baseHitbox / Math.max(0.01, Number(screen.zoom) || 1));
       const half = boxSize * 0.5;
       if (mx < screen.x - half || mx > screen.x + half || my < screen.y - half || my > screen.y + half) continue;
       const dist = Math.hypot(mx - screen.x, my - screen.y);
@@ -3306,7 +2803,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       return;
     }
 
-    const prevTarget = autoAimState.target;
     const target = findAutoAimTarget(cfg);
     autoAimState.target = target;
     if (!target) {
@@ -3333,10 +2829,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         autoAimState.targetVelX = 0;
         autoAimState.targetVelY = 0;
       }
-      if (prevTarget && prevTarget.playerId === String(target.playerId)) {
+      if (autoAimState.target) {
         const sampleDelta = Math.max(1, now - (autoAimState.lastTargetSampleAt || now));
-        const rawVelX = (target.screenX - prevTarget.screenX) / sampleDelta;
-        const rawVelY = (target.screenY - prevTarget.screenY) / sampleDelta;
+        const rawVelX = (target.screenX - autoAimState.target.screenX) / sampleDelta;
+        const rawVelY = (target.screenY - autoAimState.target.screenY) / sampleDelta;
         const velBlend = 0.28;
         autoAimState.targetVelX = autoAimState.targetVelX * (1 - velBlend) + rawVelX * velBlend;
         autoAimState.targetVelY = autoAimState.targetVelY * (1 - velBlend) + rawVelY * velBlend;
@@ -3454,137 +2950,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     ctx.restore();
   }
 
-  function setQuickFireStatus(status) {
-    quickFireState.lastStatus = status;
-    quickFireState.statusText = status;
-  }
-
-  function isQuickFireMouseDown(pointer) {
-    const pointerButtons = Number(pointer?.buttons) || 0;
-    return Boolean(pointer?.isDown || pointer?.leftButtonDown?.() || (pointerButtons & 1) || quickFireInputState.leftMouseDown);
-  }
-
-  function getQuickFireBody(phaser, stores) {
-    return phaser?.mainCharacter?.body
-      ?? getMainCharacter(stores)?.body
-      ?? phaser?.scene?.characterManager?.characters?.get?.(phaser?.mainCharacter?.id)?.body
-      ?? phaser?.mainCharacter
-      ?? null;
-  }
-
-  function getQuickFirePointerWorld(pointer, scene) {
-    const directX = Number(pointer?.worldX);
-    const directY = Number(pointer?.worldY);
-    if (Number.isFinite(directX) && Number.isFinite(directY)) return { x: directX, y: directY };
-
-    const pointerX = Number(pointer?.x ?? pointer?.position?.x);
-    const pointerY = Number(pointer?.y ?? pointer?.position?.y);
-    if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) return null;
-
-    const camera = scene?.cameras?.main ?? scene?.cameras?.cameras?.[0];
-    const worldPoint = camera?.getWorldPoint?.(pointerX, pointerY);
-    const worldX = Number(worldPoint?.x);
-    const worldY = Number(worldPoint?.y);
-    if (Number.isFinite(worldX) && Number.isFinite(worldY)) return { x: worldX, y: worldY };
-
-    const cameraPoint = pointer?.positionToCamera?.(camera);
-    const cameraX = Number(cameraPoint?.x);
-    const cameraY = Number(cameraPoint?.y);
-    if (Number.isFinite(cameraX) && Number.isFinite(cameraY)) return { x: cameraX, y: cameraY };
-    return null;
-  }
-
-  function getQuickFireGameObjects() {
-    const stores = espState.stores ?? window.stores;
-    const phaser = stores?.phaser;
-    const scene = phaser?.scene;
-    const input = scene?.input;
-    const mousePointer = input?.mousePointer ?? input?.activePointer ?? input?.manager?.activePointer ?? input?.pointers?.[0];
-    const body = getQuickFireBody(phaser, stores);
-    return { stores, phaser, scene, mousePointer, body };
-  }
-
-  function sendQuickFireMessage(angle, bodyX, bodyY) {
-    if (!socketManager?.socket) {
-      setQuickFireStatus("Waiting for socket");
-      return false;
-    }
-    const socketUrl = String(socketManager.socket?.url || "");
-    const transport = socketManager.transportType !== "unknown"
-      ? socketManager.transportType
-      : (socketUrl.includes("/socket.io/") ? "blueboat" : "colyseus");
-    if (transport === "blueboat" && !socketManager.blueboatRoomId) {
-      setQuickFireStatus("Waiting for room");
-      return false;
-    }
-    socketManager.sendMessage("FIRE", { angle, x: bodyX, y: bodyY });
-    return true;
-  }
-
-  function quickFireTick() {
-    if (!quickFireState.enabled) return;
-    const cfg = getQuickFireConfig();
-    if (!cfg.enabled) {
-      setQuickFireStatus("Disabled in config");
-      return;
-    }
-    if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
-      setQuickFireStatus("Waiting for focus");
-      return;
-    }
-
-    const { scene, mousePointer, body } = getQuickFireGameObjects();
-    if (!mousePointer || !body) {
-      setQuickFireStatus("Waiting for game objects");
-      return;
-    }
-    if (cfg.onlyWhenMouseDown && !isQuickFireMouseDown(mousePointer)) {
-      setQuickFireStatus("Waiting for left click");
-      return;
-    }
-
-    const Vector2 = window.Phaser?.Math?.Vector2;
-    const angleBetween = window.Phaser?.Math?.Angle?.Between;
-    if (typeof Vector2 !== "function" || typeof angleBetween !== "function") {
-      setQuickFireStatus("Waiting for Phaser math");
-      return;
-    }
-
-    const bodyX = Number(body.x);
-    const bodyY = Number(body.y);
-    const pointerWorld = getQuickFirePointerWorld(mousePointer, scene);
-    const worldX = Number(pointerWorld?.x);
-    const worldY = Number(pointerWorld?.y);
-    if (![bodyX, bodyY, worldX, worldY].every(Number.isFinite)) {
-      setQuickFireStatus("Waiting for coordinates");
-      return;
-    }
-
-    const vector = new Vector2(worldX - bodyX, worldY - (bodyY - 3)).normalize();
-    const angle = angleBetween(0, 0, vector.x, vector.y);
-    if (sendQuickFireMessage(angle, bodyX, bodyY)) setQuickFireStatus("Fired");
-  }
-
-  function startQuickFire() {
-    stopQuickFire();
-    quickFireState.enabled = true;
-    setQuickFireStatus("Armed");
-    const cfg = getQuickFireConfig();
-    const intervalMs = Math.max(1, Math.min(250, Number(cfg.fireIntervalMs) || 50));
-    quickFireState.intervalMs = intervalMs;
-    quickFireState.intervalId = setInterval(quickFireTick, intervalMs);
-  }
-
-  function stopQuickFire() {
-    if (quickFireState.intervalId != null) {
-      clearInterval(quickFireState.intervalId);
-      quickFireState.intervalId = null;
-    }
-    quickFireState.enabled = false;
-    quickFireState.intervalMs = 50;
-    setQuickFireStatus("Idle");
-  }
-
   function triggerAssistTick() {
     if (!triggerAssistState.enabled) return;
     const cfg = getTriggerAssistConfig();
@@ -3674,7 +3039,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     if (crosshairState.enabled) runTimedModule("crosshair", renderCrosshairFrame);
     if (autoAimState.enabled) runTimedModule("autoAim", autoAimTick);
     if (triggerAssistState.enabled) runTimedModule("triggerAssist", triggerAssistTick);
-    if (cameraZoomState.enabled) runTimedModule("cameraZoom", applyCameraZoomTick);
 
     unifiedRenderState.rafId = requestAnimationFrame(unifiedRenderTick);
   }
@@ -3686,7 +3050,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   }
 
   function stopUnifiedRenderLoopIfIdle() {
-    if (espState.enabled || crosshairState.enabled || autoAimState.enabled || triggerAssistState.enabled || cameraZoomState.enabled) return;
+    if (espState.enabled || crosshairState.enabled || autoAimState.enabled || triggerAssistState.enabled) return;
     unifiedRenderState.running = false;
     if (unifiedRenderState.rafId != null) {
       cancelAnimationFrame(unifiedRenderState.rafId);
@@ -3696,7 +3060,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   window.addEventListener("blur", () => {
     autoAimInputState.leftMouseDown = false;
-    quickFireInputState.leftMouseDown = false;
     autoAimInputState.reroutedShotActive = false;
     autoAimState.target = null;
     releaseFireHold();
@@ -3704,7 +3067,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState !== "visible") {
       autoAimInputState.leftMouseDown = false;
-      quickFireInputState.leftMouseDown = false;
       autoAimInputState.reroutedShotActive = false;
       autoAimState.target = null;
       releaseFireHold();
@@ -3728,19 +3090,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     return true;
   }
 
-  window.addEventListener("pointerdown", (event) => {
-    if (event.button === 0 && !isEventInsideUi(event.target)) quickFireInputState.leftMouseDown = true;
-  }, { capture: true, passive: true });
-  window.addEventListener("pointerup", (event) => {
-    if (event.button === 0) quickFireInputState.leftMouseDown = false;
-  }, { capture: true, passive: true });
-
   window.addEventListener("mousedown", (event) => {
     if (!shouldRerouteManualShot(event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = true;
-    quickFireInputState.leftMouseDown = true;
     autoAimInputState.reroutedShotActive = true;
     attemptFire(false, false, { x: crosshairState.mouseX, y: crosshairState.mouseY });
   }, true);
@@ -3751,20 +3105,15 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     event.preventDefault();
     event.stopImmediatePropagation();
     autoAimInputState.leftMouseDown = false;
-    quickFireInputState.leftMouseDown = false;
     autoAimInputState.reroutedShotActive = false;
   }, true);
 
   window.addEventListener("mousedown", (event) => {
-    if (event.button === 0 && !isEventInsideUi(event.target)) {
-      autoAimInputState.leftMouseDown = true;
-      quickFireInputState.leftMouseDown = true;
-    }
+    if (event.button === 0 && !isEventInsideUi(event.target)) autoAimInputState.leftMouseDown = true;
   }, { passive: true });
   window.addEventListener("mouseup", (event) => {
     if (event.button === 0) {
       autoAimInputState.leftMouseDown = false;
-      quickFireInputState.leftMouseDown = false;
       autoAimInputState.reroutedShotActive = false;
     }
   }, { passive: true });
@@ -4051,10 +3400,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     enabled: false,
     container: null,
     config: {
+      hudLocation: "topRight",
       displayTitle: true,
       showLvlPrefix: false,
       showUpgradeButton: true,
       hudSize: 100,
+      hudPosition: null,
     },
     levels: {
       moneyPerQuestion: 1,
@@ -4079,240 +3430,31 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     order: [...AUTO_UPGRADE_TIE_BREAK_ORDER],
   };
   const UPGRADE_HUD_TOP_OFFSET_PX = 39;
+  let getUpgradeHudModuleConfig = () => null;
+  let persistUpgradeHudSettings = () => {};
+  let getLavaBuildingHudModuleConfig = () => null;
+  let persistLavaBuildingHudSettings = () => {};
 
-  function upgradeHudLog(message, extra) {
-    if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
-    else console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`, extra);
+
+  function patchHudModuleConfig(moduleName, patch) {
+    const getter = moduleName === "Upgrade HUD" ? getUpgradeHudModuleConfig : getLavaBuildingHudModuleConfig;
+    const targetCfg = getter?.();
+    if (!targetCfg || typeof targetCfg !== "object") return;
+    Object.assign(targetCfg, patch);
   }
 
-  function isRememberHudPositionEnabled(value, fallback = true) {
-    if (value === undefined || value === null) return fallback;
-    if (value === false || value === "false" || value === 0 || value === "0") return false;
-    return true;
-  }
-
-  function parseBooleanSetting(value, fallback = false) {
-    if (value === undefined || value === null) return fallback;
-    if (value === true || value === "true" || value === 1 || value === "1") return true;
-    if (value === false || value === "false" || value === 0 || value === "0") return false;
-    return Boolean(value);
-  }
-
-  function normalizeHudPosition(pos, fallback = null) {
-    const normalizePoint = (value) => {
-      if (!value || typeof value !== "object") return null;
-      const rawX = value.x ?? value.left ?? value.hudPositionX;
-      const rawY = value.y ?? value.top ?? value.hudPositionY;
-      const x = Number.parseFloat(rawX);
-      const y = Number.parseFloat(rawY);
-      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
-      return null;
-    };
-    return normalizePoint(pos) || normalizePoint(fallback) || null;
-  }
-
-
-  function readModuleConfigFromStorage(moduleName) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const saved = JSON.parse(raw);
-      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig : [];
-      for (const entry of moduleConfig) {
-        if (!Array.isArray(entry) || entry.length < 2) continue;
-        if (entry[0] !== moduleName) continue;
-        const cfg = entry[1];
-        if (cfg && typeof cfg === "object") return { ...cfg };
-        break;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  function readHudPositionFromStorage(moduleName, fallback = null) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return normalizeHudPosition(null, fallback);
-      const saved = JSON.parse(raw);
-      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig : [];
-      for (const entry of moduleConfig) {
-        if (!Array.isArray(entry) || entry.length < 2) continue;
-        if (entry[0] !== moduleName) continue;
-        const cfg = entry[1] && typeof entry[1] === "object" ? entry[1] : null;
-        if (!cfg) break;
-        const legacy = { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top };
-        return normalizeHudPosition(cfg.hudPosition, legacy || fallback);
-      }
-    } catch (_) {}
-    return normalizeHudPosition(null, fallback);
-  }
-
-  function readHudPosition(moduleName, fallback = null) {
-    const cfg = getHudModuleConfigObject(moduleName, {});
-    const legacy = cfg && typeof cfg === "object"
-      ? { x: cfg.hudPositionX, y: cfg.hudPositionY, left: cfg.left, top: cfg.top }
-      : null;
-    const fromCfg = normalizeHudPosition(cfg?.hudPosition, legacy || null);
-    if (fromCfg) return fromCfg;
-    return readHudPositionFromStorage(moduleName, fallback);
-  }
-
-  function persistHudPositionToStorage(moduleName, hudPosition) {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      const moduleConfig = Array.isArray(saved?.moduleConfig) ? saved.moduleConfig.slice() : [];
-      let found = false;
-      for (let i = 0; i < moduleConfig.length; i += 1) {
-        const entry = moduleConfig[i];
-        if (!Array.isArray(entry) || entry.length < 2) continue;
-        if (entry[0] !== moduleName) continue;
-        const cfg = entry[1] && typeof entry[1] === "object" ? { ...entry[1] } : {};
-        cfg.hudPosition = { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) };
-        moduleConfig[i] = [entry[0], cfg];
-        found = true;
-        break;
-      }
-      if (!found) moduleConfig.push([moduleName, { keybind: null, hudPosition: { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) } }]);
-      saved.moduleConfig = moduleConfig;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-      console.log("[HUD Position] Forced localStorage sync", { moduleName, hudPosition: { x: Math.round(Number(hudPosition.x) || 0), y: Math.round(Number(hudPosition.y) || 0) } });
-    } catch (_) {}
-  }
-
-  function writeHudPosition(moduleName, pos) {
-    const normalized = normalizeHudPosition(pos, null);
-    if (!normalized) return null;
-    const cfg = getHudModuleConfigObject(moduleName, {});
-    if (!cfg || typeof cfg !== "object") return null;
-    cfg.hudPosition = { x: Math.round(normalized.x), y: Math.round(normalized.y) };
-    console.log("[HUD Position] Stored", { moduleName, hudPosition: { ...cfg.hudPosition } });
-    persistHudPositionToStorage(moduleName, cfg.hudPosition);
-    markHudFallbackConfigDirty(moduleName);
-    if (typeof saveSettings === "function") saveSettings();
-    return { ...cfg.hudPosition };
-  }
 
   function readHudPositionFromElement(el) {
     if (!el) return null;
     const left = Number.parseFloat(el.style.left || "");
     const top = Number.parseFloat(el.style.top || "");
     if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
-    return { x: left, y: top };
+    return { x: Math.round(left), y: Math.round(top) };
   }
 
-  function applyHudPosition(el, pos, clamp = true) {
-    if (!el || !pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return null;
-    const rect = el.getBoundingClientRect();
-    const width = Math.max(1, rect.width || el.offsetWidth || 1);
-    const height = Math.max(1, rect.height || el.offsetHeight || 1);
-    const maxX = Math.max(0, window.innerWidth - width);
-    const maxY = Math.max(0, window.innerHeight - height);
-    const next = clamp
-      ? { x: Math.max(0, Math.min(maxX, Number(pos.x) || 0)), y: Math.max(0, Math.min(maxY, Number(pos.y) || 0)) }
-      : { x: Number(pos.x) || 0, y: Number(pos.y) || 0 };
-    el.style.removeProperty("right");
-    el.style.removeProperty("bottom");
-    el.style.setProperty("left", `${next.x}px`);
-    el.style.setProperty("top", `${next.y}px`);
-    return next;
-  }
-
-
-
-  function markHudFallbackConfigDirty(moduleName) {
-    const dirtyKey = "__zyroxHudFallbackConfigDirty";
-    if (!window[dirtyKey] || typeof window[dirtyKey] !== "object") window[dirtyKey] = {};
-    window[dirtyKey][moduleName] = true;
-  }
-
-  function getHudModuleConfigObject(moduleName, defaults = {}) {
-    const cacheKey = "__zyroxHudFallbackConfig";
-    const dirtyKey = "__zyroxHudFallbackConfigDirty";
-    if (!window[cacheKey] || typeof window[cacheKey] !== "object") window[cacheKey] = {};
-    if (!window[dirtyKey] || typeof window[dirtyKey] !== "object") window[dirtyKey] = {};
-
-    try {
-      if (typeof moduleCfg === "function") {
-        const cfg = moduleCfg(moduleName);
-        if (cfg && typeof cfg === "object") {
-          const fallbackCfg = window[cacheKey][moduleName];
-          const fallbackDirty = window[dirtyKey][moduleName] === true;
-          if (fallbackCfg && typeof fallbackCfg === "object") {
-            if (fallbackDirty) {
-              for (const [key, value] of Object.entries(fallbackCfg)) cfg[key] = value;
-            }
-            delete window[cacheKey][moduleName];
-            delete window[dirtyKey][moduleName];
-          }
-          return cfg;
-        }
-      }
-    } catch (_) {}
-
-    if (!window[cacheKey][moduleName] || typeof window[cacheKey][moduleName] !== "object") {
-      window[cacheKey][moduleName] = { ...defaults, ...(readModuleConfigFromStorage(moduleName) || {}) };
-    }
-    return window[cacheKey][moduleName];
-  }
-
-  function normalizeUpgradeHudConfigFromRaw(rawCfg = {}) {
-    const defaults = { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null };
-    return {
-      displayTitle: parseBooleanSetting(rawCfg.displayTitle, defaults.displayTitle),
-      showLvlPrefix: parseBooleanSetting(rawCfg.showLvlPrefix, defaults.showLvlPrefix),
-      showUpgradeButton: parseBooleanSetting(rawCfg.showUpgradeButton, defaults.showUpgradeButton),
-      hudSize: Number.isFinite(Number(rawCfg.hudSize)) ? Math.max(60, Math.min(180, Number(rawCfg.hudSize))) : defaults.hudSize,
-      hudPosition: normalizeHudPosition(rawCfg.hudPosition, defaults.hudPosition),
-    };
-  }
-
-  function normalizeBuildingHudConfigFromRaw(rawCfg = {}) {
-    const defaults = { displayTitle: true, hudSize: 100, hudPosition: null };
-    return {
-      displayTitle: parseBooleanSetting(rawCfg.displayTitle, defaults.displayTitle),
-      hudSize: Number.isFinite(Number(rawCfg.hudSize)) ? Math.max(60, Math.min(180, Number(rawCfg.hudSize))) : defaults.hudSize,
-      hudPosition: normalizeHudPosition(rawCfg.hudPosition, defaults.hudPosition),
-    };
-  }
-
-  function readUpgradeHudConfig() {
-    const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
-    const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
-    Object.assign(upgradeHudState.config, normalized);
-    return { ...normalized };
-  }
-
-  function writeUpgradeHudConfigPatch(patch = {}) {
-    const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
-    if (!cfg || typeof cfg !== "object") return readUpgradeHudConfig();
-    Object.assign(cfg, patch);
-    markHudFallbackConfigDirty("Building HUD");
-    markHudFallbackConfigDirty("Upgrade HUD");
-    const normalized = normalizeUpgradeHudConfigFromRaw(cfg);
-    Object.assign(cfg, normalized);
-    Object.assign(upgradeHudState.config, normalized);
-    if (typeof saveSettings === "function") saveSettings();
-    return { ...normalized };
-  }
-
-  function readBuildingHudConfig() {
-    const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
-    const normalized = normalizeBuildingHudConfigFromRaw(cfg);
-    Object.assign(lavaBuildingHudState.config, normalized);
-    return { ...normalized };
-  }
-
-  function writeBuildingHudConfigPatch(patch = {}) {
-    const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
-    if (!cfg || typeof cfg !== "object") return readBuildingHudConfig();
-    Object.assign(cfg, patch);
-    const normalized = normalizeBuildingHudConfigFromRaw(cfg);
-    Object.assign(cfg, normalized);
-    Object.assign(lavaBuildingHudState.config, normalized);
-    if (typeof saveSettings === "function") saveSettings();
-    return { ...normalized };
+  function upgradeHudLog(message, extra) {
+    if (extra === undefined) console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`);
+    else console.log(`${UPGRADE_HUD_LOG_PREFIX} ${message}`, extra);
   }
 
   function ensureUpgradeHudContainer() {
@@ -4359,30 +3501,40 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         y: Math.max(0, Math.min(maxY, Number(nextY) || 0)),
       };
     };
+    const applyCustomPositionToConfig = (nextX, nextY) => {
+      const cfg = getUpgradeHudModuleConfig?.();
+      if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
+      const clamped = clampToViewport(nextX, nextY);
+      const nextPos = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+      cfg.hudPosition = nextPos;
+      upgradeHudState.config.hudPosition = nextPos;
+      patchHudModuleConfig("Upgrade HUD", { hudPosition: nextPos });
+      upgradeHudLog("Stored HUD drag position", { moduleName: "Upgrade HUD", hudPosition: nextPos });
+      return clamped;
+    };
     const handleMouseMove = (event) => {
       if (!dragState) return;
       const nextX = event.clientX - dragState.offsetX;
       const nextY = event.clientY - dragState.offsetY;
-      const clamped = clampToViewport(nextX, nextY);
-      applyHudPosition(hud, clamped, false);
-      writeUpgradeHudConfigPatch({ hudPosition: { x: Math.round(clamped.x), y: Math.round(clamped.y) } });
+      const clamped = applyCustomPositionToConfig(nextX, nextY);
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${clamped.x}px`);
+      hud.style.setProperty("top", `${clamped.y}px`);
     };
-    const handleDragEnd = () => {
+    const endDrag = () => {
       if (!dragState) return;
-      const rect = hud.getBoundingClientRect();
-      const clamped = clampToViewport(rect.left, rect.top);
-      writeHudPosition("Upgrade HUD", { x: Math.round(clamped.x), y: Math.round(clamped.y) });
-      if (typeof saveSettings === "function") saveSettings();
       dragState = null;
       hud.style.cursor = "grab";
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleDragEnd);
-      window.removeEventListener("blur", handleDragEnd);
-      document.removeEventListener("mouseleave", handleDragEnd);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("blur", endDrag);
+      document.removeEventListener("mouseleave", endDrag);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      persistUpgradeHudSettings?.();
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") handleDragEnd();
+      if (document.visibilityState === "hidden") endDrag();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
@@ -4392,70 +3544,128 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         offsetY: event.clientY - rect.top,
       };
       hud.style.cursor = "grabbing";
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleDragEnd);
-      window.addEventListener("blur", handleDragEnd);
-      document.addEventListener("mouseleave", handleDragEnd);
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", endDrag);
+      window.addEventListener("blur", endDrag);
+      document.addEventListener("mouseleave", endDrag);
       document.addEventListener("visibilitychange", handleVisibilityChange);
       event.preventDefault();
     });
-    const savedPos = readHudPosition("Upgrade HUD", null);
-    if (savedPos) {
-      const applied = applyHudPosition(hud, savedPos, true);
-      upgradeHudLog("Restored HUD position", { moduleName: "Upgrade HUD", saved: savedPos, applied });
-    } else {
-      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Upgrade HUD", rawCfg: (() => { try { return moduleCfg("Upgrade HUD"); } catch (_) { return null; } })(), storagePos: readHudPositionFromStorage("Upgrade HUD", null) });
-    }
     document.documentElement.appendChild(hud);
     upgradeHudState.container = hud;
     return hud;
   }
 
   function getUpgradeHudConfig() {
-    return readUpgradeHudConfig();
+    const defaults = {
+      hudLocation: "topRight",
+      displayTitle: true,
+      showLvlPrefix: false,
+      showUpgradeButton: true,
+      hudSize: 100,
+      hudPosition: null,
+    };
+    const apply = (cfg) => {
+      const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
+      const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
+      upgradeHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      upgradeHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      upgradeHudState.config.showLvlPrefix = cfg?.showLvlPrefix !== undefined ? Boolean(cfg.showLvlPrefix) : defaults.showLvlPrefix;
+      upgradeHudState.config.showUpgradeButton = cfg?.showUpgradeButton !== undefined ? Boolean(cfg.showUpgradeButton) : defaults.showUpgradeButton;
+      const parsedSize = Number(cfg?.hudSize);
+      upgradeHudState.config.hudSize = Number.isFinite(parsedSize) ? Math.max(60, Math.min(180, parsedSize)) : defaults.hudSize;
+      const rawPos = cfg?.hudPosition || ((Number.isFinite(Number(cfg?.customX)) && Number.isFinite(Number(cfg?.customY))) ? { x: Number(cfg.customX), y: Number(cfg.customY) } : null);
+      const parsedX = Number(rawPos?.x);
+      const parsedY = Number(rawPos?.y);
+      upgradeHudState.config.hudPosition = (Number.isFinite(parsedX) && Number.isFinite(parsedY)) ? { x: parsedX, y: parsedY } : defaults.hudPosition;
+      return { ...upgradeHudState.config };
+    };
+    try {
+      return apply(moduleCfg("Upgrade HUD"));
+    } catch (_) {
+      return apply(upgradeHudState.config || defaults);
+    }
   }
+
 
   function getLavaBuildingHudConfig() {
-    return readBuildingHudConfig();
+    const defaults = {
+      hudLocation: "topRight",
+      displayTitle: true,
+      hudSize: 100,
+      hudPosition: null,
+    };
+    const apply = (cfg) => {
+      const loc = String(cfg?.hudLocation ?? defaults.hudLocation);
+      const allowed = new Set(["topRight", "topLeft", "bottomRight", "bottomLeft"]);
+      lavaBuildingHudState.config.hudLocation = allowed.has(loc) ? loc : defaults.hudLocation;
+      lavaBuildingHudState.config.displayTitle = cfg?.displayTitle !== undefined ? Boolean(cfg.displayTitle) : defaults.displayTitle;
+      lavaBuildingHudState.config.hudSize = Number.isFinite(Number(cfg?.hudSize)) ? Math.max(60, Math.min(180, Number(cfg.hudSize))) : defaults.hudSize;
+      const rawPos = cfg?.hudPosition || ((Number.isFinite(Number(cfg?.customX)) && Number.isFinite(Number(cfg?.customY))) ? { x: Number(cfg.customX), y: Number(cfg.customY) } : null);
+      const parsedX = Number(rawPos?.x);
+      const parsedY = Number(rawPos?.y);
+      lavaBuildingHudState.config.hudPosition = (Number.isFinite(parsedX) && Number.isFinite(parsedY)) ? { x: parsedX, y: parsedY } : defaults.hudPosition;
+      return { ...lavaBuildingHudState.config };
+    };
+    try {
+      return apply(moduleCfg("Building HUD"));
+    } catch (_) {
+      return apply(lavaBuildingHudState.config || defaults);
+    }
   }
 
-  function applyUpgradeHudPosition(hud, cfg, moduleName = "Upgrade HUD") {
-    const storedPos = readHudPosition(moduleName, null);
-    const sourcePos = normalizeHudPosition(storedPos, cfg?.hudPosition);
-    if (sourcePos) {
-      const applied = applyHudPosition(hud, sourcePos, true);
-      upgradeHudLog(`Position source=${storedPos ? "moduleCfg" : "runtime"}`, { moduleName, requested: sourcePos, applied });
-      return applied;
-    }
-    upgradeHudLog("Position source=default-anchor", { moduleName });
+  function applyUpgradeHudPosition(hud, cfg) {
     hud.style.removeProperty("top");
     hud.style.removeProperty("right");
     hud.style.removeProperty("bottom");
     hud.style.removeProperty("left");
+
+    if (cfg?.hudPosition && Number.isFinite(Number(cfg.hudPosition.x)) && Number.isFinite(Number(cfg.hudPosition.y))) {
+      hud.style.setProperty("left", `${Math.max(0, Number(cfg.hudPosition.x))}px`);
+      hud.style.setProperty("top", `${Math.max(0, Number(cfg.hudPosition.y))}px`);
+      return;
+    }
+
+    if (cfg.hudLocation === "topLeft") {
+      hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
+      hud.style.setProperty("left", "14px");
+      return;
+    }
+    if (cfg.hudLocation === "bottomRight") {
+      hud.style.setProperty("bottom", "14px");
+      hud.style.setProperty("right", "14px");
+      return;
+    }
+    if (cfg.hudLocation === "bottomLeft") {
+      hud.style.setProperty("bottom", "14px");
+      hud.style.setProperty("left", "14px");
+      return;
+    }
+
     hud.style.setProperty("top", `${UPGRADE_HUD_TOP_OFFSET_PX}px`);
     hud.style.setProperty("right", "14px");
-    const width = Math.max(1, hud.offsetWidth || hud.getBoundingClientRect().width || 220);
-    const anchored = { x: Math.max(0, window.innerWidth - width - 14), y: UPGRADE_HUD_TOP_OFFSET_PX };
-    const applied = applyHudPosition(hud, anchored, true);
-    return applied;
+  }
+
+  function getHudTransformOrigin(cfg) {
+    if (cfg?.hudPosition) return "top left";
+    if (cfg.hudLocation === "topLeft") return "top left";
+    if (cfg.hudLocation === "bottomRight") return "bottom right";
+    if (cfg.hudLocation === "bottomLeft") return "bottom left";
+    return "top right";
   }
 
   function renderUpgradeHud(configOverride = null) {
     const hud = ensureUpgradeHudContainer();
-    const cfg = { ...getUpgradeHudConfig(), ...(configOverride && typeof configOverride === "object" ? configOverride : {}) };
-    if (!normalizeHudPosition(cfg.hudPosition, null)) {
-      const livePos = readHudPositionFromElement(hud);
-      if (livePos) {
-        writeHudPosition("Upgrade HUD", livePos);
-        cfg.hudPosition = livePos;
-      }
-    }
+    const cfg = configOverride && typeof configOverride === "object"
+      ? { ...getUpgradeHudConfig(), ...configOverride }
+      : getUpgradeHudConfig();
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
-    const appliedPos = applyUpgradeHudPosition(hud, cfg, "Upgrade HUD");
-    if (appliedPos) writeHudPosition("Upgrade HUD", appliedPos);
+    applyUpgradeHudPosition(hud, cfg);
+    hud.style.transformOrigin = getHudTransformOrigin(cfg);
+    hud.style.transform = `scale(${sizeScale})`;
     const rows = Object.keys(UPGRADE_HUD_LABELS)
       .map((key) => {
         const label = UPGRADE_HUD_LABELS[key];
@@ -4774,48 +3984,51 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const maxY = Math.max(0, window.innerHeight - rect.height);
       return { x: Math.max(0, Math.min(maxX, Number(nextX) || 0)), y: Math.max(0, Math.min(maxY, Number(nextY) || 0)) };
     };
+    const applyCustomPositionToConfig = (nextX, nextY) => {
+      const cfg = getLavaBuildingHudModuleConfig?.();
+      if (!cfg || typeof cfg !== "object") return clampToViewport(nextX, nextY);
+      const clamped = clampToViewport(nextX, nextY);
+      const nextPos = { x: Math.round(clamped.x), y: Math.round(clamped.y) };
+      cfg.hudPosition = nextPos;
+      lavaBuildingHudState.config.hudPosition = nextPos;
+      patchHudModuleConfig("Building HUD", { hudPosition: nextPos });
+      upgradeHudLog("Stored HUD drag position", { moduleName: "Building HUD", hudPosition: nextPos });
+      return clamped;
+    };
     const handleMouseMove = (event) => {
       if (!dragState) return;
-      const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
-      applyHudPosition(hud, clamped, false);
-      writeBuildingHudConfigPatch({ hudPosition: { x: Math.round(clamped.x), y: Math.round(clamped.y) } });
+      const clamped = applyCustomPositionToConfig(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY);
+      hud.style.removeProperty("right");
+      hud.style.removeProperty("bottom");
+      hud.style.setProperty("left", `${clamped.x}px`);
+      hud.style.setProperty("top", `${clamped.y}px`);
     };
-    const handleDragEnd = () => {
+    const endDrag = () => {
       if (!dragState) return;
-      const rect = hud.getBoundingClientRect();
-      const clamped = clampToViewport(rect.left, rect.top);
-      writeHudPosition("Building HUD", { x: Math.round(clamped.x), y: Math.round(clamped.y) });
-      if (typeof saveSettings === "function") saveSettings();
       dragState = null;
       hud.style.cursor = "grab";
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleDragEnd);
-      window.removeEventListener("blur", handleDragEnd);
-      document.removeEventListener("mouseleave", handleDragEnd);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("blur", endDrag);
+      document.removeEventListener("mouseleave", endDrag);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      persistLavaBuildingHudSettings?.();
     };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") handleDragEnd();
+      if (document.visibilityState === "hidden") endDrag();
     };
     hud.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
       const rect = hud.getBoundingClientRect();
       dragState = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
       hud.style.cursor = "grabbing";
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleDragEnd);
-      window.addEventListener("blur", handleDragEnd);
-      document.addEventListener("mouseleave", handleDragEnd);
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", endDrag);
+      window.addEventListener("blur", endDrag);
+      document.addEventListener("mouseleave", endDrag);
       document.addEventListener("visibilitychange", handleVisibilityChange);
       event.preventDefault();
     });
-    const savedPos = readHudPosition("Building HUD", null);
-    if (savedPos) {
-      const applied = applyHudPosition(hud, savedPos, true);
-      upgradeHudLog("Restored HUD position", { moduleName: "Building HUD", saved: savedPos, applied });
-    } else {
-      upgradeHudLog("No saved HUD position found; using default anchor", { moduleName: "Building HUD", rawCfg: (() => { try { return moduleCfg("Building HUD"); } catch (_) { return null; } })(), storagePos: readHudPositionFromStorage("Building HUD", null) });
-    }
     document.documentElement.appendChild(hud);
     lavaBuildingHudState.container = hud;
     return hud;
@@ -4823,20 +4036,16 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   function renderLavaBuildingHud(configOverride = null) {
     const hud = ensureLavaBuildingHudContainer();
-    const cfg = { ...getLavaBuildingHudConfig(), ...(configOverride && typeof configOverride === "object" ? configOverride : {}) };
-    if (!normalizeHudPosition(cfg.hudPosition, null)) {
-      const livePos = readHudPositionFromElement(hud);
-      if (livePos) {
-        writeHudPosition("Building HUD", livePos);
-        cfg.hudPosition = livePos;
-      }
-    }
+    const cfg = configOverride && typeof configOverride === "object"
+      ? { ...getLavaBuildingHudConfig(), ...configOverride }
+      : getLavaBuildingHudConfig();
     const sizeScale = Math.max(0.6, Math.min(1.8, Number(cfg.hudSize || 100) / 100));
     hud.style.minWidth = `${Math.round(220 * sizeScale)}px`;
     hud.style.padding = `${Math.round(10 * sizeScale)}px ${Math.round(12 * sizeScale)}px`;
     hud.style.borderRadius = `${Math.round(10 * sizeScale)}px`;
-    const appliedPos = applyUpgradeHudPosition(hud, cfg, "Building HUD");
-    if (appliedPos) writeHudPosition("Building HUD", appliedPos);
+    applyUpgradeHudPosition(hud, cfg);
+    hud.style.transformOrigin = getHudTransformOrigin(cfg);
+    hud.style.transform = `scale(${sizeScale})`;
 
     const titleRow = cfg.displayTitle !== false
       ? `<div style="font-size:${Math.max(10, Math.round(12 * sizeScale))}px;text-transform:uppercase;letter-spacing:.05em;opacity:.72;margin-bottom:${Math.max(4, Math.round(6 * sizeScale))}px;">Buildings</div>`
@@ -4874,155 +4083,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     lavaBuildingHudState.enabled = false;
     if (lavaBuildingHudState.container) lavaBuildingHudState.container.style.display = "none";
   }
-
-  const HIDE_POPUPS_MODULE_NAME = "Hide pop-ups";
-  const HIDE_POPUPS_LOG_PREFIX = "[ZyroxHidePopups]";
-  const HIDE_POPUPS_TOAST_SELECTOR = ".Toastify__toast";
-  const HIDE_POPUPS_TOAST_CLOSE_SELECTOR = ".Toastify__close-button";
-  const HIDE_POPUPS_ENERGY_POPUP_SELECTOR = ".maxAll.flex.hc";
-  const HIDE_POPUPS_ENERGY_RESOURCE_PATH = "/assets/map/inventory/resources/";
-  const HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR = `img[src*='${HIDE_POPUPS_ENERGY_RESOURCE_PATH}']`;
-
-  const hidePopupsState = {
-    enabled: false,
-    observer: null,
-    hiddenBuildingPopups: 0,
-    hiddenEnergyPopups: 0,
-  };
-
-  function hidePopupsLog(...args) {
-    console.log(HIDE_POPUPS_LOG_PREFIX, ...args);
-  }
-
-  function getHidePopupsConfig() {
-    const cfg = typeof moduleCfg === "function" ? moduleCfg(HIDE_POPUPS_MODULE_NAME) : {};
-    return {
-      hideEnergyPopups: cfg?.hideEnergyPopups !== false,
-      hideBuildingPopups: cfg?.hideBuildingPopups !== false,
-    };
-  }
-
-  function isHidePopupsElement(node) {
-    return node instanceof Element;
-  }
-
-  function isHidePopupsEnergyResourceImage(node) {
-    if (!isHidePopupsElement(node) || node.tagName !== "IMG") return false;
-
-    const src = node.getAttribute("src") || node.src || node.currentSrc || "";
-    return src.includes(HIDE_POPUPS_ENERGY_RESOURCE_PATH);
-  }
-
-  function isHidePopupsEnergyPopup(node) {
-    return isHidePopupsElement(node)
-      && node.matches(HIDE_POPUPS_ENERGY_POPUP_SELECTOR)
-      && Boolean(node.querySelector(HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR));
-  }
-
-  function findHidePopupsEnergyPopup(node) {
-    if (!isHidePopupsElement(node)) return null;
-    if (isHidePopupsEnergyPopup(node)) return node;
-
-    const popup = isHidePopupsEnergyResourceImage(node)
-      ? node.closest(HIDE_POPUPS_ENERGY_POPUP_SELECTOR)
-      : node.querySelector(HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR)?.closest(HIDE_POPUPS_ENERGY_POPUP_SELECTOR);
-    return isHidePopupsEnergyPopup(popup) ? popup : null;
-  }
-
-  function hideBuildingPopup(toast) {
-    const cfg = getHidePopupsConfig();
-    if (!hidePopupsState.enabled
-      || !cfg.hideBuildingPopups
-      || !isHidePopupsElement(toast)
-      || toast.dataset.zyroxPopupHidden === "building") return false;
-
-    toast.dataset.zyroxPopupHidden = "building";
-    toast.style.display = "none";
-    toast.querySelector(HIDE_POPUPS_TOAST_CLOSE_SELECTOR)?.click();
-    hidePopupsState.hiddenBuildingPopups += 1;
-    hidePopupsLog("Hid building popup", toast);
-    return true;
-  }
-
-  function hideEnergyPopup(popup) {
-    const cfg = getHidePopupsConfig();
-    if (!hidePopupsState.enabled
-      || !cfg.hideEnergyPopups
-      || !isHidePopupsEnergyPopup(popup)
-      || popup.dataset.zyroxPopupHidden === "energy") return false;
-
-    popup.dataset.zyroxPopupHidden = "energy";
-    popup.style.display = "none";
-    hidePopupsState.hiddenEnergyPopups += 1;
-    hidePopupsLog("Hid energy/resource popup", popup);
-    return true;
-  }
-
-  function scanHidePopupNode(node) {
-    if (!isHidePopupsElement(node)) return;
-
-    if (node.matches(HIDE_POPUPS_TOAST_SELECTOR)) hideBuildingPopup(node);
-    const energyPopup = findHidePopupsEnergyPopup(node);
-    if (energyPopup) hideEnergyPopup(energyPopup);
-
-    node.querySelectorAll?.(HIDE_POPUPS_TOAST_SELECTOR).forEach(hideBuildingPopup);
-    node.querySelectorAll?.(HIDE_POPUPS_ENERGY_POPUP_SELECTOR).forEach((candidate) => {
-      if (isHidePopupsEnergyPopup(candidate)) hideEnergyPopup(candidate);
-    });
-    node.querySelectorAll?.(HIDE_POPUPS_ENERGY_RESOURCE_IMAGE_SELECTOR).forEach((image) => {
-      const popup = findHidePopupsEnergyPopup(image);
-      if (popup) hideEnergyPopup(popup);
-    });
-  }
-
-  function scanHidePopupsDocument() {
-    scanHidePopupNode(document.documentElement);
-  }
-
-  function observeHidePopups() {
-    if (hidePopupsState.observer || !document.documentElement) return;
-
-    hidePopupsState.observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.type === "attributes") scanHidePopupNode(mutation.target);
-        for (const node of mutation.addedNodes) scanHidePopupNode(node);
-      }
-    });
-
-    hidePopupsState.observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "src"], childList: true, subtree: true });
-  }
-
-  function syncHidePopups() {
-    if (hidePopupsState.enabled) scanHidePopupsDocument();
-  }
-
-  function startHidePopups() {
-    hidePopupsState.enabled = true;
-    observeHidePopups();
-    scanHidePopupsDocument();
-    hidePopupsLog("Enabled");
-  }
-
-  function stopHidePopups() {
-    hidePopupsState.enabled = false;
-    hidePopupsLog("Disabled");
-  }
-
-  window.__zyroxHidePopups = {
-    enable: startHidePopups,
-    disable: stopHidePopups,
-    rescan: scanHidePopupsDocument,
-    sync: syncHidePopups,
-    status() {
-      return {
-        enabled: hidePopupsState.enabled,
-        observer: Boolean(hidePopupsState.observer),
-        ...getHidePopupsConfig(),
-        hiddenBuildingPopups: hidePopupsState.hiddenBuildingPopups,
-        hiddenEnergyPopups: hidePopupsState.hiddenEnergyPopups,
-      };
-    },
-  };
 
   const ANIMATION_SKIP_MODULE_NAME = "Animation skip (UI)";
   const LEGACY_ANIMATION_SKIP_MODULE_NAME = "Animation Skip";
@@ -5099,1895 +4159,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     applyAnimationSkipState(false);
   }
 
-  function getModuleConfigSafe(name, fallback = {}) {
-    if (typeof moduleCfg !== "function") return fallback;
-    try {
-      return moduleCfg(name) || fallback;
-    } catch (_) {
-      return fallback;
-    }
-  }
-
-  const ANTI_AFK_MODULE_NAME = "Anti AFK";
-  const antiAfkState = {
-    intervalId: null,
-    phase: 0,
-  };
-
-  function getAntiAfkConfig() {
-    const cfg = getModuleConfigSafe(ANTI_AFK_MODULE_NAME);
-    const pulseMs = Math.max(4000, Number(cfg.pulseMs) || 12000);
-    return { pulseMs };
-  }
-
-  function dispatchAntiAfkPulse() {
-    const phase = antiAfkState.phase++ % 4;
-    if (phase === 0) {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 6, clientY: 6, bubbles: true }));
-      return;
-    }
-    if (phase === 1) {
-      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 10, clientY: 10, bubbles: true }));
-      return;
-    }
-    if (phase === 2) {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Shift", code: "ShiftLeft", bubbles: true }));
-      return;
-    }
-    document.dispatchEvent(new Event("visibilitychange", { bubbles: false }));
-  }
-
-  function startAntiAfk() {
-    if (antiAfkState.intervalId) clearInterval(antiAfkState.intervalId);
-    const { pulseMs } = getAntiAfkConfig();
-    dispatchAntiAfkPulse();
-    antiAfkState.intervalId = setInterval(() => {
-      dispatchAntiAfkPulse();
-    }, pulseMs);
-  }
-
-  function stopAntiAfk() {
-    if (antiAfkState.intervalId) {
-      clearInterval(antiAfkState.intervalId);
-      antiAfkState.intervalId = null;
-    }
-  }
-
-
-  const LEGACY_STYLES_MODULE_NAME = "Styles";
-  const STYLES_MODULE_NAME = "Theme";
-  const QUESTION_STYLES_DEFAULTS = {
-    topBarBackground: "#0f172a",
-    pageBackground: "#020617",
-    correctBackground: "#166534",
-    wrongBackground: "#7f1d1d",
-    continueButtonBackground: "#0f1e3a",
-    shopButtonBackground: "#431407",
-    questionBackground: "#101827",
-    questionText: "#e0f2fe",
-    option1Background: "#771322",
-    option1Text: "#ffffff",
-    option2Background: "#a85c15",
-    option2Text: "#ffffff",
-    option3Background: "#0d6b33",
-    option3Text: "#ffffff",
-    option4Background: "#076296",
-    option4Text: "#ffffff",
-    questionFontSize: 30,
-    answerFontSize: 22,
-    borderRadius: 18,
-    useGlobalTheme: false,
-    stylePreset: "midnight",
-  };
-  const QUESTION_STYLES_PRESETS = {
-    default: {
-      label: "Default Gimkit",
-      values: {
-        topBarBackground: "#4252af",
-        pageBackground: "#f5f7fb",
-        correctBackground: "#0d6b33",
-        wrongBackground: "#771322",
-        continueButtonBackground: "#076296",
-        shopButtonBackground: "#076296",
-        questionBackground: "#303f9f",
-        questionText: "#ffffff",
-        option1Background: "#771322",
-        option1Text: "#ffffff",
-        option2Background: "#a85c15",
-        option2Text: "#ffffff",
-        option3Background: "#0d6b33",
-        option3Text: "#ffffff",
-        option4Background: "#076296",
-        option4Text: "#ffffff",
-        questionFontSize: 28,
-        answerFontSize: 20,
-        borderRadius: 0,
-        useGlobalTheme: false,
-      },
-    },
-    midnight: {
-      label: "Midnight",
-      values: {
-        topBarBackground: "#0f172a",
-        pageBackground: "#020617",
-        correctBackground: "#166534",
-        wrongBackground: "#7f1d1d",
-        continueButtonBackground: "#0f1e3a",
-        shopButtonBackground: "#431407",
-        questionBackground: "#101827",
-        questionText: "#e0f2fe",
-        option1Background: "#771322",
-        option1Text: "#ffffff",
-        option2Background: "#a85c15",
-        option2Text: "#ffffff",
-        option3Background: "#0d6b33",
-        option3Text: "#ffffff",
-        option4Background: "#076296",
-        option4Text: "#ffffff",
-        questionFontSize: 30,
-        answerFontSize: 22,
-        borderRadius: 18,
-      },
-    },
-    dark: {
-      label: "Dark",
-      values: {
-        topBarBackground: "#030712",
-        pageBackground: "#00030a",
-        correctBackground: "#052e16",
-        wrongBackground: "#1f2937",
-        continueButtonBackground: "#0f1f3d",
-        shopButtonBackground: "#111827",
-        questionBackground: "#050816",
-        questionText: "#e5e7eb",
-        option1Background: "#111827",
-        option1Text: "#f3f4f6",
-        option2Background: "#0b1120",
-        option2Text: "#e5e7eb",
-        option3Background: "#101820",
-        option3Text: "#d1d5db",
-        option4Background: "#111a2e",
-        option4Text: "#dbeafe",
-        questionFontSize: 30,
-        answerFontSize: 22,
-        borderRadius: 12,
-      },
-    },
-    highContrast: {
-      label: "High Contrast",
-      values: {
-        topBarBackground: "#000000",
-        pageBackground: "#ffffff",
-        correctBackground: "#008000",
-        wrongBackground: "#ff0000",
-        continueButtonBackground: "#0000ff",
-        shopButtonBackground: "#ffcc00",
-        questionBackground: "#ffffff",
-        questionText: "#000000",
-        option1Background: "#ff0000",
-        option1Text: "#ffffff",
-        option2Background: "#ffcc00",
-        option2Text: "#000000",
-        option3Background: "#008000",
-        option3Text: "#ffffff",
-        option4Background: "#0000ff",
-        option4Text: "#ffffff",
-        questionFontSize: 32,
-        answerFontSize: 24,
-        borderRadius: 8,
-      },
-    },
-    pastel: {
-      label: "Pastel",
-      values: {
-        topBarBackground: "#6d5bd0",
-        pageBackground: "#fff7ed",
-        correctBackground: "#bbf7d0",
-        wrongBackground: "#fecaca",
-        continueButtonBackground: "#93c5fd",
-        shopButtonBackground: "#fde68a",
-        questionBackground: "#f8fafc",
-        questionText: "#1f2937",
-        option1Background: "#fecaca",
-        option1Text: "#451a1a",
-        option2Background: "#fde68a",
-        option2Text: "#3f2a00",
-        option3Background: "#bbf7d0",
-        option3Text: "#12351f",
-        option4Background: "#93c5fd",
-        option4Text: "#10233f",
-        questionFontSize: 28,
-        answerFontSize: 21,
-        borderRadius: 22,
-      },
-    },
-    forest: {
-      label: "Forest",
-      values: {
-        topBarBackground: "#1f3d2b",
-        pageBackground: "#102015",
-        correctBackground: "#2f6b3f",
-        wrongBackground: "#3f2f1f",
-        continueButtonBackground: "#27452f",
-        shopButtonBackground: "#24381e",
-        questionBackground: "#263a24",
-        questionText: "#f4f7e8",
-        option1Background: "#25422a",
-        option1Text: "#edf7df",
-        option2Background: "#24381e",
-        option2Text: "#f4f7e8",
-        option3Background: "#1f5a32",
-        option3Text: "#ecfdf5",
-        option4Background: "#224235",
-        option4Text: "#e0f2f1",
-        questionFontSize: 30,
-        answerFontSize: 22,
-        borderRadius: 12,
-      },
-    },
-  };
-  const QUESTION_STYLE_SCREEN_SELECTOR = '[style*="opacity:"][style*="translateY(0%)"]';
-  const QUESTION_STYLE_SHELL_SELECTOR = ".gAlRHP, .dujAvP, .cZgLFG, .cChptk, .ljtfrY, .dDfMyc, .dBwWbX";
-  const QUESTION_STYLE_INTERACTIVE_SELECTOR = [
-    "button",
-    '[role="button"]',
-    "[tabindex]",
-    '[class*="answer" i]',
-    '[class*="option" i]',
-    '[style*="cursor: pointer" i]',
-  ].join(",");
-  const QUESTION_STYLE_CONTINUE_TEXT_PATTERN = /(?:^|\b)(continue|next|ok|okay)(?:\b|$)/i;
-  const QUESTION_STYLE_SHOP_TEXT_PATTERN = /(?:^|\b)(shop|open shop|store)(?:\b|$)/i;
-  const QUESTION_STYLE_ACTION_TEXT_MAX_LENGTH = 90;
-  const questionStylesState = {
-    observer: null,
-    changedElements: new Set(),
-    originalStyles: new WeakMap(),
-    syncQueued: false,
-    syncFrameId: null,
-    burstFrameId: null,
-    burstFramesRemaining: 0,
-    currentRoot: null,
-  };
-
-  function getStylesConfigStore() {
-    if (!(state.moduleConfig instanceof Map)) return null;
-    let cfg = state.moduleConfig.get(STYLES_MODULE_NAME);
-    if ((!cfg || typeof cfg !== "object") && state.moduleConfig.has(LEGACY_STYLES_MODULE_NAME)) {
-      cfg = state.moduleConfig.get(LEGACY_STYLES_MODULE_NAME);
-      if (cfg && typeof cfg === "object") {
-        state.moduleConfig.set(STYLES_MODULE_NAME, cfg);
-        state.moduleConfig.delete(LEGACY_STYLES_MODULE_NAME);
-      }
-    }
-    if (!cfg || typeof cfg !== "object") {
-      cfg = { keybind: null, ...QUESTION_STYLES_DEFAULTS };
-      state.moduleConfig.set(STYLES_MODULE_NAME, cfg);
-    }
-    for (const [key, value] of Object.entries(QUESTION_STYLES_DEFAULTS)) {
-      if (cfg[key] === undefined) cfg[key] = value;
-    }
-    return cfg;
-  }
-
-  function getStylesConfig() {
-    const cfg = getStylesConfigStore() || {};
-    return { ...QUESTION_STYLES_DEFAULTS, ...cfg };
-  }
-
-  function applyStylesPresetToConfig(cfg, presetName) {
-    if (!cfg || typeof cfg !== "object") return;
-    const preset = QUESTION_STYLES_PRESETS[presetName];
-    if (!preset) return;
-    Object.assign(cfg, preset.values, { stylePreset: presetName });
-  }
-
-  function isStylesHexColor(value, fallback) {
-    const color = String(value || "").trim();
-    return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
-  }
-  function getComputedBackgroundValue(element, fallback) {
-    if (!(element instanceof HTMLElement)) return fallback;
-    const computed = window.getComputedStyle(element);
-    return computed.backgroundImage && computed.backgroundImage !== "none" ? computed.backgroundImage : computed.backgroundColor || fallback;
-  }
-
-  function parseCssRgb(value) {
-    const match = String(value || "").match(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/i);
-    if (!match) return null;
-    return {
-      r: Math.max(0, Math.min(255, Number(match[1]) || 0)),
-      g: Math.max(0, Math.min(255, Number(match[2]) || 0)),
-      b: Math.max(0, Math.min(255, Number(match[3]) || 0)),
-      a: match[4] === undefined ? 1 : Math.max(0, Math.min(1, Number(match[4]) || 0)),
-    };
-  }
-
-  function opaqueCssColorOverBlack(value, fallback = "#000000") {
-    const parsed = parseCssRgb(value);
-    if (!parsed) return value && value !== "transparent" ? value : fallback;
-    const r = Math.round(parsed.r * parsed.a);
-    const g = Math.round(parsed.g * parsed.a);
-    const b = Math.round(parsed.b * parsed.a);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-
-  function getComputedOpaqueBackgroundColor(element, fallback = "#000000") {
-    if (!(element instanceof HTMLElement)) return fallback;
-    return opaqueCssColorOverBlack(window.getComputedStyle(element).backgroundColor, fallback);
-  }
-
-  function darkenCssBackground(value, factor = 0.72) {
-    const darkenPart = (r, g, b, alpha = null) => {
-      const nr = Math.max(0, Math.min(255, Math.round(Number(r) * factor)));
-      const ng = Math.max(0, Math.min(255, Math.round(Number(g) * factor)));
-      const nb = Math.max(0, Math.min(255, Math.round(Number(b) * factor)));
-      return alpha == null ? `rgb(${nr}, ${ng}, ${nb})` : `rgba(${nr}, ${ng}, ${nb}, ${alpha})`;
-    };
-    return String(value || "").replace(/rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)/gi, (_match, r, g, b, a) => darkenPart(r, g, b, a ?? null));
-  }
-
-  function cssBackgroundLayer(value) {
-    const background = String(value || "").trim();
-    if (!background || background === "transparent") return "";
-    if (/gradient\(|url\(/i.test(background)) return background;
-    return `linear-gradient(${background}, ${background})`;
-  }
-
-  function composeGlobalThemeLayeredBackground(overlayBackground, baseBackground = "#000000") {
-    const baseLayer = cssBackgroundLayer(baseBackground) || baseBackground;
-    const overlayLayer = cssBackgroundLayer(overlayBackground);
-    return overlayLayer ? `${overlayLayer}, ${baseLayer}` : baseLayer;
-  }
-
-  function composeGlobalThemeButtonBackground(globalTheme) {
-    if (!globalTheme) return "";
-    return composeGlobalThemeLayeredBackground(globalTheme.activeBackground, globalTheme.inactiveBackground || "#000000");
-  }
-
-  function getStylesGlobalThemeValues() {
-    const uiRoot = document.querySelector(".zyrox-root");
-    const activeModule = uiRoot?.querySelector?.(".zyrox-module.active")
-      || state.moduleItems?.get?.(STYLES_MODULE_NAME)
-      || uiRoot?.querySelector?.(".zyrox-module");
-    const inactiveModule = uiRoot?.querySelector?.(".zyrox-module:not(.active)")
-      || uiRoot?.querySelector?.(".zyrox-module");
-    const categoryHeader = uiRoot?.querySelector?.(".zyrox-panel-header");
-    const activeFallback = "linear-gradient(90deg, rgba(255, 61, 61, 0.35), rgba(60, 18, 18, 0.82))";
-    const inactiveFallback = "#000000";
-    const categoryFallback = "linear-gradient(90deg, rgba(255, 74, 74, 0.24), rgba(60, 18, 18, 0.92))";
-    const uiComputed = uiRoot instanceof HTMLElement ? window.getComputedStyle(uiRoot) : null;
-    const radiusFallback = uiComputed?.getPropertyValue("--zyx-radius-md")?.trim() || `${QUESTION_STYLES_DEFAULTS.borderRadius}px`;
-    const activeComputed = activeModule instanceof HTMLElement ? window.getComputedStyle(activeModule) : null;
-    const categoryBackground = getComputedBackgroundValue(categoryHeader, categoryFallback);
-    const activeBackground = getComputedBackgroundValue(activeModule, activeFallback);
-    const inactiveBackground = getComputedOpaqueBackgroundColor(inactiveModule, inactiveFallback);
-    return {
-      activeBackground,
-      inactiveBackground,
-      buttonBackground: composeGlobalThemeButtonBackground({ activeBackground, inactiveBackground }),
-      categoryBackground: composeGlobalThemeLayeredBackground(activeBackground || darkenCssBackground(categoryBackground, 0.62), "#000000"),
-      borderRadius: activeComputed?.borderRadius || radiusFallback,
-    };
-  }
-
-  function resolveStylesBackground(value, fallback) {
-    return isStylesHexColor(value, fallback);
-  }
-
-  function clampStylesNumber(value, min, max, fallback) {
-    const parsed = Number(value);
-    const fallbackNumber = Number(fallback);
-    const nextValue = Number.isFinite(parsed) ? parsed : fallbackNumber;
-    return Math.max(min, Math.min(max, Number.isFinite(nextValue) ? nextValue : min));
-  }
-
-
-  function getZyroxOwnUiSelector() {
-    return [
-      ".zyrox-root",
-      ".zyrox-config-backdrop",
-      ".zyrox-config",
-      ".zyrox-settings",
-      ".zyrox-answer-popup",
-      ".zyrox-upgrade-hud",
-      ".zyrox-ability-hud",
-      "#zyrox-menu-shell",
-      "#zyrox-config-menu",
-      "#zyrox-settings-menu",
-      "#zyrox-config-backdrop",
-      "#zyrox-welcome-card",
-      "#zyrox-target-menu",
-    ].join(",");
-  }
-
-  function isQuestionStyleElement(value) {
-    return value instanceof HTMLElement && !value.closest(getZyroxOwnUiSelector());
-  }
-
-  function isQuestionStyleVisible(element) {
-    if (!isQuestionStyleElement(element)) return false;
-    const style = window.getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
-    const rect = element.getBoundingClientRect();
-    return rect.width >= 20 && rect.height >= 20 && rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
-  }
-
-  function rememberQuestionStyle(element, property) {
-    if (!isQuestionStyleElement(element)) return;
-    let original = questionStylesState.originalStyles.get(element);
-    if (!original) {
-      original = {};
-      questionStylesState.originalStyles.set(element, original);
-      questionStylesState.changedElements.add(element);
-    }
-    if (!Object.prototype.hasOwnProperty.call(original, property)) {
-      original[property] = {
-        value: element.style.getPropertyValue(property) || "",
-        priority: element.style.getPropertyPriority(property) || "",
-      };
-    }
-  }
-
-  function setQuestionInlineStyle(element, property, value) {
-    if (!isQuestionStyleElement(element)) return;
-    const nextValue = String(value ?? "");
-    rememberQuestionStyle(element, property);
-    if (property === "background") rememberQuestionStyle(element, "background-color");
-    if (element.style.getPropertyValue(property) === nextValue && element.style.getPropertyPriority(property) === "important") return;
-    element.style.setProperty(property, nextValue, "important");
-  }
-
-  function restoreQuestionStyleElement(element) {
-    const original = questionStylesState.originalStyles.get(element);
-    if (!original || !(element instanceof HTMLElement)) return false;
-    for (const [property, snapshot] of Object.entries(original)) {
-      if (snapshot?.value) element.style.setProperty(property, snapshot.value, snapshot.priority || "");
-      else element.style.removeProperty(property);
-    }
-    questionStylesState.changedElements.delete(element);
-    return true;
-  }
-
-  function restoreQuestionStyles() {
-    for (const element of questionStylesState.changedElements) restoreQuestionStyleElement(element);
-    questionStylesState.changedElements.clear();
-    questionStylesState.originalStyles = new WeakMap();
-  }
-
-  function restoreExcludedQuestionNavigationStyles() {
-    for (const element of [...questionStylesState.changedElements]) {
-      if (isQuestionExcludedNavigationAction(element)) restoreQuestionStyleElement(element);
-    }
-  }
-
-  function getQuestionStyleInteractiveText(element) {
-    return String(element?.textContent || element?.getAttribute?.("aria-label") || "").replace(/\s+/g, " ").trim();
-  }
-
-  function isQuestionExcludedNavigationAction(element) {
-    return element instanceof HTMLElement
-      && Boolean(element.closest(".MuiListItem-root, .MuiDrawer-root, .MuiList-root"));
-  }
-
-  function isQuestionStyleClickableElement(element) {
-    if (!(element instanceof HTMLElement)) return false;
-    const tagName = String(element.tagName || "").toLowerCase();
-    const role = String(element.getAttribute?.("role") || "").toLowerCase();
-    const className = String(element.className || "");
-    const style = window.getComputedStyle(element);
-    return tagName === "button"
-      || tagName === "a"
-      || role === "button"
-      || role === "link"
-      || style.cursor === "pointer"
-      || element.tabIndex >= 0
-      || /(?:^|[-_\s])(btn|button)(?:[-_\s]|$)/i.test(className);
-  }
-
-  function isQuestionActionTextMatch(element, textPattern) {
-    const text = getQuestionStyleInteractiveText(element);
-    return Boolean(text && text.length <= QUESTION_STYLE_ACTION_TEXT_MAX_LENGTH && textPattern.test(text));
-  }
-
-  function findQuestionActionSurface(element) {
-    if (!isQuestionStyleVisible(element) || isQuestionExcludedNavigationAction(element)) return null;
-    let current = element;
-    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
-      if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
-      if (isQuestionStyleClickableElement(current) && isQuestionStyleVisible(current)) return current;
-    }
-    const rect = element.getBoundingClientRect();
-    if (elementHasVisibleBackground(element) && rect.width <= 340 && rect.height <= 120) return element;
-    return null;
-  }
-
-  function isLikelyQuestionActionButton(element, textPattern) {
-    return isQuestionActionTextMatch(element, textPattern) && Boolean(findQuestionActionSurface(element));
-  }
-
-  function addQuestionActionCandidate(buttons, seen, element, textPattern, limit) {
-    if (!(element instanceof HTMLElement) || isQuestionExcludedNavigationAction(element) || !isQuestionActionTextMatch(element, textPattern)) return false;
-    const surface = findQuestionActionSurface(element);
-    if (!(surface instanceof HTMLElement) || seen.has(surface)) return false;
-    seen.add(surface);
-    buttons.push(surface);
-    return buttons.length >= limit;
-  }
-
-  function getQuestionActionButtonCandidates(textPattern, root = document, limit = 6) {
-    const searchRoot = root && typeof root.querySelectorAll === "function" ? root : document;
-    const buttons = [];
-    const seen = new Set();
-    for (const element of searchRoot.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (addQuestionActionCandidate(buttons, seen, element, textPattern, limit)) return buttons;
-    }
-    const walkerRoot = searchRoot === document ? document.body : searchRoot;
-    if (walkerRoot instanceof HTMLElement) {
-      const walker = document.createTreeWalker(walkerRoot, NodeFilter.SHOW_ELEMENT, {
-        acceptNode(node) {
-          if (!(node instanceof HTMLElement) || !isQuestionStyleElement(node)) return NodeFilter.FILTER_REJECT;
-          if (isQuestionExcludedNavigationAction(node)) return NodeFilter.FILTER_REJECT;
-          if (!node.children.length && isQuestionActionTextMatch(node, textPattern)) return NodeFilter.FILTER_ACCEPT;
-          return NodeFilter.FILTER_SKIP;
-        },
-      });
-      let scanned = 0;
-      for (let node = walker.nextNode(); node && scanned < 3000; node = walker.nextNode(), scanned += 1) {
-        if (addQuestionActionCandidate(buttons, seen, node, textPattern, limit)) break;
-      }
-    }
-    return buttons;
-  }
-
-  function getQuestionContinueButtonCandidates(root = document) {
-    return getQuestionActionButtonCandidates(QUESTION_STYLE_CONTINUE_TEXT_PATTERN, root);
-  }
-
-  function getQuestionShopButtonCandidates(root = document) {
-    return getQuestionActionButtonCandidates(QUESTION_STYLE_SHOP_TEXT_PATTERN, root);
-  }
-
-  function getQuestionOptionCandidates(root) {
-    if (!isQuestionStyleElement(root)) return [];
-    const seen = new Set();
-    const options = [];
-    for (const element of root.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (!isQuestionStyleVisible(element) || seen.has(element)) continue;
-      const rect = element.getBoundingClientRect();
-      const text = String(element.textContent || "").trim();
-      if (!text || rect.width < 70 || rect.height < 30) continue;
-      if (element.closest(getZyroxOwnUiSelector())) continue;
-      seen.add(element);
-      options.push(element);
-    }
-    return options
-      .sort((a, b) => {
-        const ar = a.getBoundingClientRect();
-        const br = b.getBoundingClientRect();
-        return ar.top === br.top ? ar.left - br.left : ar.top - br.top;
-      })
-      .slice(0, 4);
-  }
-
-  function scoreQuestionStyleRoot(element) {
-    if (!isQuestionStyleVisible(element)) return -1;
-    const text = String(element.textContent || "").trim();
-    if (text.length < 4) return -1;
-    const interactiveTotal = element.querySelectorAll?.(QUESTION_STYLE_INTERACTIVE_SELECTOR).length || 0;
-    if (interactiveTotal > 8 && !/question|answer|option|prompt/i.test(element.className || "")) return -1;
-    const options = getQuestionOptionCandidates(element);
-    if (options.length < 2) return -1;
-    const rect = element.getBoundingClientRect();
-    let score = options.length * 30;
-    if (options.length === 4) score += 45;
-    if (/question|answer|option|prompt/i.test(element.className || "")) score += 20;
-    const inlineStyle = element.getAttribute("style") || "";
-    if (/opacity\s*:/.test(inlineStyle) && /translateY\(0%\)/.test(inlineStyle)) score += 35;
-    if (rect.width > 250 && rect.height > 180) score += 15;
-    return score;
-  }
-
-  function collectQuestionStyleCandidates() {
-    const selectors = [
-      QUESTION_STYLE_SCREEN_SELECTOR,
-      '[style*="translateY(0%)"]',
-      '[class*="question" i]',
-      '[class*="answer" i]',
-      "main",
-      "section",
-    ].join(",");
-    const candidates = new Set();
-    for (const element of document.querySelectorAll(selectors)) {
-      if (isQuestionStyleElement(element)) candidates.add(element);
-    }
-
-    let interactiveCount = 0;
-    for (const element of document.querySelectorAll(QUESTION_STYLE_INTERACTIVE_SELECTOR)) {
-      if (!isQuestionStyleElement(element)) continue;
-      const text = String(element.textContent || "").trim();
-      if (!text) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.width < 70 || rect.height < 30) continue;
-      interactiveCount += 1;
-      let parent = element.parentElement;
-      for (let depth = 0; parent && depth < 5; depth += 1, parent = parent.parentElement) {
-        if (parent.matches?.("main,section") || parent.querySelectorAll?.(QUESTION_STYLE_INTERACTIVE_SELECTOR).length >= 2) {
-          if (isQuestionStyleElement(parent)) candidates.add(parent);
-        }
-      }
-      if (interactiveCount >= 8) break;
-    }
-    return candidates;
-  }
-
-  function findQuestionStyleRoot() {
-    const candidates = collectQuestionStyleCandidates();
-    let best = null;
-    let bestScore = -1;
-    for (const candidate of candidates) {
-      const score = scoreQuestionStyleRoot(candidate);
-      if (score > bestScore) {
-        best = candidate;
-        bestScore = score;
-      }
-    }
-    return bestScore >= 0 ? best : null;
-  }
-
-  function hasQuestionStyleShell() {
-    return Boolean(document.querySelector(QUESTION_STYLE_SHELL_SELECTOR));
-  }
-
-  function hasLikelyQuestionStyleSurface(hasShell = hasQuestionStyleShell()) {
-    if (hasShell) return true;
-    if (isQuestionStyleVisible(questionStylesState.currentRoot)) return true;
-    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
-    if (isQuestionStyleVisible(direct)) return true;
-    if (getQuestionContinueButtonCandidates().length > 0) return true;
-    if (getQuestionShopButtonCandidates().length > 0) return true;
-    if (getQuestionTopBarCandidates(1).length > 0) return true;
-    return false;
-  }
-
-  function findQuestionDisplay(root, options) {
-    if (!isQuestionStyleElement(root)) return null;
-    const optionSet = new Set(options || []);
-    const optionTop = options?.length ? Math.min(...options.map((option) => option.getBoundingClientRect().top)) : Infinity;
-    const selectors = ["h1", "h2", "h3", '[class*="question" i]', '[class*="prompt" i]', '[data-testid*="question" i]', "p", "div"].join(",");
-    let best = null;
-    let bestScore = -1;
-    for (const element of root.querySelectorAll(selectors)) {
-      if (!isQuestionStyleVisible(element) || optionSet.has(element)) continue;
-      if ([...optionSet].some((option) => element.contains(option) || option.contains(element))) continue;
-      const text = String(element.textContent || "").trim();
-      if (text.length < 4 || text.length > 600) continue;
-      const rect = element.getBoundingClientRect();
-      if (rect.top > optionTop + 8) continue;
-      let score = Math.min(text.length, 120);
-      if (/question|prompt/i.test(element.className || "")) score += 35;
-      if (/^H[1-3]$/.test(element.tagName)) score += 25;
-      score += Math.min(rect.width, 900) / 25;
-      if (rect.bottom <= optionTop + 12) score += 30;
-      if (score > bestScore) {
-        best = element;
-        bestScore = score;
-      }
-    }
-    return best || root;
-  }
-
-
-  function getElementChild(element, index) {
-    if (!isQuestionStyleElement(element)) return null;
-    const child = element.children?.[index];
-    return child instanceof HTMLElement ? child : null;
-  }
-
-  function findReferenceQuestionTargets() {
-    let root = questionStylesState.currentRoot;
-    if (!isQuestionStyleVisible(root)) root = null;
-    if (!root) {
-      const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
-      root = isQuestionStyleVisible(direct) ? direct : null;
-    }
-    if (!root) return null;
-
-    const questionDisplay = getElementChild(getElementChild(getElementChild(getElementChild(root, 0), 0), 0), 0);
-    const optionsWrap = getElementChild(root, 1);
-    const options = [];
-    if (optionsWrap) {
-      for (const option of Array.from(optionsWrap.children || [])) {
-        if (!(option instanceof HTMLElement)) continue;
-        const optionDisplay = getElementChild(option, 0) || option;
-        if (isQuestionStyleVisible(optionDisplay)) options.push(optionDisplay);
-        if (options.length >= 4) break;
-      }
-    }
-    if (questionDisplay && options.length >= 2) {
-      questionStylesState.currentRoot = root;
-      return { root, question: questionDisplay, options };
-    }
-    return null;
-  }
-
-  function captureQuestionStyleRootFromNode(node) {
-    if (!(node instanceof HTMLElement)) return;
-    if (node.matches?.(QUESTION_STYLE_SCREEN_SELECTOR)) {
-      questionStylesState.currentRoot = node;
-      return;
-    }
-    const found = node.querySelector?.(QUESTION_STYLE_SCREEN_SELECTOR);
-    if (found instanceof HTMLElement) questionStylesState.currentRoot = found;
-  }
-
-  function findQuestionStyleTargets() {
-    const referenceTargets = findReferenceQuestionTargets();
-    if (referenceTargets) return referenceTargets;
-    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
-    const root = isQuestionStyleVisible(direct) ? direct : null;
-    if (!root) return null;
-    const options = getQuestionOptionCandidates(root);
-    if (options.length < 2) return null;
-    const question = findQuestionDisplay(root, options);
-    return { root, question, options };
-  }
-
-  function applyQuestionTextInlineStyles(element, color, fontSizePx) {
-    if (!isQuestionStyleElement(element)) return;
-    setQuestionInlineStyle(element, "color", color);
-    setQuestionInlineStyle(element, "font-size", `${fontSizePx}px`);
-    const descendants = Array.from(element.querySelectorAll("*")).filter((child) => child instanceof HTMLElement && String(child.textContent || "").trim());
-    for (const child of descendants.slice(0, 24)) {
-      setQuestionInlineStyle(child, "color", color);
-      setQuestionInlineStyle(child, "font-size", `${fontSizePx}px`);
-    }
-  }
-
-  function elementHasVisibleBackground(element) {
-    if (!(element instanceof HTMLElement)) return false;
-    const computed = window.getComputedStyle(element);
-    if (computed.backgroundImage && computed.backgroundImage !== "none") return true;
-    const parsed = parseCssRgb(computed.backgroundColor);
-    return Boolean(parsed && parsed.a > 0.01);
-  }
-
-  function isLikelyQuestionTopBar(element) {
-    if (!isQuestionStyleVisible(element) || !elementHasVisibleBackground(element)) return false;
-    const tagName = String(element.tagName || "").toLowerCase();
-    if (["button", "a", "canvas", "svg", "img", "input", "select", "textarea"].includes(tagName)) return false;
-    const rect = element.getBoundingClientRect();
-    const viewportWidth = Math.max(320, window.innerWidth || 0);
-    if (rect.top > 120 || rect.bottom < 12) return false;
-    if (rect.width < Math.min(280, viewportWidth * 0.45)) return false;
-    if (rect.height < 28 || rect.height > 120) return false;
-    const text = getQuestionStyleInteractiveText(element);
-    if (QUESTION_STYLE_CONTINUE_TEXT_PATTERN.test(text) || QUESTION_STYLE_SHOP_TEXT_PATTERN.test(text)) return false;
-    return true;
-  }
-
-  function getQuestionTopBarCandidates(limit = 4) {
-    const candidates = new Map();
-    const addCandidate = (element, score = 0) => {
-      if (!(element instanceof HTMLElement) || candidates.has(element) || !isLikelyQuestionTopBar(element)) return;
-      const rect = element.getBoundingClientRect();
-      const widthRatio = rect.width / Math.max(1, window.innerWidth || rect.width);
-      candidates.set(element, score + (1 - Math.min(1, Math.max(0, rect.top) / 120)) * 40 + widthRatio * 35 - Math.abs(rect.height - 56) / 4);
-    };
-
-    for (const element of document.querySelectorAll(".gAlRHP, .dujAvP, header, nav, [class*='top' i], [class*='bar' i], [class*='header' i]")) {
-      addCandidate(element, 35);
-    }
-
-    let scanned = 0;
-    for (const element of document.body?.querySelectorAll?.("*") || []) {
-      if (scanned >= 2500) break;
-      scanned += 1;
-      addCandidate(element, 0);
-    }
-
-    return [...candidates.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([element]) => element);
-  }
-
-  function applyQuestionTopBarSurface(element, background) {
-    if (!isQuestionStyleElement(element)) return;
-    setQuestionInlineStyle(element, "background", background);
-    setQuestionInlineStyle(element, "background-color", background);
-    const descendants = Array.from(element.querySelectorAll("div,header,nav,section"))
-      .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
-    for (const child of descendants.slice(0, 8)) {
-      setQuestionInlineStyle(child, "background", background);
-      setQuestionInlineStyle(child, "background-color", background);
-    }
-  }
-
-  function isQuestionButtonPaintSurface(element) {
-    if (!(element instanceof HTMLElement) || !isQuestionStyleVisible(element) || isQuestionExcludedNavigationAction(element)) return false;
-    const rect = element.getBoundingClientRect();
-    if (rect.width > 520 || rect.height > 180) return false;
-    return isQuestionStyleClickableElement(element) || elementHasVisibleBackground(element);
-  }
-
-  function getQuestionButtonPaintTargets(element) {
-    const targets = new Set();
-    if (!isQuestionStyleElement(element) || isQuestionExcludedNavigationAction(element)) return targets;
-    if (element instanceof HTMLElement) targets.add(element);
-
-    const actionSurface = findQuestionActionSurface(element);
-    if (actionSurface instanceof HTMLElement) targets.add(actionSurface);
-
-    let current = element.parentElement;
-    for (let depth = 0; current instanceof HTMLElement && depth < 5; depth += 1, current = current.parentElement) {
-      if (!isQuestionStyleElement(current) || current === document.body || current === document.documentElement) break;
-      if (isQuestionButtonPaintSurface(current)) targets.add(current);
-    }
-    return targets;
-  }
-
-  function paintQuestionButtonTarget(element, background, borderRadiusValue, baseBackground) {
-    setQuestionInlineStyle(element, "background", background);
-    setQuestionInlineStyle(element, "background-color", baseBackground);
-    if (borderRadiusValue) setQuestionInlineStyle(element, "border-radius", borderRadiusValue);
-  }
-
-  function applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground = background) {
-    if (!isQuestionStyleElement(element)) return;
-    const targets = getQuestionButtonPaintTargets(element);
-    if (!targets.size && element instanceof HTMLElement) targets.add(element);
-    for (const target of targets) {
-      paintQuestionButtonTarget(target, background, borderRadiusValue, baseBackground);
-      const descendants = Array.from(target.querySelectorAll("button,[role='button'],a,div,span"))
-        .filter((child) => child instanceof HTMLElement && elementHasVisibleBackground(child));
-      for (const child of descendants.slice(0, 12)) {
-        paintQuestionButtonTarget(child, background, borderRadiusValue, baseBackground);
-      }
-    }
-  }
-
-  function applyGlobalThemeButtonSurface(element, background, borderRadiusValue, baseBackground = "#000000") {
-    applyQuestionButtonSurface(element, background, borderRadiusValue, baseBackground);
-  }
-
-  function getQuestionStyleScopeRoots(targets = null) {
-    const roots = new Set();
-    const addRoot = (element) => {
-      if (!isQuestionStyleElement(element)) return;
-      roots.add(element);
-      const shell = element.closest?.(QUESTION_STYLE_SCREEN_SELECTOR);
-      if (isQuestionStyleElement(shell)) roots.add(shell);
-      const section = element.closest?.("main,section");
-      if (isQuestionStyleElement(section)) roots.add(section);
-    };
-    addRoot(targets?.root);
-    addRoot(questionStylesState.currentRoot);
-    const direct = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
-    addRoot(direct);
-    for (const shellElement of document.querySelectorAll(QUESTION_STYLE_SHELL_SELECTOR)) addRoot(shellElement);
-    return roots;
-  }
-
-  function queryQuestionStyleScope(scopeRoots, selector) {
-    const elements = new Set();
-    for (const root of scopeRoots) {
-      if (!(root instanceof HTMLElement)) continue;
-      if (root.matches?.(selector)) elements.add(root);
-      for (const element of root.querySelectorAll(selector)) elements.add(element);
-    }
-    return elements;
-  }
-
-  function applyQuestionShellStyles(cfg, globalTheme = null, targets = null) {
-    const topBarBackground = globalTheme?.categoryBackground || resolveStylesBackground(cfg.topBarBackground, QUESTION_STYLES_DEFAULTS.topBarBackground);
-    const pageBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.pageBackground, QUESTION_STYLES_DEFAULTS.pageBackground);
-    const continueBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.continueButtonBackground, QUESTION_STYLES_DEFAULTS.continueButtonBackground);
-    const shopBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg.shopButtonBackground, QUESTION_STYLES_DEFAULTS.shopButtonBackground);
-    const borderRadiusValue = globalTheme?.borderRadius || `${clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius)}px`;
-    const scopeRoots = getQuestionStyleScopeRoots(targets);
-
-    const topBars = new Set([
-      ...queryQuestionStyleScope(scopeRoots, ".gAlRHP, .dujAvP"),
-      ...getQuestionTopBarCandidates(),
-    ]);
-    for (const element of topBars) {
-      if (element instanceof HTMLElement) applyQuestionTopBarSurface(element, topBarBackground);
-    }
-    for (const element of queryQuestionStyleScope(scopeRoots, ".cZgLFG, .cChptk")) {
-      if (element instanceof HTMLElement) setQuestionInlineStyle(element, "background", pageBackground);
-    }
-    const continueButtons = new Set([
-      ...queryQuestionStyleScope(scopeRoots, ".ljtfrY, .dDfMyc"),
-      ...getQuestionContinueButtonCandidates(),
-    ]);
-    for (const element of continueButtons) {
-      if (!(element instanceof HTMLElement)) continue;
-      applyQuestionButtonSurface(element, continueBackground, borderRadiusValue, globalTheme ? pageBackground : continueBackground);
-    }
-    const shopButtons = new Set([
-      ...queryQuestionStyleScope(scopeRoots, ".dBwWbX"),
-      ...getQuestionShopButtonCandidates(),
-    ]);
-    for (const element of shopButtons) {
-      if (!(element instanceof HTMLElement)) continue;
-      applyQuestionButtonSurface(element, shopBackground, borderRadiusValue, globalTheme ? pageBackground : shopBackground);
-    }
-  }
-
-  function applyQuestionStyles() {
-    const hasShell = hasQuestionStyleShell();
-    if (!hasLikelyQuestionStyleSurface(hasShell)) return false;
-
-    const targets = findQuestionStyleTargets();
-    const hasContinueButton = getQuestionContinueButtonCandidates().length > 0;
-    const hasShopButton = getQuestionShopButtonCandidates().length > 0;
-    const hasTopBar = getQuestionTopBarCandidates(1).length > 0;
-    if (!targets && !hasShell && !hasContinueButton && !hasShopButton && !hasTopBar) return false;
-
-    restoreExcludedQuestionNavigationStyles();
-
-    const cfg = getStylesConfig();
-    const globalTheme = cfg.useGlobalTheme ? getStylesGlobalThemeValues() : null;
-    applyQuestionShellStyles(cfg, globalTheme, targets);
-    if (!targets) return true;
-    const questionFontSize = clampStylesNumber(cfg.questionFontSize, 12, 64, QUESTION_STYLES_DEFAULTS.questionFontSize);
-    const answerFontSize = clampStylesNumber(cfg.answerFontSize, 10, 48, QUESTION_STYLES_DEFAULTS.answerFontSize);
-    const borderRadius = clampStylesNumber(cfg.borderRadius, 0, 36, QUESTION_STYLES_DEFAULTS.borderRadius);
-    const borderRadiusValue = globalTheme?.borderRadius || `${borderRadius}px`;
-    const questionBackground = globalTheme?.inactiveBackground || resolveStylesBackground(cfg.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
-
-    if (targets.question) {
-      setQuestionInlineStyle(targets.question, "background", questionBackground);
-      setQuestionInlineStyle(targets.question, "border-radius", borderRadiusValue);
-      applyQuestionTextInlineStyles(targets.question, isStylesHexColor(cfg.questionText, QUESTION_STYLES_DEFAULTS.questionText), questionFontSize);
-    }
-
-    targets.options.forEach((option, index) => {
-      const optionNumber = index + 1;
-      const optionBackground = globalTheme?.buttonBackground || resolveStylesBackground(cfg[`option${optionNumber}Background`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Background`]);
-      if (globalTheme) applyGlobalThemeButtonSurface(option, optionBackground, borderRadiusValue, globalTheme.inactiveBackground);
-      else setQuestionInlineStyle(option, "background", optionBackground);
-      applyQuestionTextInlineStyles(option, isStylesHexColor(cfg[`option${optionNumber}Text`], QUESTION_STYLES_DEFAULTS[`option${optionNumber}Text`]), answerFontSize);
-      setQuestionInlineStyle(option, "border-radius", borderRadiusValue);
-    });
-    return true;
-  }
-
-  function isQuestionStylesEnabled() {
-    return Boolean(state.enabledModules.has(STYLES_MODULE_NAME) || state.modules.get(STYLES_MODULE_NAME)?.enabled);
-  }
-
-  function runQuestionStylesBurst(frameCount = 6) {
-    if (!isQuestionStylesEnabled()) return;
-    questionStylesState.burstFramesRemaining = Math.max(questionStylesState.burstFramesRemaining || 0, frameCount);
-    if (questionStylesState.burstFrameId) return;
-    const tick = () => {
-      questionStylesState.burstFrameId = null;
-      if (!isQuestionStylesEnabled()) {
-        questionStylesState.burstFramesRemaining = 0;
-        return;
-      }
-      if (!applyQuestionStyles()) {
-        questionStylesState.burstFramesRemaining = 0;
-        return;
-      }
-      questionStylesState.burstFramesRemaining -= 1;
-      if (questionStylesState.burstFramesRemaining > 0) {
-        questionStylesState.burstFrameId = requestAnimationFrame(tick);
-      }
-    };
-    questionStylesState.burstFrameId = requestAnimationFrame(tick);
-  }
-
-  function refreshQuestionStylesAfterConfigChange() {
-    if (!isQuestionStylesEnabled()) return;
-    restoreQuestionStyles();
-    if (applyQuestionStyles()) runQuestionStylesBurst(4);
-    setTimeout(() => {
-      if (isQuestionStylesEnabled()) applyQuestionStyles();
-    }, 75);
-  }
-
-  function syncQuestionStyles() {
-    if (!isQuestionStylesEnabled() || questionStylesState.syncQueued) return;
-    questionStylesState.syncQueued = true;
-    questionStylesState.syncFrameId = requestAnimationFrame(() => {
-      questionStylesState.syncFrameId = null;
-      questionStylesState.syncQueued = false;
-      if (!isQuestionStylesEnabled()) return;
-      if (applyQuestionStyles()) runQuestionStylesBurst(2);
-    });
-  }
-
-
-  function isStylesSettingId(settingId) {
-    return typeof settingId === "string" && Object.prototype.hasOwnProperty.call(QUESTION_STYLES_DEFAULTS, settingId);
-  }
-
-  function syncStylesConfigControl(control) {
-    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) return false;
-    const settingId = control.dataset?.settingId;
-    if (!isStylesSettingId(settingId)) return false;
-    const cfg = getStylesConfigStore();
-    if (!cfg) return false;
-    if (control instanceof HTMLInputElement && control.type === "checkbox") cfg[settingId] = Boolean(control.checked);
-    else if (control instanceof HTMLInputElement && control.type === "range") cfg[settingId] = Number(control.value);
-    else cfg[settingId] = String(control.value ?? "");
-    refreshQuestionStylesAfterConfigChange();
-    if (typeof saveSettings === "function") saveSettings();
-    return true;
-  }
-
-  function attachStylesConfigLiveSync(targetBody) {
-    if (!(targetBody instanceof HTMLElement)) return;
-    targetBody.__zyroxStylesConfigAbort?.abort?.();
-    const controller = new AbortController();
-    targetBody.__zyroxStylesConfigAbort = controller;
-    const syncFromEvent = (event) => {
-      const control = event.target?.closest?.("[data-setting-id]");
-      if (!control) return;
-      syncStylesConfigControl(control);
-    };
-    targetBody.addEventListener("input", syncFromEvent, { capture: true, signal: controller.signal });
-    targetBody.addEventListener("change", syncFromEvent, { capture: true, signal: controller.signal });
-  }
-
-  function startQuestionStyles() {
-    if (questionStylesState.observer) questionStylesState.observer.disconnect();
-    const existingRoot = document.querySelector(QUESTION_STYLE_SCREEN_SELECTOR);
-    if (existingRoot instanceof HTMLElement) questionStylesState.currentRoot = existingRoot;
-    questionStylesState.observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if (mutation.target instanceof HTMLElement) captureQuestionStyleRootFromNode(mutation.target);
-        for (const node of mutation.addedNodes) captureQuestionStyleRootFromNode(node);
-      }
-      syncQuestionStyles();
-    });
-    const target = document.body || document.documentElement;
-    if (target) questionStylesState.observer.observe(target, { childList: true, subtree: true });
-    if (applyQuestionStyles()) runQuestionStylesBurst(4);
-  }
-
-  function stopQuestionStyles() {
-    if (questionStylesState.observer) {
-      questionStylesState.observer.disconnect();
-      questionStylesState.observer = null;
-    }
-    if (questionStylesState.burstFrameId) {
-      cancelAnimationFrame(questionStylesState.burstFrameId);
-      questionStylesState.burstFrameId = null;
-    }
-    if (questionStylesState.syncFrameId) {
-      cancelAnimationFrame(questionStylesState.syncFrameId);
-      questionStylesState.syncFrameId = null;
-    }
-    questionStylesState.syncQueued = false;
-    questionStylesState.burstFramesRemaining = 0;
-    restoreQuestionStyles();
-    questionStylesState.currentRoot = null;
-  }
-
-  const ABILITY_HUD_MODULE_NAME = "Ability HUD";
-  const ABILITY_HUD_LOG = "[AbilityHUD]";
-  const ABILITY_HUD_INTERNAL_OPACITY = 0.95;
-  const ABILITY_HUD_INTERNAL_Z_INDEX = 2147483646;
-  const ABILITY_HUD_DRAG_MARGIN = 10;
-  const ABILITY_HUD_CONFIG_DEFAULTS = {
-    // Switch between detailed card rows and compact icon tiles.
-    abilityHudDisplayMode: "icons",
-    // Scales the entire HUD UI (container + content).
-    abilityHudScale: 0.9,
-    // Gap spacing between icon tiles (pixels).
-    abilityHudGap: 5,
-    // Toggle price labels in both default + icon modes.
-    abilityHudShowPrices: true,
-    // Icon tile size (pixels).
-    abilityHudIconSize: 96,
-  };
-  const abilityHudState = {
-    enabled: false,
-    container: null,
-    body: null,
-    abilities: new Map(),
-    currentBalance: 0,
-    roomId: null,
-    isDragging: false,
-    dragOffsetX: 0,
-    dragOffsetY: 0,
-    position: { x: null, y: null },
-    renderTimerId: null,
-    wired: false,
-    listeners: null,
-    packetLogCount: 0,
-    purchasedAbilities: new Set(),
-    usedAbilities: new Set(),
-    pendingTargetAbility: null,
-    pendingTargetRequestedAt: 0,
-    selfPlayerId: null,
-    config: { ...ABILITY_HUD_CONFIG_DEFAULTS },
-    iconTiles: [],
-  };
-
-  function calculateAbilityCost(ability, playerState = {}) {
-    const baseCost = Number(ability?.baseCost) || 0;
-    const percentageCost = Number(ability?.percentageCost) || 0;
-    const balance = Number(playerState?.balance) || 0;
-    const rawCost = (percentageCost * balance) + baseCost;
-    const roundedCost = Math.ceil(rawCost / 5) * 5;
-    return { rawCost, roundedCost, displayCost: roundedCost };
-  }
-
-  function extractAbilitiesFromPacket(packet) {
-    const containers = [
-      packet?.data,
-      packet?.payload?.data,
-      packet?.payload,
-      packet,
-    ].filter(Boolean);
-
-    for (const container of containers) {
-      const direct = container?.powerups;
-      if (Array.isArray(direct)) return direct;
-      const fallback = container?.abilities;
-      if (Array.isArray(fallback)) return fallback;
-    }
-
-    for (const container of containers) {
-      if (!container || typeof container !== "object") continue;
-      for (const value of Object.values(container)) {
-        if (!value || typeof value !== "object") continue;
-        if (Array.isArray(value?.powerups)) return value.powerups;
-        if (Array.isArray(value?.abilities)) return value.abilities;
-      }
-    }
-
-    return [];
-  }
-
-  function normalizeAbility(entry) {
-    if (!entry || typeof entry !== "object") return null;
-    const name = typeof entry.name === "string" ? entry.name.trim() : "";
-    if (!name) return null;
-    const displayName = typeof entry.displayName === "string" && entry.displayName.trim() ? entry.displayName.trim() : name;
-    return {
-      name,
-      displayName,
-      description: typeof entry.description === "string" ? entry.description : "",
-      icon: typeof entry.icon === "string" ? entry.icon : "",
-      color: {
-        background: entry?.color?.background || "#2a2f3a",
-        text: entry?.color?.text || "#ffffff",
-      },
-      baseCost: Number(entry.baseCost) || 0,
-      percentageCost: Number(entry.percentageCost) || 0,
-      disabled: Array.isArray(entry.disabled) ? entry.disabled.slice() : [],
-    };
-  }
-
-  function requestAbilityHudRender() {
-    if (!abilityHudState.enabled || !abilityHudState.container) return;
-    if (abilityHudState.renderTimerId) clearTimeout(abilityHudState.renderTimerId);
-    abilityHudState.renderTimerId = setTimeout(() => {
-      abilityHudState.renderTimerId = null;
-      renderAbilityHud();
-    }, 35);
-  }
-
-  function getAbilityHudConfig() {
-    const readModuleCfg = () => {
-      if (typeof moduleCfg === "function") {
-        try { return moduleCfg(ABILITY_HUD_MODULE_NAME); } catch (_) {}
-      }
-      return abilityHudState.config || ABILITY_HUD_CONFIG_DEFAULTS;
-    };
-    try {
-      return getAbilityHudConfigFromRaw(readModuleCfg());
-    } catch (_) {
-      return getAbilityHudConfigFromRaw(abilityHudState.config || ABILITY_HUD_CONFIG_DEFAULTS);
-    }
-  }
-
-  function getAbilityHudDefaultPosition(panelRect) {
-    const inset = 18;
-    const topInset = 116;
-    const width = Math.max(100, panelRect?.width || 360);
-    return { x: window.innerWidth - width - inset, y: topInset };
-  }
-
-  function clampAbilityHudPosition(x, y, panelRect) {
-    const width = Math.max(100, panelRect?.width || 360);
-    const height = Math.max(44, panelRect?.height || 120);
-    const minX = ABILITY_HUD_DRAG_MARGIN;
-    const minY = ABILITY_HUD_DRAG_MARGIN;
-    const maxX = Math.max(minX, window.innerWidth - width - ABILITY_HUD_DRAG_MARGIN);
-    const maxY = Math.max(minY, window.innerHeight - height - ABILITY_HUD_DRAG_MARGIN);
-    return { x: Math.max(minX, Math.min(maxX, Number(x) || minX)), y: Math.max(minY, Math.min(maxY, Number(y) || minY)) };
-  }
-
-  function persistAbilityHudPosition() {
-    try {
-      const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
-      if (!cfg || typeof cfg !== "object") return;
-      cfg.hudPosition = {
-        x: Math.round(Number(abilityHudState.position.x) || 0),
-        y: Math.round(Number(abilityHudState.position.y) || 0),
-      };
-      console.log("[HUD Position] Stored", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } });
-      if (typeof saveSettings === "function") saveSettings();
-    } catch (_) {}
-  }
-
-  function applyAbilityHudLiveConfig(opts = {}) {
-    if (!abilityHudState.enabled) return;
-    const cfg = opts.cfg && typeof opts.cfg === "object"
-      ? getAbilityHudConfigFromRaw(opts.cfg)
-      : getAbilityHudConfig();
-    if (!abilityHudState.container) return;
-    const panelRect = abilityHudState.container.getBoundingClientRect();
-    const clamped = clampAbilityHudPosition(abilityHudState.position.x, abilityHudState.position.y, panelRect);
-    abilityHudState.position.x = clamped.x;
-    abilityHudState.position.y = clamped.y;
-    abilityHudState.container.style.left = `${clamped.x}px`;
-    abilityHudState.container.style.top = `${clamped.y}px`;
-    abilityHudState.container.style.transformOrigin = "top left";
-    abilityHudState.container.style.transform = `scale(${cfg.abilityHudScale})`;
-    requestAbilityHudRender();
-  }
-
-  function getAbilityHudConfigFromRaw(rawCfg) {
-    const mode = String(rawCfg?.abilityHudDisplayMode ?? ABILITY_HUD_CONFIG_DEFAULTS.abilityHudDisplayMode).trim().toLowerCase();
-    abilityHudState.config.abilityHudDisplayMode = mode === "icons" ? "icons" : "list";
-    abilityHudState.config.abilityHudScale = Math.max(0.75, Math.min(1.25, Number(rawCfg?.abilityHudScale) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudScale));
-    abilityHudState.config.abilityHudGap = Math.max(1, Math.min(15, Number(rawCfg?.abilityHudGap) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudGap));
-    abilityHudState.config.abilityHudShowPrices = parseBooleanSetting(rawCfg?.abilityHudShowPrices, ABILITY_HUD_CONFIG_DEFAULTS.abilityHudShowPrices);
-    abilityHudState.config.abilityHudIconSize = Math.max(56, Math.min(164, Number(rawCfg?.abilityHudIconSize) || ABILITY_HUD_CONFIG_DEFAULTS.abilityHudIconSize));
-    return { ...abilityHudState.config };
-  }
-
-
-  function getAbilityHudTextColor(hex) {
-    const color = String(hex || "").trim();
-    const match = color.match(/^#([0-9a-f]{6})$/i);
-    if (!match) return "#ffffff";
-    const raw = match[1];
-    const r = parseInt(raw.slice(0, 2), 16);
-    const g = parseInt(raw.slice(2, 4), 16);
-    const b = parseInt(raw.slice(4, 6), 16);
-    const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
-    return luminance > 160 ? "#0a111d" : "#ffffff";
-  }
-
-  function createAbilityTile(index) {
-    const tile = document.createElement("button");
-    tile.type = "button";
-    tile.dataset.slotIndex = String(index);
-    tile.style.cssText = "appearance:none;position:relative;display:grid;grid-template-rows:auto 1fr auto;align-items:center;justify-items:center;gap:4px;width:96px;height:96px;border-radius:16px;border:1px solid rgba(255,255,255,.24);padding:7px;box-sizing:border-box;cursor:pointer;overflow:hidden;background:#2a2f3a;color:#fff;box-shadow:inset 0 -12px 20px rgba(0,0,0,.18),0 5px 14px rgba(0,0,0,.24);";
-
-    // Enforced order: title (top) -> icon (center) -> price (bottom), all inside tile.
-    const title = document.createElement("div");
-    title.className = "zyrox-ability-title";
-    title.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
-    const icon = document.createElement("div");
-    icon.className = "zyrox-ability-icon";
-    icon.style.cssText = "display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;max-width:44px;max-height:44px;font-size:29px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4));z-index:2;overflow:hidden;";
-    const iconImg = document.createElement("img");
-    iconImg.className = "zyrox-ability-icon-img";
-    iconImg.alt = "";
-    iconImg.style.cssText = "display:none;width:100%;height:100%;object-fit:contain;";
-    const iconFallback = document.createElement("span");
-    iconFallback.className = "zyrox-ability-icon-fallback";
-    iconFallback.textContent = "◻";
-    const iconFa = document.createElement("i");
-    iconFa.className = "zyrox-ability-icon-fa";
-    iconFa.setAttribute("aria-hidden", "true");
-    iconFa.style.cssText = "display:none;font-size:28px;line-height:1;";
-    icon.append(iconImg, iconFa, iconFallback);
-    const price = document.createElement("div");
-    price.className = "zyrox-ability-price";
-    price.style.cssText = "width:100%;text-align:center;font-size:11px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,.45);z-index:2;";
-    const overlay = document.createElement("div");
-    overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.18),rgba(0,0,0,.07) 42%,rgba(0,0,0,.25));z-index:1;";
-    tile.append(title, icon, price, overlay);
-    return { tile, title, icon, iconImg, iconFa, iconFallback, price };
-  }
-
-  function updateAbilityTileData(slot, ability) {
-    const fallbackBg = "#2a2f3a";
-    const fallbackIcon = "◻";
-    const abilityName = ability?.displayName || ability?.name || "Unknown";
-    const iconText = fallbackIcon;
-    const iconRaw = typeof ability?.icon === "string" ? ability.icon.trim() : "";
-    const bg = ability?.color?.background || fallbackBg;
-    const textColor = ability?.color?.text || getAbilityHudTextColor(bg);
-    if (!ability) {
-      slot.tile.disabled = true;
-      slot.tile.style.cursor = "default";
-      slot.tile.style.opacity = ".52";
-      slot.tile.style.background = fallbackBg;
-      slot.tile.style.borderColor = "rgba(255,255,255,.16)";
-      slot.title.textContent = "Empty";
-      slot.iconImg.style.display = "none";
-      slot.iconImg.removeAttribute("src");
-      slot.iconFa.style.display = "none";
-      slot.iconFa.className = "zyrox-ability-icon-fa";
-      slot.iconFallback.style.display = "";
-      slot.iconFallback.textContent = fallbackIcon;
-      slot.price.textContent = "--";
-      slot.title.style.color = "#d6dbea";
-      slot.price.style.color = "#d6dbea";
-      return;
-    }
-    const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
-    const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
-    const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
-    const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
-    const isTooExpensive = !alreadyPurchased && !canAfford;
-    const disabled = alreadyUsed || isTooExpensive;
-    slot.tile.disabled = disabled;
-    slot.tile.style.opacity = alreadyUsed ? ".58" : (isTooExpensive ? ".68" : "1");
-    slot.tile.style.cursor = disabled ? "default" : "pointer";
-    slot.tile.style.background = bg;
-    slot.tile.style.borderColor = alreadyUsed
-      ? "rgba(140,146,160,.38)"
-      : (isTooExpensive ? "rgba(172,158,128,.42)" : "rgba(255,255,255,.34)");
-    slot.tile.style.filter = alreadyUsed
-      ? "grayscale(0.7) saturate(0.45) brightness(0.74)"
-      : (isTooExpensive ? "grayscale(0.45) saturate(0.6) brightness(0.8)" : "none");
-    slot.title.textContent = abilityName;
-    slot.title.title = abilityName;
-    slot.title.style.color = textColor;
-    slot.title.style.fontSize = abilityName.length > 14 ? "9px" : "11px";
-    slot.icon.style.color = textColor;
-    const isLikelyImage = /^https?:\/\//i.test(iconRaw) || /^data:image\//i.test(iconRaw) || iconRaw.startsWith("/");
-    const isLikelyFaClass = /\bfa[srbld]?\b/i.test(iconRaw) || /\bfa-[a-z0-9-]+\b/i.test(iconRaw);
-    if (isLikelyImage) {
-      slot.iconImg.src = iconRaw;
-      slot.iconImg.style.display = "";
-      slot.iconFa.style.display = "none";
-      slot.iconFa.className = "zyrox-ability-icon-fa";
-      slot.iconFallback.style.display = "none";
-    } else if (isLikelyFaClass) {
-      slot.iconImg.style.display = "none";
-      slot.iconImg.removeAttribute("src");
-      slot.iconFa.className = `zyrox-ability-icon-fa ${iconRaw}`.trim();
-      slot.iconFa.style.display = "";
-      slot.iconFallback.style.display = "none";
-    } else {
-      slot.iconImg.style.display = "none";
-      slot.iconImg.removeAttribute("src");
-      slot.iconFa.style.display = "none";
-      slot.iconFa.className = "zyrox-ability-icon-fa";
-      slot.iconFallback.style.display = "";
-      slot.iconFallback.textContent = iconText;
-    }
-    slot.iconFa.style.color = textColor;
-    slot.iconFallback.style.color = textColor;
-    const dimText = alreadyUsed ? "rgba(230,234,242,.95)" : (isTooExpensive ? "rgba(244,235,210,.95)" : textColor);
-    slot.title.style.color = dimText;
-    slot.icon.style.color = dimText;
-    slot.iconFa.style.color = dimText;
-    slot.iconFallback.style.color = dimText;
-    const outlineShadow = alreadyUsed
-      ? "0 1px 0 rgba(0,0,0,.8), 0 0 2px rgba(0,0,0,.7), 0 0 6px rgba(110,120,140,.45)"
-      : (isTooExpensive ? "0 1px 0 rgba(0,0,0,.85), 0 0 2px rgba(0,0,0,.72), 0 0 6px rgba(184,152,86,.38)" : "0 1px 2px rgba(0,0,0,.45)");
-    slot.title.style.textShadow = outlineShadow;
-    slot.price.style.textShadow = outlineShadow;
-    slot.icon.style.filter = alreadyUsed
-      ? "drop-shadow(0 1px 1px rgba(0,0,0,.85)) drop-shadow(0 0 6px rgba(120,130,150,.38))"
-      : (isTooExpensive ? "drop-shadow(0 1px 1px rgba(0,0,0,.88)) drop-shadow(0 0 6px rgba(191,150,76,.3))" : "drop-shadow(0 2px 3px rgba(0,0,0,.4))");
-    const showPrices = abilityHudState.config.abilityHudShowPrices !== false;
-    slot.price.textContent = showPrices ? (alreadyUsed ? "Used" : (alreadyPurchased ? "Use" : `$${pricing.roundedCost || 0}`)) : "";
-    slot.price.style.display = showPrices ? "" : "none";
-    slot.price.style.color = textColor;
-    slot.tile.onclick = () => {
-      if (alreadyPurchased) sendAbilityUse(ability);
-      else sendAbilityPurchase(ability);
-    };
-  }
-
-  function renderAbilityHudIcons(entries) {
-    if (!abilityHudState.body) return;
-    let row = abilityHudState.body.querySelector(".zyrox-ability-icon-row");
-    if (!row) {
-      abilityHudState.body.innerHTML = "";
-      row = document.createElement("div");
-      row.className = "zyrox-ability-icon-row";
-      row.style.cssText = "display:grid;grid-template-columns:repeat(3,minmax(0,96px));gap:8px;justify-content:start;align-items:start;pointer-events:auto;width:max-content;";
-      abilityHudState.body.appendChild(row);
-      abilityHudState.iconTiles = [];
-    }
-
-    const slotCount = Math.max(3, entries.length);
-    while (abilityHudState.iconTiles.length < slotCount) {
-      const slot = createAbilityTile(abilityHudState.iconTiles.length);
-      abilityHudState.iconTiles.push(slot);
-      row.appendChild(slot.tile);
-    }
-    while (abilityHudState.iconTiles.length > slotCount) {
-      const slot = abilityHudState.iconTiles.pop();
-      slot?.tile?.remove();
-    }
-
-    const iconSize = abilityHudState.config.abilityHudIconSize;
-    row.style.gap = `${abilityHudState.config.abilityHudGap}px`;
-    for (let i = 0; i < slotCount; i += 1) {
-      const slot = abilityHudState.iconTiles[i];
-      if (slot?.tile) { slot.tile.style.width = `${iconSize}px`; slot.tile.style.height = `${iconSize}px`; }
-      updateAbilityTileData(slot, entries[i] || null);
-    }
-  }
-
-  function onAbilityHudInbound(event) {
-    const packet = event?.detail;
-    const key = packet?.key ?? packet?.payload?.key;
-    if (key === "PLAYER_JOINS_STATIC_STATE") {
-      abilityHudState.purchasedAbilities.clear();
-      abilityHudState.usedAbilities.clear();
-    }
-    if (abilityHudState.packetLogCount < 18) {
-      abilityHudState.packetLogCount += 1;
-      console.debug(`${ABILITY_HUD_LOG} inbound packet`, {
-        key,
-        eventName: packet?.eventName,
-        hasData: Boolean(packet?.data),
-        dataKeys: packet?.data && typeof packet.data === "object" ? Object.keys(packet.data).slice(0, 12) : [],
-      });
-    }
-    if (key === "PLAYER_JOINS_STATIC_STATE") {
-      console.debug(`${ABILITY_HUD_LOG} static join packet intercepted`);
-    }
-    if (key === "STATE_UPDATE") {
-      const type = packet?.data?.type ?? packet?.payload?.data?.type;
-      if (type === "BALANCE") {
-        const balance = Number(packet?.data?.value ?? packet?.payload?.data?.value);
-        if (Number.isFinite(balance)) {
-          abilityHudState.currentBalance = balance;
-          requestAbilityHudRender();
-        }
-      }
-      if (type === "PURCHASED_POWERUPS" || type === "USED_POWERUPS") {
-        const list = packet?.data?.value ?? packet?.payload?.data?.value;
-        if (Array.isArray(list)) {
-          const targetSet = type === "PURCHASED_POWERUPS" ? abilityHudState.purchasedAbilities : abilityHudState.usedAbilities;
-          let changed = false;
-          for (const entry of list) {
-            const abilityName = typeof entry === "string" ? entry.trim() : "";
-            if (!abilityName) continue;
-            if (!targetSet.has(abilityName)) {
-              targetSet.add(abilityName);
-              changed = true;
-            }
-          }
-          if (changed) requestAbilityHudRender();
-        }
-      }
-    }
-    if (packet?.eventName === "CLIENT_ID_SET") {
-      const selfPlayerId = packet?.payload ?? packet?.data ?? null;
-      if (typeof selfPlayerId === "string" && selfPlayerId.trim()) {
-        abilityHudState.selfPlayerId = selfPlayerId.trim();
-        console.debug(`${ABILITY_HUD_LOG} captured self player id from CLIENT_ID_SET`, { selfPlayerId: abilityHudState.selfPlayerId });
-      }
-    }
-    if (key === "UPDATED_PLAYER_LEADERBOARD") {
-      const pendingAbility = abilityHudState.pendingTargetAbility;
-      const items = packet?.data?.items ?? packet?.payload?.data?.items;
-      const rawPlayers = Array.isArray(items) ? items.filter((item) => item && item.id) : [];
-      const players = rawPlayers.filter((item) => item.id !== abilityHudState.selfPlayerId);
-      console.debug(`${ABILITY_HUD_LOG} [Step 3] received leaderboard packet`, {
-        hasPendingAbility: Boolean(pendingAbility),
-        selfPlayerId: abilityHudState.selfPlayerId,
-        itemCountRaw: rawPlayers.length,
-        itemCountFiltered: players.length,
-      });
-      if (pendingAbility && players.length) {
-        openTargetSelectionMenu(pendingAbility, players);
-      }
-    }
-    const abilities = extractAbilitiesFromPacket(packet);
-    if (!abilities.length) {
-      if (key === "PLAYER_JOINS_STATIC_STATE" || key === "STATE_UPDATE") {
-        console.debug(`${ABILITY_HUD_LOG} no abilities extracted`, {
-          key,
-          probe: {
-            hasDataPowerups: Array.isArray(packet?.data?.powerups),
-            hasPayloadDataPowerups: Array.isArray(packet?.payload?.data?.powerups),
-            hasPayloadPowerups: Array.isArray(packet?.payload?.powerups),
-          },
-        });
-      }
-      return;
-    }
-    console.debug(`${ABILITY_HUD_LOG} extracted abilities`, { key, count: abilities.length });
-    let changed = false;
-    for (const rawAbility of abilities) {
-      const normalized = normalizeAbility(rawAbility);
-      if (!normalized) continue;
-      abilityHudState.abilities.set(normalized.name, normalized);
-      changed = true;
-      if (normalized.name === "Icer" || normalized.displayName === "Freezer") {
-        console.debug(`${ABILITY_HUD_LOG} freeze mapping`, { displayName: normalized.displayName, purchaseName: normalized.name });
-      }
-    }
-    if (changed) requestAbilityHudRender();
-  }
-
-  function onAbilityHudOutbound(event) {
-    const packet = event?.detail;
-    const key = packet?.key ?? packet?.payload?.key;
-    if (key !== "POWERUP_PURCHASED" && key !== "POWERUP_ACTIVATED") return;
-    const payload = packet?.payload || packet;
-    console.debug(`${ABILITY_HUD_LOG} outbound powerup observed`, payload);
-  }
-
-  function sendAbilityPurchase(ability) {
-    if (!ability?.name) return;
-    if (abilityHudState.purchasedAbilities.has(ability.name) || abilityHudState.usedAbilities.has(ability.name)) return;
-    const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
-    if (abilityHudState.currentBalance < pricing.roundedCost) return;
-    const payload = { room: socketManager.blueboatRoomId, key: "POWERUP_PURCHASED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} sending purchase payload`, payload);
-    if (ability.name === "Icer") {
-      console.debug(`${ABILITY_HUD_LOG} ASSERT freeze mapping ok: display="${ability.displayName}" payload="${ability.name}"`);
-    }
-    socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
-    abilityHudState.purchasedAbilities.add(ability.name);
-    requestAbilityHudRender();
-  }
-
-  function isRebooterAbility(ability) {
-    const name = String(ability?.name || "").trim().toLowerCase();
-    const displayName = String(ability?.displayName || "").trim().toLowerCase();
-    return name === "repurchasepowerups" || displayName === "rebooter";
-  }
-
-  function abilityRequiresTargetSelection(ability) {
-    if (!ability || !Array.isArray(ability.disabled)) return false;
-    const isShield = String(ability?.name || "").trim().toLowerCase() === "shield";
-    const isGiftAbility = String(ability?.name || "").trim().toLowerCase() === "giving"
-      || String(ability?.displayName || "").trim().toLowerCase() === "gift";
-    const requires = (!isShield && ability.disabled.some((flag) => String(flag || "").trim() === "cleanOnly")) || isGiftAbility;
-    console.debug(`${ABILITY_HUD_LOG} [Step 1] ability target-selection requirement`, {
-      abilityName: ability?.name,
-      disabledFlags: ability?.disabled,
-      requiresTargetSelection: requires,
-    });
-    return requires;
-  }
-
-  function requestLeaderboardForAbilityTarget(ability) {
-    const roomId = socketManager.blueboatRoomId;
-    if (!roomId) {
-      console.warn(`${ABILITY_HUD_LOG} [Step 2] missing room id; cannot request leaderboard`, { abilityName: ability?.name });
-      return;
-    }
-    abilityHudState.pendingTargetAbility = ability;
-    abilityHudState.pendingTargetRequestedAt = Date.now();
-    const payload = { room: roomId, key: "PLAYER_LEADERBOARD_REQUESTED", data: null };
-    console.debug(`${ABILITY_HUD_LOG} [Step 2] requesting leaderboard for target selection`, payload);
-    socketManager.sendMessage("PLAYER_LEADERBOARD_REQUESTED", null);
-  }
-
-  function openTargetSelectionMenu(ability, players) {
-    console.debug(`${ABILITY_HUD_LOG} [Step 3] opening target selection menu`, {
-      abilityName: ability?.name,
-      playerCount: players.length,
-      players,
-    });
-    const existing = document.getElementById("zyrox-target-menu");
-    if (existing) existing.remove();
-    const overlay = document.createElement("div");
-    overlay.id = "zyrox-target-menu";
-    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;";
-    const panel = document.createElement("div");
-    panel.style.cssText = "width:min(360px,calc(100vw - 20px));max-height:min(80vh,520px);overflow:auto;background:#121722;border:1px solid rgba(255,255,255,.2);border-radius:10px;padding:10px;font-family:Inter,system-ui,sans-serif;color:#fff;";
-    const title = document.createElement("div");
-    title.textContent = `Select target for ${ability.displayName || ability.name}`;
-    title.style.cssText = "font-size:14px;font-weight:700;margin-bottom:8px;";
-    panel.appendChild(title);
-    players.forEach((player) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = `${player.name || "Unknown"}`;
-      btn.style.cssText = "display:block;width:100%;text-align:left;margin:0 0 6px 0;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#fff;cursor:pointer;";
-      btn.addEventListener("click", () => {
-        overlay.remove();
-        sendTargetedAbilityUse(ability, player.id);
-      });
-      panel.appendChild(btn);
-    });
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.textContent = "Cancel";
-    cancel.style.cssText = "display:block;width:100%;padding:7px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.2);background:rgba(255,0,0,.2);color:#fff;cursor:pointer;";
-    cancel.addEventListener("click", () => {
-      console.debug(`${ABILITY_HUD_LOG} [Step 3] target selection canceled`, { abilityName: ability?.name });
-      abilityHudState.pendingTargetAbility = null;
-      overlay.remove();
-    });
-    panel.appendChild(cancel);
-    overlay.appendChild(panel);
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) overlay.remove();
-    });
-    document.body.appendChild(overlay);
-  }
-
-  function sendTargetedAbilityUse(ability, targetId) {
-    const roomId = socketManager.blueboatRoomId;
-    if (!roomId || !ability?.name || !targetId) return;
-    const data = { name: ability.name, target: targetId };
-    const payload = { room: roomId, key: "POWERUP_ATTACK", data };
-    console.debug(`${ABILITY_HUD_LOG} [Step 4] sending targeted ability payload`, payload);
-    socketManager.sendMessage("POWERUP_ATTACK", data);
-    abilityHudState.usedAbilities.add(ability.name);
-    abilityHudState.pendingTargetAbility = null;
-    requestAbilityHudRender();
-  }
-
-  function sendAbilityUse(ability) {
-    if (!ability?.name) return;
-    if (abilityHudState.usedAbilities.has(ability.name)) return;
-    const activatePayload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
-    console.debug(`${ABILITY_HUD_LOG} [Step 0] sending regular activate payload`, activatePayload);
-    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
-
-    if (abilityRequiresTargetSelection(ability)) {
-      requestLeaderboardForAbilityTarget(ability);
-      return;
-    }
-
-    if (isRebooterAbility(ability)) {
-      console.debug(`${ABILITY_HUD_LOG} rebooter activated; clearing USED state while preserving PURCHASED state`);
-      abilityHudState.usedAbilities.clear();
-      abilityHudState.usedAbilities.add(ability.name);
-      requestAbilityHudRender();
-      return;
-    }
-
-    abilityHudState.usedAbilities.add(ability.name);
-    requestAbilityHudRender();
-  }
-
-  function renderAbilityHud() {
-    if (!abilityHudState.body) return;
-    const entries = Array.from(abilityHudState.abilities.values());
-    const cfg = getAbilityHudConfig();
-    if (abilityHudState.container) {
-      abilityHudState.container.style.transformOrigin = "top left";
-      abilityHudState.container.style.transform = `scale(${cfg.abilityHudScale})`;
-    }
-    if (!entries.length) {
-      abilityHudState.body.innerHTML = `<div style="font-size:12px;color:#b3b9c7;opacity:.85;">Waiting for abilities…</div>`;
-      return;
-    }
-    if (cfg.abilityHudDisplayMode === "icons") {
-      if (abilityHudState.container) {
-        abilityHudState.container.style.width = "fit-content";
-      }
-      if (abilityHudState.body) {
-        abilityHudState.body.style.width = "fit-content";
-      }
-      renderAbilityHudIcons(entries);
-      return;
-    }
-    if (abilityHudState.container) abilityHudState.container.style.width = "min(360px,calc(100vw - 24px))";
-    if (abilityHudState.body) abilityHudState.body.style.width = "";
-    const frag = document.createDocumentFragment();
-    for (const ability of entries) {
-      const wrap = document.createElement("div");
-      wrap.style.cssText = "display:flex;gap:8px;align-items:center;padding:6px 7px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);";
-      const abilityDescription = typeof ability.description === "string" && ability.description.trim() ? ability.description.trim() : "No description available.";
-      wrap.title = abilityDescription;
-      const info = document.createElement("div");
-      info.style.cssText = "display:flex;align-items:center;gap:8px;min-width:0;flex:1;";
-      const name = document.createElement("div");
-      name.style.cssText = "font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
-      name.textContent = ability.displayName;
-      name.title = abilityDescription;
-      const pricing = calculateAbilityCost(ability, { balance: abilityHudState.currentBalance });
-      const canAfford = abilityHudState.currentBalance >= pricing.roundedCost;
-      const showPrices = abilityHudState.config.abilityHudShowPrices !== false;
-      info.append(name);
-      const buyBtn = document.createElement("button");
-      buyBtn.type = "button";
-      const alreadyPurchased = abilityHudState.purchasedAbilities.has(ability.name);
-      const alreadyUsed = abilityHudState.usedAbilities.has(ability.name);
-      const disabled = alreadyUsed || (!alreadyPurchased && !canAfford);
-      buyBtn.disabled = disabled;
-      buyBtn.textContent = alreadyUsed
-        ? "Used"
-        : (alreadyPurchased ? "Use" : (showPrices ? `$${pricing.roundedCost}` : "Buy"));
-      const isUsed = alreadyUsed;
-      const isUnavailable = !alreadyPurchased && !canAfford;
-      const buttonBorder = isUsed ? "rgba(160,160,160,.42)" : (isUnavailable ? "rgba(255,255,255,.24)" : "rgba(46,204,113,.82)");
-      const buttonBg = isUsed ? "rgba(120,120,120,.36)" : (isUnavailable ? "rgba(255,255,255,.09)" : "rgba(46,204,113,.35)");
-      const buttonColor = isUsed ? "rgba(230,230,230,.9)" : "#fff";
-      buyBtn.className = "zyrox-upgrade-hud-button";
-      buyBtn.style.cssText = `appearance:none;border:1px solid ${buttonBorder};background:${buttonBg};color:${buttonColor};border-radius:6px;padding:5px 10px;font-size:12px;font-weight:700;line-height:1;cursor:${disabled ? "default" : "pointer"};width:96px;min-width:96px;max-width:96px;text-align:center;opacity:${isUsed ? ".9" : (disabled ? ".72" : "1")};`;
-      buyBtn.addEventListener("mousedown", (event) => {
-        event.stopPropagation();
-      });
-      buyBtn.addEventListener("click", () => {
-        if (alreadyPurchased) sendAbilityUse(ability);
-        else sendAbilityPurchase(ability);
-      });
-      wrap.append(info, buyBtn);
-      frag.appendChild(wrap);
-    }
-    abilityHudState.body.innerHTML = "";
-    abilityHudState.body.appendChild(frag);
-  }
-
-  function startAbilityHud() {
-    if (abilityHudState.enabled) return;
-    abilityHudState.enabled = true;
-    getAbilityHudConfig();
-    if (!abilityHudState.wired) {
-      abilityHudState.listeners = {
-        inbound: (event) => onAbilityHudInbound(event),
-        outbound: (event) => onAbilityHudOutbound(event),
-      };
-      socketManager.addEventListener("blueboatMessage", abilityHudState.listeners.inbound);
-      socketManager.addEventListener("blueboatSend", abilityHudState.listeners.outbound);
-      abilityHudState.wired = true;
-    }
-    const cfg = getAbilityHudConfig();
-    const savedPos = readHudPosition(ABILITY_HUD_MODULE_NAME, null);
-    if (savedPos && Number.isFinite(savedPos.x) && Number.isFinite(savedPos.y)) {
-      abilityHudState.position.x = savedPos.x;
-      abilityHudState.position.y = savedPos.y;
-      console.debug(`${ABILITY_HUD_LOG} restored HUD position`, { saved: savedPos });
-    }
-    if (!Number.isFinite(abilityHudState.position.x) || !Number.isFinite(abilityHudState.position.y)) {
-      const position = getAbilityHudDefaultPosition({ width: 360, height: 120 });
-      abilityHudState.position.x = position.x;
-      abilityHudState.position.y = position.y;
-      console.debug(`${ABILITY_HUD_LOG} no saved HUD position; using default`, { position });
-    }
-    const panel = document.createElement("section");
-    panel.style.cssText = `position:fixed;left:${abilityHudState.position.x}px;top:${abilityHudState.position.y}px;z-index:${ABILITY_HUD_INTERNAL_Z_INDEX};width:min(360px,calc(100vw - 24px));background:linear-gradient(170deg,rgba(17,21,30,${ABILITY_HUD_INTERNAL_OPACITY}),rgba(8,10,16,${ABILITY_HUD_INTERNAL_OPACITY}));border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:8px;box-shadow:0 14px 34px rgba(0,0,0,.5);font-family:Inter,system-ui,sans-serif;cursor:grab;user-select:none;`;
-    const head = document.createElement("header");
-    head.style.cssText = "display:flex;align-items:center;justify-content:space-between;padding:4px 4px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);margin-bottom:8px;";
-    head.innerHTML = `<div style="font-size:12px;font-weight:800;color:#fff;letter-spacing:.06em;">ABILITY HUD</div>`;
-    const body = document.createElement("div");
-    body.style.cssText = "display:flex;flex-direction:column;gap:5px;";
-    panel.append(head, body);
-    abilityHudState.container = panel;
-    abilityHudState.body = body;
-    document.documentElement.appendChild(panel);
-    const clampedStart = clampAbilityHudPosition(abilityHudState.position.x, abilityHudState.position.y, panel.getBoundingClientRect());
-    abilityHudState.position.x = clampedStart.x;
-    abilityHudState.position.y = clampedStart.y;
-    panel.style.left = `${clampedStart.x}px`;
-    panel.style.top = `${clampedStart.y}px`;
-    writeHudPosition(ABILITY_HUD_MODULE_NAME, clampedStart);
-    console.debug(`${ABILITY_HUD_LOG} applied HUD position`, { applied: clampedStart });
-    applyAbilityHudLiveConfig({ cfg });
-    renderAbilityHud();
-    panel.addEventListener("mousedown", (event) => {
-      if (event.button !== 0) return;
-      if (event.target?.closest?.("button")) return;
-      abilityHudState.isDragging = true;
-      abilityHudState.dragOffsetX = event.clientX - panel.offsetLeft;
-      abilityHudState.dragOffsetY = event.clientY - panel.offsetTop;
-      panel.style.cursor = "grabbing";
-      event.preventDefault();
-    });
-    document.addEventListener("mousemove", abilityHudMouseMove);
-    document.addEventListener("mouseup", abilityHudMouseUp);
-    if (abilityHudBootstrap.latestPacket) {
-      console.debug(`${ABILITY_HUD_LOG} hydrating from bootstrap cache`);
-      onAbilityHudInbound({ detail: abilityHudBootstrap.latestPacket });
-    }
-    if (Number.isFinite(abilityHudBootstrap.latestBalance)) {
-      abilityHudState.currentBalance = Number(abilityHudBootstrap.latestBalance) || 0;
-    }
-    if (abilityHudBootstrap.purchasedAbilities.size) {
-      abilityHudState.purchasedAbilities = new Set(abilityHudBootstrap.purchasedAbilities);
-    }
-    if (abilityHudBootstrap.usedAbilities.size) {
-      abilityHudState.usedAbilities = new Set(abilityHudBootstrap.usedAbilities);
-    }
-    if (abilityHudBootstrap.selfPlayerId) {
-      abilityHudState.selfPlayerId = abilityHudBootstrap.selfPlayerId;
-    }
-    requestAbilityHudRender();
-  }
-
-  function abilityHudMouseMove(event) {
-    if (!abilityHudState.isDragging || !abilityHudState.container) return;
-    const rect = abilityHudState.container.getBoundingClientRect();
-    const clamped = clampAbilityHudPosition(event.clientX - abilityHudState.dragOffsetX, event.clientY - abilityHudState.dragOffsetY, rect);
-    abilityHudState.position.x = clamped.x;
-    abilityHudState.position.y = clamped.y;
-    abilityHudState.container.style.left = `${abilityHudState.position.x}px`;
-    abilityHudState.container.style.top = `${abilityHudState.position.y}px`;
-    writeHudPosition(ABILITY_HUD_MODULE_NAME, { x: Math.round(clamped.x), y: Math.round(clamped.y) });
-  }
-
-  function abilityHudMouseUp() {
-    abilityHudState.isDragging = false;
-    if (abilityHudState.container) abilityHudState.container.style.cursor = "grab";
-    writeHudPosition(ABILITY_HUD_MODULE_NAME, abilityHudState.position);
-    persistAbilityHudPosition();
-  }
-
-  function stopAbilityHud() {
-    abilityHudState.enabled = false;
-    if (abilityHudState.container) {
-      abilityHudState.container.remove();
-      abilityHudState.container = null;
-      abilityHudState.body = null;
-      abilityHudState.iconTiles = [];
-    }
-    if (abilityHudState.renderTimerId) {
-      clearTimeout(abilityHudState.renderTimerId);
-      abilityHudState.renderTimerId = null;
-    }
-    document.removeEventListener("mousemove", abilityHudMouseMove);
-    document.removeEventListener("mouseup", abilityHudMouseUp);
-  }
-
-  const abilityHudBootstrap = {
-    latestPacket: null,
-    latestBalance: 0,
-    purchasedAbilities: new Set(),
-    usedAbilities: new Set(),
-    selfPlayerId: null,
-  };
-
-  socketManager.addEventListener("blueboatMessage", (event) => {
-    const packet = event?.detail;
-    const key = packet?.key ?? packet?.payload?.key;
-
-    if (packet?.eventName === "CLIENT_ID_SET") {
-      const selfPlayerId = packet?.payload ?? packet?.data ?? null;
-      if (typeof selfPlayerId === "string" && selfPlayerId.trim()) {
-        abilityHudBootstrap.selfPlayerId = selfPlayerId.trim();
-      }
-    }
-
-    if (!key) return;
-    if (key === "PLAYER_JOINS_STATIC_STATE") {
-      abilityHudBootstrap.latestPacket = packet;
-      abilityHudBootstrap.usedAbilities.clear();
-      const count = Array.isArray(packet?.data?.powerups) ? packet.data.powerups.length : 0;
-      console.debug(`${ABILITY_HUD_LOG} bootstrap captured static state`, { count });
-      return;
-    }
-    if (key === "STATE_UPDATE") {
-      const type = packet?.data?.type ?? packet?.payload?.data?.type;
-      if (type === "BALANCE") {
-        const value = Number(packet?.data?.value ?? packet?.payload?.data?.value);
-        if (Number.isFinite(value)) abilityHudBootstrap.latestBalance = value;
-      }
-      if (type === "PURCHASED_POWERUPS" || type === "USED_POWERUPS") {
-        const list = packet?.data?.value ?? packet?.payload?.data?.value;
-        if (Array.isArray(list)) {
-          const targetSet = type === "PURCHASED_POWERUPS" ? abilityHudBootstrap.purchasedAbilities : abilityHudBootstrap.usedAbilities;
-          targetSet.clear();
-          for (const item of list) {
-            const name = typeof item === "string" ? item.trim() : "";
-            if (name) targetSet.add(name);
-          }
-        }
-      }
-      if (!abilityHudBootstrap.latestPacket) {
-        abilityHudBootstrap.latestPacket = packet;
-      }
-    }
-  });
-
   const MODULE_BEHAVIORS = {
     [ANIMATION_SKIP_MODULE_NAME]: {
       onEnable: startAnimationSkip,
       onDisable: stopAnimationSkip,
-    },
-    [GAME_FINDER_MODULE_NAME]: {
-      onEnable: startGameFinder,
-      onDisable: stopGameFinder,
     },
     "ESP": {
       onEnable: startEsp,
@@ -7000,10 +4175,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     "Triggerbot (Autoshoot)": {
       onEnable: startTriggerAssist,
       onDisable: stopTriggerAssist,
-    },
-    "Quick Fire": {
-      onEnable: startQuickFire,
-      onDisable: stopQuickFire,
     },
     "Aimbot": {
       onEnable: startAutoAim,
@@ -7025,50 +4196,23 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       onEnable: startLavaBuildingHud,
       onDisable: stopLavaBuildingHud,
     },
-    [ABILITY_HUD_MODULE_NAME]: {
-      onEnable: startAbilityHud,
-      onDisable: stopAbilityHud,
-    },
     "Answer Reveal": {
       onEnable: startDrawItAnswerReveal,
       onDisable: stopDrawItAnswerReveal,
     },
-    [CAMERA_ZOOM_MODULE_NAME]: {
-      onEnable: startCameraZoom,
-      onDisable: stopCameraZoom,
-    },
-    [HIDE_POPUPS_MODULE_NAME]: {
-      onEnable: startHidePopups,
-      onDisable: stopHidePopups,
-    },
-    [ANTI_AFK_MODULE_NAME]: {
-      onEnable: startAntiAfk,
-      onDisable: stopAntiAfk,
-    },
-    [STYLES_MODULE_NAME]: {
-      onEnable: startQuestionStyles,
-      onDisable: stopQuestionStyles,
-    },
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
-    [GAME_FINDER_MODULE_NAME]: "Adds a button next to the game code field that tries random Gimkit join codes and fills in the first active code it finds.",
     [ANIMATION_SKIP_MODULE_NAME]: "Skips most UI/menu animations (CSS + Web Animations API) so interfaces appear instantly.",
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
     "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
-    "Quick Fire": "Rapidly fires toward your cursor while left click is held.",
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
     "Upgrade HUD": "Shows Classic/Tycoon upgrade levels in a configurable HUD.",
     "Auto Upgrade": "Automatically buys the cheapest available Classic/Tycoon upgrade.",
     "Building HUD": "Shows Floor is Lava build costs and lets you buy builds quickly.",
-    [ABILITY_HUD_MODULE_NAME]: "Shows intercepted abilities with live Classic/Tycoon pricing and one-click purchases.",
-    [CAMERA_ZOOM_MODULE_NAME]: "Adjust how much you can see on the screen",
-    [HIDE_POPUPS_MODULE_NAME]: "Hides Floor is Lava building purchase toasts and energy/resource popups.",
-    [ANTI_AFK_MODULE_NAME]: "Sends lightweight synthetic activity pulses to reduce AFK kicks.",
-    [STYLES_MODULE_NAME]: "Customizes question and answer colors on Gimkit question screens.",
   };
 
   // --- End of Core Utilities ---
@@ -7085,21 +4229,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               description: MODULE_DESCRIPTIONS["Auto Answer"],
               settings: [
                 { id: "speed", label: "Answer Delay", type: "slider", min: 200, max: 3000, step: 50, default: 1000 },
-                { id: "triviaDelay", label: "Trivia Answer Delay", type: "slider", min: 0, max: 8000, step: 50, default: 1500 },
-              ],
-            },
-            {
-              name: GAME_FINDER_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
-              settings: [
-                { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 5, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
-              ],
-            },
-            {
-              name: ANTI_AFK_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[ANTI_AFK_MODULE_NAME],
-              settings: [
-                { id: "pulseMs", label: "Activity Pulse", type: "slider", min: 4000, max: 45000, step: 500, default: 12000 },
               ],
             },
           ],
@@ -7159,13 +4288,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                 },
               ],
             },
-            {
-              name: CAMERA_ZOOM_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[CAMERA_ZOOM_MODULE_NAME],
-              settings: [
-                { id: "zoom", label: "Zoom", type: "slider", min: CAMERA_ZOOM_MIN, max: CAMERA_ZOOM_MAX, step: CAMERA_ZOOM_STEP, default: CAMERA_ZOOM_DEFAULT, unit: "x" },
-              ],
-            },
           ],
         },
         {
@@ -7175,37 +4297,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               name: ANIMATION_SKIP_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[ANIMATION_SKIP_MODULE_NAME],
               settings: [],
-            },
-            {
-              name: HIDE_POPUPS_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[HIDE_POPUPS_MODULE_NAME],
-              settings: [
-                { id: "hideEnergyPopups", label: "Hide Energy Popup", type: "checkbox", default: true },
-                { id: "hideBuildingPopups", label: "Hide Building Popup", type: "checkbox", default: true },
-              ],
-            },
-            {
-              name: STYLES_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[STYLES_MODULE_NAME],
-              settings: [
-                { id: "topBarBackground", label: "Top Bar Color", type: "color", default: QUESTION_STYLES_DEFAULTS.topBarBackground },
-                { id: "pageBackground", label: "Page Background", type: "color", default: QUESTION_STYLES_DEFAULTS.pageBackground },
-                { id: "continueButtonBackground", label: "Continue Button", type: "color", default: QUESTION_STYLES_DEFAULTS.continueButtonBackground },
-                { id: "shopButtonBackground", label: "Shop Button", type: "color", default: QUESTION_STYLES_DEFAULTS.shopButtonBackground },
-                { id: "questionBackground", label: "Question Background", type: "color", default: QUESTION_STYLES_DEFAULTS.questionBackground },
-                { id: "questionText", label: "Question Text", type: "color", default: QUESTION_STYLES_DEFAULTS.questionText },
-                { id: "option1Background", label: "Option 1 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option1Background },
-                { id: "option1Text", label: "Option 1 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option1Text },
-                { id: "option2Background", label: "Option 2 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option2Background },
-                { id: "option2Text", label: "Option 2 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option2Text },
-                { id: "option3Background", label: "Option 3 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option3Background },
-                { id: "option3Text", label: "Option 3 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option3Text },
-                { id: "option4Background", label: "Option 4 Background", type: "color", default: QUESTION_STYLES_DEFAULTS.option4Background },
-                { id: "option4Text", label: "Option 4 Text", type: "color", default: QUESTION_STYLES_DEFAULTS.option4Text },
-                { id: "questionFontSize", label: "Question Font Size", type: "slider", min: 12, max: 64, step: 1, default: QUESTION_STYLES_DEFAULTS.questionFontSize, unit: "px" },
-                { id: "answerFontSize", label: "Answer Font Size", type: "slider", min: 10, max: 48, step: 1, default: QUESTION_STYLES_DEFAULTS.answerFontSize, unit: "px" },
-                { id: "borderRadius", label: "Border Radius", type: "slider", min: 0, max: 36, step: 1, default: QUESTION_STYLES_DEFAULTS.borderRadius, unit: "px" },
-              ],
             },
           ],
         },
@@ -7255,16 +4346,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               ],
             },
             {
-              name: "Quick Fire",
-              description: MODULE_DESCRIPTIONS["Quick Fire"],
-              settings: [
-                { id: "enabled",             label: "Enabled",              type: "checkbox", default: true },
-                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 50, min: 1, max: 250, step: 1, unit: "ms" },
-                { id: "onlyWhenMouseDown",   label: "Only While Left Click", type: "checkbox", default: true },
-                { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
-              ],
-            },
-            {
               name: "Aimbot",
               description: MODULE_DESCRIPTIONS["Aimbot"],
               settings: [
@@ -7297,6 +4378,18 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               name: "Upgrade HUD",
               description: MODULE_DESCRIPTIONS["Upgrade HUD"],
               settings: [
+                {
+                  id: "hudLocation",
+                  label: "HUD Location",
+                  type: "select",
+                  default: "topRight",
+                  options: [
+                    { value: "topRight", label: "Top Right" },
+                    { value: "topLeft", label: "Top Left" },
+                    { value: "bottomRight", label: "Bottom Right" },
+                    { value: "bottomLeft", label: "Bottom Left" },
+                  ],
+                },
                 {
                   id: "displayTitle",
                   label: "Display Title",
@@ -7337,16 +4430,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                 { id: "insurance", label: "Insurance", type: "checkbox", default: true },
               ],
             },
-            {
-              name: ABILITY_HUD_MODULE_NAME,
-              description: MODULE_DESCRIPTIONS[ABILITY_HUD_MODULE_NAME],
-              settings: [
-                { id: "abilityHudDisplayMode", label: "Display Mode", type: "select", default: "icons", options: [{ value: "icons", label: "Icons" }, { value: "list", label: "List" }] },
-                { id: "abilityHudScale", label: "Scale", type: "slider", min: 0.75, max: 1.25, step: 0.05, default: 0.9 },
-                { id: "abilityHudGap", label: "Icon Gap", type: "slider", min: 1, max: 15, step: 1, default: 5, unit: "px" },
-                { id: "abilityHudShowPrices", label: "Show Prices", type: "checkbox", default: true },
-              ],
-            },
           ],
         },
         {
@@ -7356,6 +4439,18 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               name: "Building HUD",
               description: MODULE_DESCRIPTIONS["Building HUD"],
               settings: [
+                {
+                  id: "hudLocation",
+                  label: "HUD Location",
+                  type: "select",
+                  default: "topRight",
+                  options: [
+                    { value: "topRight", label: "Top Right" },
+                    { value: "topLeft", label: "Top Left" },
+                    { value: "bottomRight", label: "Bottom Right" },
+                    { value: "bottomLeft", label: "Bottom Left" },
+                  ],
+                },
                 { id: "displayTitle", label: "Display Title", type: "checkbox", default: true },
                 { id: "hudSize", label: "HUD Size", type: "slider", min: 60, max: 180, step: 5, default: 100, unit: "%" },
               ],
@@ -7451,96 +4546,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   }
 
   // Defer all DOM work — WebSocket is already patched above at document-start.
-
-  const WELCOME_POPUP_STORAGE_KEY = "zyroxWelcomePopupSeenV1";
-
-  function showFirstLaunchWelcomePopup() {
-    try {
-      if (localStorage.getItem(WELCOME_POPUP_STORAGE_KEY) === "1") return;
-    } catch (_) {
-      return;
-    }
-
-    const overlay = document.createElement("div");
-    overlay.style.cssText = [
-      "position:fixed",
-      "inset:0",
-      "background:rgba(0,0,0,.52)",
-      "display:flex",
-      "align-items:center",
-      "justify-content:center",
-      "z-index:2147483647",
-      "padding:18px",
-      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif",
-    ].join(";");
-
-    const card = document.createElement("div");
-    card.style.cssText = [
-      "width:min(560px,100%)",
-      "border-radius:14px",
-      "border:1px solid rgba(255,255,255,.16)",
-      "background:linear-gradient(165deg,rgba(31,31,36,.98),rgba(10,10,14,.98))",
-      "box-shadow:0 20px 55px rgba(0,0,0,.5)",
-      "padding:18px 20px",
-      "color:#fff",
-      "line-height:1.45",
-    ].join(";");
-
-    card.innerHTML = `
-      <div style="margin:-18px -20px 14px -20px;padding:10px 14px;border-radius:14px 14px 0 0;border-bottom:1px solid rgba(255,255,255,.18);background:linear-gradient(125deg, rgba(255, 74, 74, 0.24), rgba(56, 16, 16, 0.9));display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div style="font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;">Zyrox client</div>
-          <div style="font-size:12px;font-weight:700;opacity:.92;">v${CONFIG.version}</div>
-        </div>
-        <button type="button" class="zyrox-welcome-action" id="zyrox-welcome-x" aria-label="Close" style="appearance:none;width:24px;height:24px;border-radius:7px;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.08);color:#fff;font-size:14px;font-weight:800;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .15s ease,border-color .15s ease,transform .15s ease;">×</button>
-      </div>
-      <div style="font-size:24px;font-weight:800;margin-bottom:10px;"><b>Zyrox client</b></div>
-      <div style="font-size:15px;opacity:.92;margin-bottom:14px;">Welcome to <b>zyrox client</b>: a modern hacked client / utility mod for gimkit.<br><br><b>Left-click</b> to enable/disable a module.<br><b>Right-click</b> to configure a modules settings.<br><b>'\\'</b> to hide/show the client.</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
-        <a class="zyrox-welcome-action" href="https://github.com/Zyrox-client/Zyrox-gimkit-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;transition:background .15s ease,border-color .15s ease,transform .15s ease;">
-          <img src="https://github.githubassets.com/assets/pinned-octocat-093da3e6fa40.svg" alt="GitHub" style="width:14px;height:14px;display:block;">
-          <span>github</span>
-        </a>
-        <a class="zyrox-welcome-action" href="https://coindrop.to/zyrox-client" target="_blank" rel="noopener noreferrer" style="text-decoration:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:6px;transition:background .15s ease,border-color .15s ease,transform .15s ease;">
-          <img src="https://coindrop.to/favicon/favicon-32x32.png" alt="Coindrop" style="width:14px;height:14px;display:block;border-radius:3px;">
-          <span>support us</span>
-        </a>
-        <button type="button" class="zyrox-welcome-action" id="zyrox-welcome-close" style="margin-left:auto;appearance:none;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.24);background:rgba(255,255,255,.08);color:#fff;font-size:12px;font-weight:700;cursor:pointer;transition:background .15s ease,border-color .15s ease,transform .15s ease;">close</button>
-      </div>
-    `;
-
-    const close = () => {
-      try {
-        localStorage.setItem(WELCOME_POPUP_STORAGE_KEY, "1");
-      } catch (_) {}
-      overlay.remove();
-    };
-
-    card.querySelector("#zyrox-welcome-close")?.addEventListener("click", close);
-    card.querySelector("#zyrox-welcome-x")?.addEventListener("click", close);
-
-    for (const action of card.querySelectorAll(".zyrox-welcome-action")) {
-      action.addEventListener("mouseenter", () => {
-        action.style.background = "rgba(255,255,255,.18)";
-        action.style.borderColor = "rgba(255,255,255,.42)";
-        action.style.transform = "translateY(-1px)";
-      });
-      action.addEventListener("mouseleave", () => {
-        action.style.background = "rgba(255,255,255,.08)";
-        action.style.borderColor = "rgba(255,255,255,.24)";
-        action.style.transform = "translateY(0)";
-      });
-    }
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) close();
-    });
-
-    overlay.appendChild(card);
-    document.documentElement.appendChild(overlay);
-  }
-
   function initUi() {
-    showFirstLaunchWelcomePopup();
 
   const style = document.createElement("style");
   style.textContent = `
@@ -7731,7 +4737,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     }
 
     .zyrox-brand .title { font-size: 13px; font-weight: 700; line-height: 1; }
-    .zyrox-brand .subtitle { font-size: 10px; font-weight: 500; color: rgba(255,255,255,.7); }
+    .zyrox-brand .subtitle { font-size: 11px; font-weight: 500; color: rgba(255,255,255,.7); }
 
     .zyrox-chip {
       font-size: 10px;
@@ -7744,7 +4750,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     }
 
     .zyrox-keybind-btn {
-      font-size: 10px;
+      font-size: 11px;
       color: var(--zyx-icon-color);
       background: rgba(0, 0, 0, 0.35);
       border: 1px solid var(--zyx-outline-color);
@@ -7789,7 +4795,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
     .zyrox-section { display: flex; flex-direction: column; gap: 7px; }
     .zyrox-section-label {
-      font-size: 10px;
+      font-size: 11px;
       letter-spacing: 0.25px;
       color: var(--zyx-accent-soft);
       padding-left: 2px;
@@ -7932,7 +4938,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       align-items: center;
       gap: 10px;
       color: var(--zyx-muted);
-      font-size: 10px;
+      font-size: 11px;
       padding: 0 3px;
     }
 
@@ -7950,9 +4956,9 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
     .zyrox-config.hidden { display: none !important; }
     /* FIX: config header now uses settings-header vars so it follows the theme */
-    .zyrox-config-header { padding: 10px 72px 10px 12px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
-    .zyrox-config-title { color: var(--zyx-settings-text); font-size: 12px; font-weight: 700; margin-bottom: 2px; line-height: 1.2; }
-    .zyrox-config-sub { color: var(--zyx-settings-subtext); font-size: 11px; line-height: 1.2; }
+    .zyrox-config-header { padding: 11px 46px 11px 13px; border-bottom: 1px solid rgba(255,255,255,.09); background: linear-gradient(90deg, var(--zyx-settings-header-start), var(--zyx-settings-header-end)); }
+    .zyrox-config-title { color: var(--zyx-settings-text); font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+    .zyrox-config-sub { color: var(--zyx-settings-subtext); font-size: 12px; }
     .zyrox-config-body { padding: 13px; color: var(--zyx-settings-text); }
     .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--zyx-settings-text); font-size:14px; }
     .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
@@ -8095,14 +5101,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       color: var(--zyx-select-text);
     }
     .zyrox-gradient-pair { display: inline-flex; align-items: center; gap: 8px; }
-    .zyrox-preset-header { font-size: 10px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
+    .zyrox-preset-header { font-size: 11px; text-transform: uppercase; letter-spacing: .35px; color: var(--zyx-accent-soft); margin-bottom: 4px; }
     .zyrox-preset-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
-    .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 10px; cursor: pointer; }
+    .zyrox-preset-btn { border: 1px solid var(--zyx-outline-color); background: rgba(0,0,0,.26); color: var(--zyx-settings-text); border-radius: 8px; padding: 6px 10px; font-size: 11px; cursor: pointer; }
     .zyrox-preset-btn .preset-swatch { display:inline-block; width:10px; height:10px; border-radius:999px; margin-right:6px; border:1px solid rgba(255,255,255,.3); vertical-align:-1px; }
     .zyrox-preset-btn:hover { background: var(--zyx-btn-hover-bg); }
     .zyrox-subheading {
       grid-column: 1 / -1;
-      font-size: 10px;
+      font-size: 11px;
       text-transform: uppercase;
       letter-spacing: 0.25px;
       color: var(--zyx-accent-soft);
@@ -8134,45 +5140,19 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       line-height: 1.1;
       white-space: nowrap;
     }
-    .zyrox-config-header-actions {
-      position: absolute;
-      top: 8px;
-      right: 8px;
-      display: inline-flex;
-      gap: 4px;
-    }
-    .zyrox-config-header-actions .zyrox-close-btn {
-      position: static;
-    }
-    .config-reset-btn {
-      width: auto;
-      min-width: 44px;
-      height: 20px;
-      padding: 0 5px;
-      font-size: 9px;
-      text-transform: lowercase;
-      background: rgba(0, 0, 0, 0.16);
-      border-color: rgba(255, 255, 255, 0.22);
-      color: rgba(255, 255, 255, 0.84);
-    }
     .zyrox-close-btn {
       position: absolute;
-      top: 8px;
-      right: 8px;
-      width: 20px;
-      height: 20px;
-      border-radius: 5px;
+      top: 10px;
+      right: 10px;
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
       border: 1px solid var(--zyx-outline-color);
       background: rgba(0, 0, 0, 0.25);
       color: var(--zyx-icon-color);
       cursor: pointer;
-      padding: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
       line-height: 1;
-      font-size: 12px;
+      font-size: 14px;
     }
 
     .zyrox-resize-handle {
@@ -8221,7 +5201,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       border: 1px solid rgba(255,255,255,.12);
       border-radius: 8px;
       padding: 8px 10px;
-      font-size: 10px;
+      font-size: 11px;
       color: var(--zyx-settings-text);
       background: rgba(0,0,0,.2);
       text-align: left;
@@ -8309,10 +5289,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       <div class="zyrox-config-title">Module Config</div>
       <div class="zyrox-config-sub">Configure this module.</div>
     </div>
-    <div class="zyrox-config-header-actions">
-      <button class="zyrox-close-btn config-reset-btn" type="button" title="Reset module config">reset</button>
-      <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
-    </div>
+    <button class="zyrox-close-btn config-close-btn" type="button" title="Close">✕</button>
     <div class="zyrox-config-body">
       <div class="zyrox-config-row">
         <span>Keybind</span>
@@ -8374,8 +5351,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           </div>
           <div class="zyrox-subheading">Display Mode</div>
           <div class="zyrox-settings-actions-group" style="margin-bottom: 14px; margin-top: 8px;">
-            <button class="zyrox-btn set-display-mode" data-display-mode="merged" type="button">Merged</button>
-            <button class="zyrox-btn set-display-mode active" data-display-mode="loose" type="button">Loose</button>
+            <button class="zyrox-btn set-display-mode active" data-display-mode="merged" type="button">Merged</button>
+            <button class="zyrox-btn set-display-mode" data-display-mode="loose" type="button">Loose</button>
           </div>
         </div>
       </div>
@@ -8556,28 +5533,19 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               <div><b>Zyrox Client</b> is a custom opensource userscript hacked client for Gimkit with module toggles, keybinds, and theming controls.</div>
               <div>We are not responsible for any bans, account issues, data loss, or damages that may result from using this client. Use it at your own risk.</div>
               <div>Version: ${CONFIG.version}</div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <a
-                  class="zyrox-btn zyrox-about-source-btn"
-                  href="https://github.com/Zyrox-client/Zyrox-gimkit-client"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >View Source Code</a>
-                <a
-                  class="zyrox-btn zyrox-about-source-btn"
-                  href="https://coindrop.to/zyrox-client"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >Support Us</a>
-              </div>
+              <a
+                class="zyrox-btn zyrox-about-source-btn"
+                href="https://github.com/Bob-alt-828100/zyrox-gimkit-client"
+                target="_blank"
+                rel="noopener noreferrer"
+              >View Source Code</a>
             </div>
           </div>
         </div>
       </div>
     </div>
-      <div class="zyrox-settings-actions">
+    <div class="zyrox-settings-actions">
       <div class="zyrox-settings-actions-group" style="flex-direction:column;gap:5px;align-items:flex-start;">
-        <button class="zyrox-btn zyrox-settings-action-btn settings-reset-positions" type="button">Reset Positions</button>
         <button class="zyrox-btn zyrox-settings-action-btn settings-reset" type="button">Reset Appearance</button>
         <button class="zyrox-btn zyrox-settings-action-btn settings-reset-all" type="button" style="opacity:0.8;">Reset All</button>
       </div>
@@ -8657,12 +5625,10 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   const blurInput = settingsMenu.querySelector(".set-blur");
   const hoverShiftInput = settingsMenu.querySelector(".set-hover-shift");
   const displayModeButtons = [...settingsMenu.querySelectorAll(".set-display-mode")];
-  const settingsResetPositionsBtn = settingsMenu.querySelector(".settings-reset-positions");
   const settingsResetBtn = settingsMenu.querySelector(".settings-reset");
   const settingsResetAllBtn = settingsMenu.querySelector(".settings-reset-all");
   const settingsCloseBtn = settingsMenu.querySelector(".settings-close");
   const panelByName = new Map();
-  const configResetBtn = configMenu.querySelector(".config-reset-btn");
   const panelCollapseButtons = new Map();
   let openConfigModule = null;
   let currentSetBindBtn = null;
@@ -8695,6 +5661,15 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     const layout = getModuleLayoutConfig(moduleName);
     if (layout?.description) return layout.description;
     return MODULE_DESCRIPTIONS[moduleName] || "Configure this module.";
+  }
+
+  function getModuleConfigSafe(name, fallback = {}) {
+    if (typeof moduleCfg !== "function") return fallback;
+    try {
+      return moduleCfg(name) || fallback;
+    } catch (_) {
+      return fallback;
+    }
   }
 
   function ensureModuleConfigStore() {
@@ -8735,16 +5710,16 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       window.__zyroxEspConfig = { ...getEspRenderConfig(), ...cfg };
     } else if (name === "Triggerbot (Autoshoot)") {
       window.__zyroxTriggerAssistConfig = { ...getTriggerAssistConfig(), ...cfg };
-    } else if (name === "Quick Fire") {
-      window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
     } else if (name === "Aimbot") {
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
-    } else if (name === "Auto Answer") {
-      window.__zyroxAutoAnswerConfig = { ...cfg };
     }
     return cfg;
   }
 
+  getUpgradeHudModuleConfig = () => moduleCfg("Upgrade HUD");
+  persistUpgradeHudSettings = () => saveSettings();
+  getLavaBuildingHudModuleConfig = () => moduleCfg("Building HUD");
+  persistLavaBuildingHudSettings = () => saveSettings();
 
   function setBindLabel(item, moduleName) {
     const label = item.querySelector(".zyrox-bind-label");
@@ -8784,9 +5759,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   function startAutoAnswer() {
     const cfg = moduleCfg("Auto Answer");
     const speed = Math.max(200, Number(cfg.speed) || 1000);
-    const triviaDelayNumber = Number(cfg.triviaDelay);
-    const triviaDelay = Math.max(0, Math.min(8000, Number.isFinite(triviaDelayNumber) ? triviaDelayNumber : 1500));
-    window.__zyroxAutoAnswer?.start(speed, { pardyDelay: triviaDelay });
+    window.__zyroxAutoAnswer?.start(speed);
   }
 
   function refreshAutoAnswerLoopIfEnabled() {
@@ -8866,29 +5839,27 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     }, cfg.durationMs);
   }
 
-
-  function resetModuleConfig(moduleName) {
-    if (!moduleName) return;
-    const store = ensureModuleConfigStore();
-    store.delete(moduleName);
-    const freshCfg = moduleCfg(moduleName);
-    const module = state.modules.get(moduleName);
-    const behavior = MODULE_BEHAVIORS[moduleName];
-    if (module?.enabled) {
-      try { behavior?.onDisable?.(); } catch (error) { console.error(`[Zyrox] ${moduleName} failed to disable during config reset`, error); }
-      try { behavior?.onEnable?.(); } catch (error) { console.error(`[Zyrox] ${moduleName} failed to re-enable during config reset`, error); }
+  function extractDrawItAnswerCandidates(stateUpdateData) {
+    const rows = Array.isArray(stateUpdateData) ? stateUpdateData : [stateUpdateData];
+    const answers = [];
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || !Array.isArray(row.value)) continue;
+      for (const item of row.value) {
+        const directKey = item?.key;
+        const nestedKey = item?.value?.key;
+        const fieldKey = directKey ?? nestedKey;
+        const directValue = item?.value;
+        const nestedValue = item?.value?.value;
+        const fieldValue = typeof nestedValue === "undefined" ? directValue : nestedValue;
+        if (fieldKey !== "term" || typeof fieldValue !== "string") continue;
+        const answer = fieldValue.trim();
+        if (answer) answers.push(answer);
+      }
     }
-    const item = state.moduleItems.get(moduleName);
-    if (item) setBindLabel(item, moduleName);
-    setCurrentBindText(freshCfg.keybind || null);
-    state.listeningForBind = null;
-    setBindButtonText("Set keybind");
-    saveSettings();
+    return answers;
   }
 
   function closeConfig() {
-    configBody.__zyroxStylesConfigAbort?.abort?.();
-    configBody.__zyroxStylesConfigAbort = null;
     configBackdrop.classList.add("hidden");
     configMenu.classList.add("hidden");
     settingsMenu.classList.add("hidden");
@@ -8900,11 +5871,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   function openConfig(moduleName) {
     openConfigModule = moduleName;
-    configBody.__zyroxStylesConfigAbort?.abort?.();
-    configBody.__zyroxStylesConfigAbort = null;
     const cfg = moduleCfg(moduleName);
     const moduleLayout = getModuleLayoutConfig(moduleName);
-    if (moduleName === STYLES_MODULE_NAME) attachStylesConfigLiveSync(configBody);
 
     configBody.innerHTML = `
       <div class="zyrox-config-row">
@@ -8942,122 +5910,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       });
     }
 
-
-    if (moduleName === STYLES_MODULE_NAME) {
-      Object.assign(cfg, getStylesConfigStore() || QUESTION_STYLES_DEFAULTS);
-
-      const presetCard = document.createElement("div");
-      presetCard.className = "zyrox-setting-card";
-      presetCard.style.alignItems = "stretch";
-      presetCard.style.flexDirection = "column";
-      presetCard.style.gap = "8px";
-      const presetButtonsHtml = Object.entries(QUESTION_STYLES_PRESETS)
-        .map(([value, preset]) => {
-          const swatchColor = isStylesHexColor(preset.values?.questionBackground, QUESTION_STYLES_DEFAULTS.questionBackground);
-          return `<button type="button" class="zyrox-btn styles-preset-btn" data-style-preset="${value}" style="flex:1 1 120px;justify-content:center;"><span class="preset-swatch" style="display:inline-block;width:13px;height:13px;border-radius:999px;margin-right:7px;border:1px solid rgba(255,255,255,.36);background:${swatchColor};vertical-align:-2px;"></span>${preset.label}</button>`;
-        })
-        .join("");
-      presetCard.innerHTML = `
-        <label style="font-weight:700;">Presets</label>
-        <div class="styles-preset-buttons" style="display:flex;gap:8px;flex-wrap:wrap;">${presetButtonsHtml}</div>
-        <label style="display:flex;align-items:center;gap:8px;font-weight:700;margin-top:2px;">
-          <input type="checkbox" class="styles-use-global-theme" ${cfg.useGlobalTheme ? "checked" : ""} />
-          Use global theme
-        </label>
-      `;
-      configBody.appendChild(presetCard);
-
-      const details = document.createElement("details");
-      details.className = "zyrox-setting-card styles-advanced-settings";
-      details.style.display = "block";
-      details.style.padding = "0";
-      details.style.overflow = "hidden";
-      details.innerHTML = `
-        <summary style="cursor:pointer;list-style:none;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-          <span style="font-size:12px;">Advanced color and size settings</span>
-          <span class="styles-advanced-icon" aria-hidden="true" style="font-size:14px;opacity:.8;transition:transform .15s ease;">▸</span>
-        </summary>
-        <div class="styles-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
-      `;
-      const advancedBody = details.querySelector(".styles-advanced-body");
-      const advancedIcon = details.querySelector(".styles-advanced-icon");
-      details.addEventListener("toggle", () => {
-        if (advancedIcon) advancedIcon.textContent = details.open ? "▾" : "▸";
-      });
-      const styleSettings = Array.isArray(moduleLayout?.settings) ? moduleLayout.settings : [];
-
-      const makeAdvancedRow = (setting) => {
-        const row = document.createElement("div");
-        row.className = "zyrox-setting-card";
-        row.style.margin = "0";
-        if (setting.type === "color") {
-          row.innerHTML = `<label>${setting.label}</label><input type="color" class="styles-live-control" data-setting-id="${setting.id}" value="${cfg[setting.id] ?? setting.default ?? "#ffffff"}" />`;
-        } else if (setting.type === "slider") {
-          const unit = setting.unit ?? "";
-          const value = cfg[setting.id] ?? setting.default ?? setting.min ?? 0;
-          row.innerHTML = `
-            <label style="display:flex;justify-content:space-between;align-items:center;width:100%;gap:8px;">
-              <span>${setting.label}</span>
-              <span class="zyrox-slider-value" data-value-for="${setting.id}" style="font-size:0.85em;opacity:0.75;min-width:52px;text-align:right;">${value}${unit}</span>
-            </label>
-            <input type="range" class="styles-live-control" data-setting-id="${setting.id}" min="${setting.min}" max="${setting.max}" step="${setting.step}" value="${value}" />
-          `;
-        }
-        return row;
-      };
-
-      for (const setting of styleSettings) {
-        const row = makeAdvancedRow(setting);
-        if (row.innerHTML.trim()) advancedBody.appendChild(row);
-      }
-      configBody.appendChild(details);
-
-      const syncAdvancedControlsFromCfg = () => {
-        for (const control of advancedBody.querySelectorAll("[data-setting-id]")) {
-          const id = control.dataset.settingId;
-          if (cfg[id] === undefined) continue;
-          control.value = String(cfg[id]);
-          const setting = styleSettings.find((entry) => entry.id === id);
-          const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
-          if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting?.unit ?? ""}`;
-        }
-      };
-
-      presetCard.querySelector(".styles-preset-buttons")?.addEventListener("click", (event) => {
-        const button = event.target?.closest?.("[data-style-preset]");
-        if (!(button instanceof HTMLButtonElement)) return;
-        applyStylesPresetToConfig(cfg, button.dataset.stylePreset);
-        syncAdvancedControlsFromCfg();
-        const globalThemeInput = presetCard.querySelector(".styles-use-global-theme");
-        if (globalThemeInput instanceof HTMLInputElement) globalThemeInput.checked = Boolean(cfg.useGlobalTheme);
-        refreshQuestionStylesAfterConfigChange();
-        saveSettings();
-      });
-
-      const globalThemeInput = presetCard.querySelector(".styles-use-global-theme");
-      if (globalThemeInput instanceof HTMLInputElement) {
-        globalThemeInput.addEventListener("change", () => {
-          cfg.useGlobalTheme = Boolean(globalThemeInput.checked);
-          refreshQuestionStylesAfterConfigChange();
-          saveSettings();
-        });
-      }
-
-      const updateAdvancedSetting = (event) => {
-        const control = event.target?.closest?.("[data-setting-id]");
-        if (!(control instanceof HTMLInputElement)) return;
-        const id = control.dataset.settingId;
-        const setting = styleSettings.find((entry) => entry.id === id);
-        if (!setting) return;
-        cfg[id] = control.type === "range" ? Number(control.value) : String(control.value || "#ffffff");
-        const valueLabel = advancedBody.querySelector(`[data-value-for="${id}"]`);
-        if (valueLabel) valueLabel.textContent = `${cfg[id]}${setting.unit ?? ""}`;
-        refreshQuestionStylesAfterConfigChange();
-        saveSettings();
-      };
-      advancedBody.addEventListener("input", updateAdvancedSetting);
-      advancedBody.addEventListener("change", updateAdvancedSetting);
-    } else if (moduleName === "ESP") {
+    if (moduleName === "ESP") {
       const defaults = getEspRenderConfig();
       Object.assign(cfg, { ...defaults, ...cfg });
       window.__zyroxEspConfig = { ...cfg };
@@ -9813,73 +6666,21 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
               const newVal = Number(event.target.value);
               cfg[setting.id] = newVal;
               if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
-              if (moduleName === "Auto Answer" && (setting.id === "speed" || setting.id === "triviaDelay")) {
-                // Live-update answer delays only while Auto Answer is enabled
+              if (moduleName === "Auto Answer" && setting.id === "speed") {
+                // Live-update the interval speed only while Auto Answer is enabled
                 if (state.enabledModules.has("Auto Answer")) {
-                  startAutoAnswer();
+                  window.__zyroxAutoAnswer?.start(newVal);
                 }
               }
               if (moduleName === "Upgrade HUD" && setting.id === "hudSize") {
-                let livePos = null;
-                if (upgradeHudState.container) {
-                  livePos = readHudPositionFromElement(upgradeHudState.container);
-                  if (livePos) writeHudPosition("Upgrade HUD", livePos);
-                }
-                const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
-                const nextCfg = writeUpgradeHudConfigPatch(patch);
-                upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
-                renderUpgradeHud(nextCfg);
+                upgradeHudState.config.hudSize = newVal;
+                patchHudModuleConfig("Upgrade HUD", { hudSize: newVal });
+                hardRefreshUpgradeHud({ hudSize: newVal });
               }
               if (moduleName === "Building HUD" && setting.id === "hudSize") {
-                let livePos = null;
-                if (lavaBuildingHudState.container) {
-                  livePos = readHudPositionFromElement(lavaBuildingHudState.container);
-                  if (livePos) writeHudPosition("Building HUD", livePos);
-                }
-                const patch = { hudSize: newVal, ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
-                const nextCfg = writeBuildingHudConfigPatch(patch);
-                upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: newVal, livePos, nextCfg });
-                renderLavaBuildingHud(nextCfg);
-              }
-              if (moduleName === ABILITY_HUD_MODULE_NAME) {
-                if (setting.id === "abilityHudScale" || setting.id === "abilityHudGap") {
-                  applyAbilityHudLiveConfig({ cfg });
-                }
-              }
-              if (moduleName === CAMERA_ZOOM_MODULE_NAME && setting.id === "zoom") {
-                cfg.zoom = clampCameraZoom(newVal);
-                if (valueLabel) valueLabel.textContent = `${cfg.zoom}${valueUnit}`;
-                if (state.enabledModules.has(CAMERA_ZOOM_MODULE_NAME)) showCameraZoomToast(cfg.zoom);
-              }
-              if (moduleName === STYLES_MODULE_NAME) {
-                refreshQuestionStylesAfterConfigChange();
-              }
-              if (moduleName === "Quick Fire") {
-                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
-                if (quickFireState.enabled) startQuickFire();
-              }
-              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
-                const nextDelay = setGameFinderDelay(newVal);
-                cfg[setting.id] = nextDelay;
-                if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
-              }
-              saveSettings();
-            });
-            settingInput.addEventListener("change", (event) => {
-              const newVal = Number(event.target.value);
-              cfg[setting.id] = newVal;
-              if (valueLabel) valueLabel.textContent = `${newVal}${valueUnit}`;
-              if (moduleName === STYLES_MODULE_NAME) {
-                refreshQuestionStylesAfterConfigChange();
-              }
-              if (moduleName === "Quick Fire") {
-                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
-                if (quickFireState.enabled) startQuickFire();
-              }
-              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
-                const nextDelay = setGameFinderDelay(newVal);
-                cfg[setting.id] = nextDelay;
-                if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
+                lavaBuildingHudState.config.hudSize = newVal;
+                patchHudModuleConfig("Building HUD", { hudSize: newVal });
+                hardRefreshLavaBuildingHud({ hudSize: newVal });
               }
               saveSettings();
             });
@@ -9898,42 +6699,17 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
             settingInput.addEventListener("change", (event) => {
               cfg[setting.id] = Boolean(event.target.checked);
               if (moduleName === "Upgrade HUD" && (setting.id === "displayTitle" || setting.id === "showLvlPrefix" || setting.id === "showUpgradeButton")) {
-                let livePos = null;
-                if (upgradeHudState.container) {
-                  livePos = readHudPositionFromElement(upgradeHudState.container);
-                  if (livePos) writeHudPosition("Upgrade HUD", livePos);
-                }
-                const patch = { [setting.id]: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
-                const nextCfg = writeUpgradeHudConfigPatch(patch);
-                upgradeHudLog("Upgrade HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
-                renderUpgradeHud(nextCfg);
+                upgradeHudState.config[setting.id] = cfg[setting.id];
+                patchHudModuleConfig("Upgrade HUD", { [setting.id]: cfg[setting.id] });
+                hardRefreshUpgradeHud({ [setting.id]: cfg[setting.id] });
               }
               if (moduleName === "Building HUD" && setting.id === "displayTitle") {
-                let livePos = null;
-                if (lavaBuildingHudState.container) {
-                  livePos = readHudPositionFromElement(lavaBuildingHudState.container);
-                  if (livePos) writeHudPosition("Building HUD", livePos);
-                }
-                const patch = { displayTitle: cfg[setting.id], ...(livePos ? { hudPosition: { x: Math.round(livePos.x), y: Math.round(livePos.y) } } : {}) };
-                const nextCfg = writeBuildingHudConfigPatch(patch);
-                upgradeHudLog("Building HUD setting changed", { settingId: setting.id, value: cfg[setting.id], livePos, nextCfg });
-                renderLavaBuildingHud(nextCfg);
+                lavaBuildingHudState.config.displayTitle = cfg[setting.id];
+                patchHudModuleConfig("Building HUD", { displayTitle: cfg[setting.id] });
+                hardRefreshLavaBuildingHud({ displayTitle: cfg[setting.id] });
               }
               if (moduleName === "Auto Upgrade" && Object.prototype.hasOwnProperty.call(autoUpgradeState.toggles, setting.id)) {
                 autoUpgradeState.toggles[setting.id] = Boolean(event.target.checked);
-              }
-              if (moduleName === ABILITY_HUD_MODULE_NAME && setting.id === "abilityHudShowPrices") {
-                applyAbilityHudLiveConfig({ cfg });
-              }
-              if (moduleName === HIDE_POPUPS_MODULE_NAME) {
-                syncHidePopups();
-              }
-              if (moduleName === STYLES_MODULE_NAME) {
-                refreshQuestionStylesAfterConfigChange();
-              }
-              if (moduleName === "Quick Fire") {
-                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
-                if (quickFireState.enabled) startQuickFire();
               }
               saveSettings();
             });
@@ -9962,16 +6738,31 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
                 openConfig(moduleName);
               }
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
-              if (moduleName === ABILITY_HUD_MODULE_NAME) {
-                if (setting.id === "abilityHudDisplayMode") openConfig(moduleName);
-                applyAbilityHudLiveConfig({ cfg });
+              if (moduleName === "Upgrade HUD" && setting.id === "hudLocation") {
+                upgradeHudState.config.hudLocation = cfg[setting.id];
+                upgradeHudState.config.hudPosition = null;
+                cfg.hudPosition = null;
+                patchHudModuleConfig("Upgrade HUD", {
+                  hudLocation: cfg[setting.id],
+                  hudPosition: null,
+                });
+                hardRefreshUpgradeHud({
+                  hudLocation: cfg[setting.id],
+                  hudPosition: null,
+                });
               }
-              if (moduleName === STYLES_MODULE_NAME) {
-                refreshQuestionStylesAfterConfigChange();
-              }
-              if (moduleName === "Quick Fire") {
-                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
-                if (quickFireState.enabled) startQuickFire();
+              if (moduleName === "Building HUD" && setting.id === "hudLocation") {
+                lavaBuildingHudState.config.hudLocation = cfg[setting.id];
+                lavaBuildingHudState.config.hudPosition = null;
+                cfg.hudPosition = null;
+                patchHudModuleConfig("Building HUD", {
+                  hudLocation: cfg[setting.id],
+                  hudPosition: null,
+                });
+                hardRefreshLavaBuildingHud({
+                  hudLocation: cfg[setting.id],
+                  hudPosition: null,
+                });
               }
               saveSettings();
             });
@@ -9986,20 +6777,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           `;
           const settingInput = settingCard.querySelector(".set-module-setting-color");
           if (settingInput) {
-            const updateColorSetting = (event) => {
+            settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value || "#ffffff");
               if (moduleName === "Answer Popup") refreshVisibleAnswerPopup();
-              if (moduleName === STYLES_MODULE_NAME) {
-                refreshQuestionStylesAfterConfigChange();
-              }
-              if (moduleName === "Quick Fire") {
-                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
-                if (quickFireState.enabled) startQuickFire();
-              }
               saveSettings();
-            };
-            settingInput.addEventListener("input", updateColorSetting);
-            settingInput.addEventListener("change", updateColorSetting);
+            });
           }
         }
 
@@ -10014,13 +6796,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           if (settingInput) {
             settingInput.addEventListener("input", (event) => {
               cfg[setting.id] = String(event.target.value ?? "");
-              if (moduleName === STYLES_MODULE_NAME) {
-                refreshQuestionStylesAfterConfigChange();
-              }
-              if (moduleName === "Quick Fire") {
-                window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
-                if (quickFireState.enabled) startQuickFire();
-              }
               saveSettings();
             });
           }
@@ -10047,29 +6822,14 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   }
 
   function collectSettings() {
-    try {
-      if (upgradeHudState?.container?.isConnected) {
-        const pos = readHudPositionFromElement(upgradeHudState.container);
-        if (pos) {
-          const cfg = getHudModuleConfigObject("Upgrade HUD", { displayTitle: true, showLvlPrefix: false, showUpgradeButton: true, hudSize: 100, hudPosition: null });
-          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: "Upgrade HUD", hudPosition: { ...cfg.hudPosition } }); }
-        }
-      }
-      if (lavaBuildingHudState?.container?.isConnected) {
-        const pos = readHudPositionFromElement(lavaBuildingHudState.container);
-        if (pos) {
-          const cfg = getHudModuleConfigObject("Building HUD", { displayTitle: true, hudSize: 100, hudPosition: null });
-          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: "Building HUD", hudPosition: { ...cfg.hudPosition } }); }
-        }
-      }
-      if (abilityHudState?.container?.isConnected) {
-        const pos = readHudPositionFromElement(abilityHudState.container);
-        if (pos) {
-          const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
-          if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } }); }
-        }
-      }
-    } catch (_) {}
+    const syncHudPosition = (moduleName, container) => {
+      const pos = readHudPositionFromElement(container);
+      if (!pos) return;
+      patchHudModuleConfig(moduleName, { hudPosition: pos });
+      upgradeHudLog("Stored HUD position before save", { moduleName, hudPosition: pos });
+    };
+    syncHudPosition("Upgrade HUD", upgradeHudState?.container);
+    syncHudPosition("Building HUD", lavaBuildingHudState?.container);
     return {
       toggleKey: CONFIG.toggleKey,
       globalPreset: state.globalPreset,
@@ -10156,7 +6916,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   function setPanelHidden(panelName, hidden) {
     state.hiddenCategories[panelName] = !!hidden;
     applySearchFilter();
-
   }
 
   function clampToViewport(x, y, el) {
@@ -10192,26 +6951,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     };
   }
 
-  let dragState = null;
-  let resizeState = null;
-  let hasPositionChanges = false;
-  let hasSizeChanges = false;
-
-  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
-
-  function normalizeDisplayMode(value) {
-    return value === "merged" ? "merged" : "loose";
-  }
-
-  function normalizeLoosePoint(value, fallbackX, fallbackY) {
-    const x = Number(value?.x);
-    const y = Number(value?.y);
-    return {
-      x: Number.isFinite(x) ? x : fallbackX,
-      y: Number.isFinite(y) ? y : fallbackY,
-    };
-  }
-
   function getMergedPanelPositionsSnapshot() {
     const snapshot = {};
     shell.classList.remove("loose-mode");
@@ -10227,7 +6966,7 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   }
 
   function setDisplayMode(mode) {
-    const nextMode = normalizeDisplayMode(mode);
+    const nextMode = mode === "loose" ? "loose" : "merged";
     const mergedSnapshot = nextMode === "loose" ? getMergedPanelPositionsSnapshot() : null;
 
     if (nextMode === "loose" && !state.looseInitialized) {
@@ -10244,8 +6983,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     }
 
     if (state.displayMode === "loose") {
-      shell.style.width = "";
-      shell.style.height = "";
       state.mergedRootPosition = {
         left: parseInt(root.style.left || "20", 10),
         top: parseInt(root.style.top || "28", 10),
@@ -10255,32 +6992,23 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
       const shellRect = shell.getBoundingClientRect();
       const scale = getShellScale();
-      state.loosePositions.topbar = normalizeLoosePoint(state.loosePositions?.topbar, 12, 12);
       const clampedTopbar = clampLoosePosition(state.loosePositions.topbar.x, state.loosePositions.topbar.y, topbar, scale, shellRect);
       state.loosePositions.topbar = clampedTopbar;
       topbar.style.left = `${clampedTopbar.x}px`;
       topbar.style.top = `${clampedTopbar.y}px`;
 
-      let panelIndex = 0;
       for (const [name, panel] of panelByName.entries()) {
         const existingRect = panel.getBoundingClientRect();
-        const snapshotPos = mergedSnapshot?.[name];
-        const hasRenderableSize = existingRect.width > 0 && existingRect.height > 0;
-        const safeSnapshotPos = hasRenderableSize ? snapshotPos : null;
-        const safeFallbackPos = hasRenderableSize
-          ? {
-            x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
-            y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
-          }
-          : { x: 16 + panelIndex * 22, y: 68 + panelIndex * 18 };
         const pos = state.loosePanelPositions[name]
-          || safeSnapshotPos
-          || safeFallbackPos;
+          || mergedSnapshot?.[name]
+          || {
+          x: Math.round((existingRect.left - shellRect.left) / Math.max(scale, 0.001)),
+          y: Math.round((existingRect.top - shellRect.top) / Math.max(scale, 0.001)),
+        };
         const clamped = clampLoosePosition(pos.x, pos.y, panel, scale, shellRect);
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
-        panelIndex += 1;
       }
     } else {
       root.style.left = `${state.mergedRootPosition.left}px`;
@@ -10524,12 +7252,8 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         state.loosePanelPositions[name] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
-        hasPositionChanges = true;
       }
     }
-
-    const stylesCfg = getStylesConfigStore();
-    if (stylesCfg?.useGlobalTheme && isQuestionStylesEnabled()) refreshQuestionStylesAfterConfigChange();
   }
 
   function applySearchFilter() {
@@ -10578,7 +7302,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       event.stopPropagation();
       const nextCollapsed = !state.collapsedPanels[name];
       setPanelCollapsed(name, nextCollapsed);
-      saveSettings();
     };
     collapseButton.addEventListener("click", toggleCollapsed);
     collapseButton.addEventListener("keydown", (event) => {
@@ -10736,22 +7459,12 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   blurInput.addEventListener("input", applyAppearance);
   hoverShiftInput.addEventListener("input", applyAppearance);
   displayModeButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setDisplayMode(btn.dataset.displayMode || "merged");
-      saveSettings();
-    });
+    btn.addEventListener("click", () => setDisplayMode(btn.dataset.displayMode || "merged"));
   });
   searchAutofocusInput.addEventListener("change", () => {
     state.searchAutofocus = searchAutofocusInput.checked;
   });
-  function resetModuleTabPositions() {
-    state.looseInitialized = false;
-    state.loosePositions = { topbar: { x: 12, y: 12 } };
-    state.loosePanelPositions = {};
-    setDisplayMode(state.displayMode);
-  }
-
-  function resetAppearanceSettings() {
+  settingsResetBtn.addEventListener("click", () => {
     accentInput.value = "#ff3d3d";
     shellBgStartInput.value = "#ff3d3d";
     shellBgEndInput.value = "#000000";
@@ -10793,6 +7506,9 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     radiusInput.value = "14";
     blurInput.value = "10";
     hoverShiftInput.value = "2";
+    state.looseInitialized = false;
+    state.loosePositions = { topbar: { x: 12, y: 12 } };
+    state.loosePanelPositions = {};
     state.collapsedPanels = {};
     for (const panelName of panelByName.keys()) {
       setPanelCollapsed(panelName, false);
@@ -10846,57 +7562,51 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     shell.style.background = "";
     shell.style.transform = "";
     shell.style.backdropFilter = "";
-  }
-
-  settingsResetPositionsBtn.addEventListener("click", () => {
-    resetModuleTabPositions();
-    saveSettings();
-  });
-
-  settingsResetBtn.addEventListener("click", () => {
-    resetAppearanceSettings();
-    resetModuleTabPositions();
     saveSettings();
   });
 
   settingsResetAllBtn.addEventListener("click", () => {
-    resetAppearanceSettings();
-    resetModuleTabPositions();
-    state.hiddenCategories = {};
-    state.globalPreset = "default";
-    state.enabledModules = new Set();
-    for (const [moduleName, moduleInstance] of state.modules.entries()) {
-      if (!moduleInstance?.enabled) continue;
-      try { moduleInstance.disable(); } catch (_) {}
-      const item = state.moduleItems.get(moduleName);
-      item?.classList.remove("active");
+    // Nuke localStorage
+    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+
+    // Reset module enabled state
+    for (const moduleName of [...state.enabledModules]) {
+      toggleModule(moduleName); // toggles off
     }
+    state.enabledModules.clear();
+    for (const [, item] of state.moduleItems) item.classList.remove("active");
+
+    // Reset all module configs (keybinds + settings)
     state.moduleConfig = new Map();
-    for (const item of state.moduleItems.values()) {
-      const moduleName = item.dataset.module;
-      if (!moduleName) continue;
+
+    // Reset keybind labels
+    for (const [moduleName, item] of state.moduleItems) {
       setBindLabel(item, moduleName);
     }
-    setCurrentBindText(null);
-    state.listeningForBind = null;
-    setBindButtonText("Set keybind");
-    applySearchFilter();
-    saveSettings();
-    try { closeConfig(); } catch (_) {}
+
+    // Reset menu keybind
+    CONFIG.toggleKey = CONFIG.defaultToggleKey;
+    settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
+    setFooterText();
+
+    // Reset search autofocus
+    state.searchAutofocus = true;
+    searchAutofocusInput.checked = true;
+
+    // Trigger the full appearance reset too
+    settingsResetBtn.click();
   });
 
   function saveSettings(showFeedback = false) {
     try {
-      const payload = collectSettings();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(collectSettings()));
       if (showFeedback) {
         settingsSaveBtn.textContent = "Saved";
         setTimeout(() => {
           settingsSaveBtn.textContent = "Save";
         }, 850);
       }
-    } catch (error) {
-      console.error(error);
+    } catch (_) {
       if (showFeedback) {
         settingsSaveBtn.textContent = "Save failed";
         setTimeout(() => {
@@ -10912,20 +7622,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
   settingsCloseBtn.addEventListener("click", () => {
     closeConfig();
-  });
-  configResetBtn?.addEventListener("click", () => {
-    if (!openConfigModule) return;
-    const moduleName = openConfigModule;
-    resetModuleConfig(moduleName);
-    if (moduleName === ABILITY_HUD_MODULE_NAME) {
-      applyAbilityHudLiveConfig({ cfg: moduleCfg(moduleName) });
-      requestAbilityHudRender();
-    } else if (moduleName === "Upgrade HUD") {
-      hardRefreshUpgradeHud(moduleCfg(moduleName));
-    } else if (moduleName === "Building HUD") {
-      hardRefreshLavaBuildingHud(moduleCfg(moduleName));
-    }
-    openConfig(moduleName);
   });
   configCloseBtn.addEventListener("click", () => closeConfig());
   settingsTopCloseBtn.addEventListener("click", () => closeConfig());
@@ -11046,19 +7742,15 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         assign(radiusInput, "radius");
         assign(blurInput, "blur");
         assign(hoverShiftInput, "hoverShift");
-        state.displayMode = normalizeDisplayMode(saved.displayMode);
+        if (saved.displayMode) state.displayMode = saved.displayMode === "loose" ? "loose" : "merged";
         if (typeof saved.looseInitialized === "boolean") state.looseInitialized = saved.looseInitialized;
         if (saved.loosePositions && typeof saved.loosePositions === "object") {
           state.loosePositions = {
-            topbar: normalizeLoosePoint(saved.loosePositions.topbar, state.loosePositions.topbar.x, state.loosePositions.topbar.y),
+            topbar: saved.loosePositions.topbar || state.loosePositions.topbar,
           };
         }
         if (saved.loosePanelPositions && typeof saved.loosePanelPositions === "object") {
-          const normalizedPanelPositions = {};
-          for (const [panelName, panelPos] of Object.entries(saved.loosePanelPositions)) {
-            normalizedPanelPositions[panelName] = normalizeLoosePoint(panelPos, 16, 68);
-          }
-          state.loosePanelPositions = normalizedPanelPositions;
+          state.loosePanelPositions = saved.loosePanelPositions;
         }
         if (saved.collapsedPanels && typeof saved.collapsedPanels === "object") {
           state.collapsedPanels = saved.collapsedPanels;
@@ -11080,25 +7772,15 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           : (Array.isArray(saved.moduleSettings) ? saved.moduleSettings : null);
         if (savedModuleConfig) {
           const migratedModuleConfig = savedModuleConfig.map(([name, cfg]) => {
-            const nextName = name === LEGACY_ANIMATION_SKIP_MODULE_NAME
-              ? ANIMATION_SKIP_MODULE_NAME
-              : (name === LEGACY_STYLES_MODULE_NAME ? STYLES_MODULE_NAME : name);
-            const nextCfg = (cfg && typeof cfg === "object") ? { ...cfg } : cfg;
-            if (nextName === ABILITY_HUD_MODULE_NAME && nextCfg && typeof nextCfg === "object") {
-              delete nextCfg.abilityHudEnabled; delete nextCfg.abilityHudPositionX; delete nextCfg.abilityHudPositionY; delete nextCfg.abilityHudZIndex; delete nextCfg.abilityHudOpacity;
-            }
-            return [nextName, nextCfg];
+            if (name === LEGACY_ANIMATION_SKIP_MODULE_NAME) return [ANIMATION_SKIP_MODULE_NAME, cfg];
+            return [name, cfg];
           });
           state.moduleConfig = new Map(migratedModuleConfig);
         }
         if (Array.isArray(saved.enabledModules)) {
           pendingEnabledModules = saved.enabledModules
             .filter((name) => typeof name === "string")
-            .map((name) => {
-              if (name === LEGACY_ANIMATION_SKIP_MODULE_NAME) return ANIMATION_SKIP_MODULE_NAME;
-              if (name === LEGACY_STYLES_MODULE_NAME) return STYLES_MODULE_NAME;
-              return name;
-            });
+            .map((name) => (name === LEGACY_ANIMATION_SKIP_MODULE_NAME ? ANIMATION_SKIP_MODULE_NAME : name));
         }
         settingsMenuKeyBtn.textContent = `Menu Key: ${CONFIG.toggleKey}`;
         setFooterText();
@@ -11114,30 +7796,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   applyAppearance();
   setDisplayMode(state.displayMode);
   applySearchFilter();
-
-
-  function hydrateHudConfigsFromStorage() {
-    const hudModules = ["Upgrade HUD", "Building HUD", ABILITY_HUD_MODULE_NAME];
-    for (const moduleName of hudModules) {
-      const cfg = moduleCfg(moduleName);
-      if (!cfg || typeof cfg !== "object") continue;
-      let didPatch = false;
-      if (moduleName === "Upgrade HUD") {
-        const normalized = readUpgradeHudConfig();
-        for (const [k,v] of Object.entries(normalized)) { if (cfg[k] === undefined) { cfg[k]=v; didPatch = true; } }
-      } else if (moduleName === "Building HUD") {
-        const normalized = readBuildingHudConfig();
-        for (const [k,v] of Object.entries(normalized)) { if (cfg[k] === undefined) { cfg[k]=v; didPatch = true; } }
-      } else {
-        const normalized = getAbilityHudConfigFromRaw(cfg);
-        for (const [k,v] of Object.entries(normalized)) { if (cfg[k] === undefined) { cfg[k]=v; didPatch = true; } }
-        const pos = normalizeHudPosition(cfg.hudPosition, null);
-        if (cfg.hudPosition === undefined && pos) { cfg.hudPosition = pos; didPatch = true; }
-      }
-      if (didPatch && typeof saveSettings === "function") saveSettings();
-    }
-  }
-  hydrateHudConfigsFromStorage();
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
     if (!moduleInstance || moduleInstance.enabled) continue;
@@ -11160,7 +7818,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
           searchInput.value = "";
           state.searchQuery = "";
           applySearchFilter();
-
         }
       });
     }
@@ -11207,26 +7864,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
 
     if (isTypingTarget(event.target)) return;
 
-    if (state.enabledModules.has(CAMERA_ZOOM_MODULE_NAME)) {
-      const cfg = moduleCfg(CAMERA_ZOOM_MODULE_NAME);
-      let nextZoom = Number(cfg.zoom ?? CAMERA_ZOOM_DEFAULT) || CAMERA_ZOOM_DEFAULT;
-      if (event.key === "[") {
-        event.preventDefault();
-        nextZoom = clampCameraZoom(nextZoom - CAMERA_ZOOM_STEP);
-      } else if (event.key === "]") {
-        event.preventDefault();
-        nextZoom = clampCameraZoom(nextZoom + CAMERA_ZOOM_STEP);
-      } else if (event.key === "\\") {
-        event.preventDefault();
-        nextZoom = CAMERA_ZOOM_DEFAULT;
-      }
-      if (nextZoom !== Number(cfg.zoom ?? CAMERA_ZOOM_DEFAULT)) {
-        cfg.zoom = nextZoom;
-        showCameraZoomToast(nextZoom);
-        saveSettings();
-      }
-    }
-
     for (const [moduleName, cfg] of ensureModuleConfigStore()) {
       if (cfg.keybind && cfg.keybind === event.key) {
         toggleModule(moduleName);
@@ -11235,6 +7872,11 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
   });
 
   // Intentionally no backdrop click-to-close; menus close only via explicit close buttons.
+
+  let dragState = null;
+  let resizeState = null;
+
+  const panelDragState = { panelName: null, offsetX: 0, offsetY: 0, shellLeft: 0, shellTop: 0, scale: 1 };
 
   topbar.addEventListener("mousedown", (event) => {
     const interactiveTarget = event.target instanceof Element
@@ -11288,7 +7930,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       const clamped = clampToViewport(event.clientX - dragState.offsetX, event.clientY - dragState.offsetY, root);
       root.style.left = `${clamped.x}px`;
       root.style.top = `${clamped.y}px`;
-      hasPositionChanges = true;
     }
 
     if (dragState?.mode === "topbar") {
@@ -11302,7 +7943,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
       state.loosePositions.topbar = clamped;
       topbar.style.left = `${clamped.x}px`;
       topbar.style.top = `${clamped.y}px`;
-      hasPositionChanges = true;
     }
 
     if (panelDragState.panelName) {
@@ -11318,22 +7958,17 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
         state.loosePanelPositions[panelDragState.panelName] = clamped;
         panel.style.left = `${clamped.x}px`;
         panel.style.top = `${clamped.y}px`;
-        hasPositionChanges = true;
       }
     }
   });
 
   document.addEventListener("mouseup", () => {
-    const shouldSave = hasPositionChanges || hasSizeChanges;
     dragState = null;
     resizeState = null;
     panelDragState.panelName = null;
     panelDragState.shellLeft = 0;
     panelDragState.shellTop = 0;
     panelDragState.scale = 1;
-    hasPositionChanges = false;
-    hasSizeChanges = false;
-    if (shouldSave) saveSettings();
   });
 
   resizeHandle.addEventListener("mousedown", (event) => {
@@ -11357,7 +7992,6 @@ if (window.__ZYROX_EXTENSION_INJECTED__) {
     state.shellHeight = height;
     shell.style.width = `${width}px`;
     shell.style.height = `${height}px`;
-    hasSizeChanges = true;
   });
 
   // Theme category switching functionality
