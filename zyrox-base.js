@@ -1470,11 +1470,14 @@
   const GAME_FINDER_MODULE_NAME = "Game Finder";
   const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
+  const GAME_FINDER_MIN_DELAY_MS = 25;
+  const GAME_FINDER_MAX_DELAY_MS = 500;
   const GAME_FINDER_DEFAULT_DELAY_MS = 150;
   const GAME_FINDER_RETRY_DELAY_MS = 2000;
   const gameFinderState = {
     enabled: false,
     scanId: 0,
+    delayMs: GAME_FINDER_DEFAULT_DELAY_MS,
   };
 
   function gameFinderLog(message, extra) {
@@ -1495,11 +1498,25 @@
     return Math.floor(Math.random() * (1_000_000 - 100_000) + 100_000);
   }
 
-  function getGameFinderDelay() {
-    const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
-    const delay = Number(cfg.delay);
+  function normalizeGameFinderDelay(value) {
+    const delay = Number(value);
     if (!Number.isFinite(delay)) return GAME_FINDER_DEFAULT_DELAY_MS;
-    return Math.max(25, Math.min(500, delay));
+    return Math.max(GAME_FINDER_MIN_DELAY_MS, Math.min(GAME_FINDER_MAX_DELAY_MS, delay));
+  }
+
+  function syncGameFinderDelayFromConfig() {
+    const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
+    gameFinderState.delayMs = normalizeGameFinderDelay(cfg.delay);
+    return gameFinderState.delayMs;
+  }
+
+  function getGameFinderDelay() {
+    return syncGameFinderDelayFromConfig();
+  }
+
+  function setGameFinderDelay(value) {
+    gameFinderState.delayMs = normalizeGameFinderDelay(value);
+    return gameFinderState.delayMs;
   }
 
   async function checkGameFinderPin(pin) {
@@ -1539,7 +1556,7 @@
         gameFinderLog(`code:${pin} | name picker: ${namePicker}`);
       }
 
-      await gameFinderDelay(getGameFinderDelay());
+      await gameFinderDelay(gameFinderState.delayMs);
     }
   }
 
@@ -1550,7 +1567,8 @@
     }
     gameFinderState.enabled = true;
     gameFinderState.scanId += 1;
-    gameFinderLog(`Started scanning random Gimkit game codes with ${getGameFinderDelay()}ms delay.`);
+    syncGameFinderDelayFromConfig();
+    gameFinderLog(`Started scanning random Gimkit game codes with ${gameFinderState.delayMs}ms delay.`);
     runGameFinderScanLoop(gameFinderState.scanId);
   }
 
@@ -6907,7 +6925,7 @@
               name: GAME_FINDER_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
-                { id: "delay", label: "Delay", type: "slider", min: 25, max: 500, step: 5, default: 150, unit: "ms" },
+                { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 5, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
               ],
             },
             {
@@ -9673,6 +9691,11 @@
                 window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
                 if (quickFireState.enabled) startQuickFire();
               }
+              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
+                const nextDelay = setGameFinderDelay(newVal);
+                cfg[setting.id] = nextDelay;
+                if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
+              }
               saveSettings();
             });
             settingInput.addEventListener("change", (event) => {
@@ -9685,6 +9708,11 @@
               if (moduleName === "Quick Fire") {
                 window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
                 if (quickFireState.enabled) startQuickFire();
+              }
+              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "delay") {
+                const nextDelay = setGameFinderDelay(newVal);
+                cfg[setting.id] = nextDelay;
+                if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
               }
               saveSettings();
             });
