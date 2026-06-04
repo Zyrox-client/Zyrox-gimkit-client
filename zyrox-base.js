@@ -4736,7 +4736,7 @@
       multiplier: true,
       moneyPerQuestion: true,
       streakBonus: true,
-      insurance: true,
+      insurance: false,
     },
     order: [...AUTO_UPGRADE_TIE_BREAK_ORDER],
   };
@@ -8037,7 +8037,7 @@
                 { id: "multiplier", label: "Multiplier", type: "checkbox", default: true },
                 { id: "moneyPerQuestion", label: "Money / Question", type: "checkbox", default: true },
                 { id: "streakBonus", label: "Streak Bonus", type: "checkbox", default: true },
-                { id: "insurance", label: "Insurance", type: "checkbox", default: true },
+                { id: "insurance", label: "Insurance", type: "checkbox", default: false },
               ],
             },
             {
