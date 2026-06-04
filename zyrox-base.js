@@ -1469,6 +1469,7 @@
 
   const GAME_FINDER_MODULE_NAME = "Game Finder";
   const GAME_FINDER_LOG_PREFIX = "[Game Finder]";
+  const GAME_FINDER_BUTTON_SIZE = 50;
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
   const GAME_FINDER_MIN_DELAY_MS = 0;
   const GAME_FINDER_MAX_DELAY_MS = 500;
@@ -1639,7 +1640,7 @@
         min-width: 0;
       }
       .zyrox-game-finder-button {
-        --zyrox-game-finder-size: 44px;
+        --zyrox-game-finder-size: 50px;
         position: relative;
         display: inline-flex;
         align-items: center;
@@ -1736,10 +1737,8 @@
     gameFinderState.inputOriginalStyle = null;
   }
 
-  function syncGameFinderButtonSize(input, button) {
-    const rect = input.getBoundingClientRect();
-    const side = Math.max(32, Math.round(rect.height || input.offsetHeight || 50));
-    button.style.setProperty("--zyrox-game-finder-size", `${side}px`);
+  function syncGameFinderButtonSize(button) {
+    button.style.setProperty("--zyrox-game-finder-size", `${GAME_FINDER_BUTTON_SIZE}px`);
   }
 
   function cleanupGameFinderWrapper() {
@@ -1795,7 +1794,7 @@
       gameFinderState.button = button;
     }
 
-    syncGameFinderButtonSize(input, button);
+    syncGameFinderButtonSize(button);
     if (button.parentElement !== wrapper || button.previousElementSibling !== input) {
       wrapper.appendChild(button);
     }
