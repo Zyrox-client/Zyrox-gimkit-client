@@ -3398,11 +3398,23 @@
       maxCatchupMs: 100,
       socketBufferLimitBytes: 262144,
       schedulerMode: "auto",
-      onlyWhenMouseDown: true,
+      alwaysFire: false,
       onlyWhenGameFocused: true,
     };
     const stored = window.__zyroxQuickFireConfig;
-    return stored && typeof stored === "object" ? { ...defaults, ...stored } : defaults;
+    if (stored && typeof stored === "object") {
+      const migrated = { ...defaults };
+      if (Object.prototype.hasOwnProperty.call(stored, "enabled")) migrated.enabled = Boolean(stored.enabled);
+      if (Object.prototype.hasOwnProperty.call(stored, "fireIntervalMs")) migrated.fireIntervalMs = stored.fireIntervalMs;
+      if (Object.prototype.hasOwnProperty.call(stored, "onlyWhenGameFocused")) migrated.onlyWhenGameFocused = Boolean(stored.onlyWhenGameFocused);
+      if (Object.prototype.hasOwnProperty.call(stored, "alwaysFire")) {
+        migrated.alwaysFire = Boolean(stored.alwaysFire);
+      } else if (Object.prototype.hasOwnProperty.call(stored, "onlyWhenMouseDown")) {
+        migrated.alwaysFire = stored.onlyWhenMouseDown === false;
+      }
+      return migrated;
+    }
+    return defaults;
   }
 
   function getAutoAimConfig() {
@@ -4054,7 +4066,7 @@
       setQuickFireStatus("Waiting for game objects");
       return null;
     }
-    if (cfg.onlyWhenMouseDown && !isQuickFireMouseDown(mousePointer)) {
+    if (!cfg.alwaysFire && !isQuickFireMouseDown(mousePointer)) {
       setQuickFireStatus("Waiting for left click");
       return null;
     }
@@ -7699,7 +7711,7 @@
     "ESP": "Shows players with tracers, names, and off-screen indicators.",
     "Crosshair": "Draws a customizable crosshair and optional center line.",
     "Triggerbot (Autoshoot)": "Fires automatically when an enemy is in your aim radius.",
-    "Quick Fire": "Rapidly fires toward your cursor while left click is held.",
+    "Quick Fire": "Rapidly fires toward your cursor; enable Always fire to shoot without holding left click.",
     "Aimbot": "Smoothly snaps your aim to nearby enemy players.",
     "Answer Reveal": "Reveals Draw It prompts/answers inside the drawing round.",
     "Answer Popup": "Displays detected Draw It answers in a popup.",
@@ -7903,17 +7915,7 @@
               settings: [
                 { id: "enabled",             label: "Enabled",              type: "checkbox", default: true },
                 { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 5, min: 0, max: 250, step: 0.1, unit: "ms" },
-                { id: "maxBurstPerTick",    label: "Max Burst / Tick",     type: "slider",   default: 8, min: 1, max: 100, step: 1, unit: "" },
-                { id: "maxPacketsPerSecond", label: "Max Packets / Sec",   type: "slider",   default: 500, min: 1, max: 2000, step: 1, unit: "" },
-                { id: "maxCatchupMs",       label: "Max Catch-up",        type: "slider",   default: 100, min: 0, max: 1000, step: 10, unit: "ms" },
-                { id: "socketBufferLimitBytes", label: "Socket Buffer Limit", type: "slider", default: 262144, min: 0, max: 1048576, step: 4096, unit: "B" },
-                { id: "schedulerMode",      label: "Scheduler",            type: "select",   default: "auto", options: [
-                  { value: "auto", label: "Auto" },
-                  { value: "messageChannel", label: "MessageChannel" },
-                  { value: "timer", label: "Timer" },
-                  { value: "raf", label: "RAF" },
-                ] },
-                { id: "onlyWhenMouseDown",   label: "Only While Left Click", type: "checkbox", default: true },
+                { id: "alwaysFire",          label: "Always fire",          type: "checkbox", default: false },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
               ],
             },
