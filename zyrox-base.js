@@ -8658,6 +8658,8 @@
     .zyrox-config-sub { color: var(--zyx-settings-subtext); font-size: 11px; line-height: 1.2; }
     .zyrox-config-body { padding: 13px; color: var(--zyx-settings-text); }
     .zyrox-config-row { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--zyx-settings-text); font-size:14px; }
+    .zyrox-hold-toggle { display:inline-flex; align-items:center; gap:6px; margin-left:auto; font-size:12px; color:var(--zyx-settings-subtext); cursor:pointer; user-select:none; }
+    .zyrox-hold-toggle input[type='checkbox'] { width:16px; height:16px; margin:0; accent-color:var(--zyx-checkmark-color); cursor:pointer; }
     .zyrox-config-actions { display: flex; align-items: center; gap: 6px; }
 
     /* FIX: was hardcoded rgba(255, 61, 61, ...) — now reads CSS variables set by applyAppearance() */
@@ -9407,7 +9409,7 @@
     if (state.moduleConfig && typeof state.moduleConfig === "object") {
       for (const [moduleName, cfg] of Object.entries(state.moduleConfig)) {
         if (cfg && typeof cfg === "object") {
-          recovered.set(moduleName, { ...cfg, keybind: cfg.keybind || null });
+          recovered.set(moduleName, { ...cfg, keybind: cfg.keybind || null, hold: Boolean(cfg.hold) });
         }
       }
     }
@@ -9425,9 +9427,13 @@
           settings[setting.id] = setting.default ?? setting.min ?? 0;
         }
       }
-      store.set(name, { keybind: null, ...settings });
+      store.set(name, { keybind: null, hold: false, ...settings });
     }
     const cfg = store.get(name);
+    if (cfg && typeof cfg === "object") {
+      if (cfg.keybind === undefined) cfg.keybind = null;
+      if (cfg.hold === undefined) cfg.hold = false;
+    }
     if (cfg && layout && Array.isArray(layout.settings)) {
       for (const setting of layout.settings) {
         if (cfg[setting.id] !== undefined) continue;
@@ -9456,23 +9462,30 @@
     label.style.display = bind ? "" : "none";
   }
 
-  function toggleModule(moduleName) {
+  function setModuleEnabled(moduleName, enabled, { persist = true } = {}) {
     const item = state.moduleItems.get(moduleName);
     const moduleInstance = state.modules.get(moduleName);
     if (!item || !moduleInstance) return;
+    if (enabled === moduleInstance.enabled) return;
 
-    if (moduleInstance.enabled) {
-      moduleInstance.disable();
-      item.classList.remove("active");
-      state.enabledModules.delete(moduleName);
-      if (moduleName === "Auto Answer") stopAutoAnswer();
-    } else {
+    if (enabled) {
       moduleInstance.enable();
       item.classList.add("active");
       state.enabledModules.add(moduleName);
       if (moduleName === "Auto Answer") startAutoAnswer();
+    } else {
+      moduleInstance.disable();
+      item.classList.remove("active");
+      state.enabledModules.delete(moduleName);
+      if (moduleName === "Auto Answer") stopAutoAnswer();
     }
-    saveSettings();
+    if (persist) saveSettings();
+  }
+
+  function toggleModule(moduleName, options) {
+    const moduleInstance = state.modules.get(moduleName);
+    if (!moduleInstance) return;
+    setModuleEnabled(moduleName, !moduleInstance.enabled, options);
   }
 
   // ---------------------------------------------------------------------------
@@ -9612,6 +9625,10 @@
     configBody.innerHTML = `
       <div class="zyrox-config-row">
         <span class="zyrox-keybind-current">Keybind: ${cfg.keybind || "none"}</span>
+        <label class="zyrox-hold-toggle" title="Only enable this module while its keybind is held down">
+          <input type="checkbox" class="hold-bind-checkbox" ${cfg.hold ? "checked" : ""} />
+          <span>Hold</span>
+        </label>
         <div class="zyrox-config-actions">
           <button class="zyrox-btn zyrox-btn-square reset-bind-btn" type="button" title="Reset keybind">↺</button>
           <button class="zyrox-btn set-bind-btn" type="button">Set keybind</button>
@@ -9622,6 +9639,17 @@
     currentResetBindBtn = configMenu.querySelector(".reset-bind-btn");
     currentSetBindBtn = configMenu.querySelector(".set-bind-btn");
     currentBindTextEl = configMenu.querySelector(".zyrox-keybind-current");
+    const currentHoldBindCheckbox = configMenu.querySelector(".hold-bind-checkbox");
+
+    if (currentHoldBindCheckbox) {
+      currentHoldBindCheckbox.addEventListener("change", (event) => {
+        if (!openConfigModule) return;
+        const activeCfg = moduleCfg(openConfigModule);
+        activeCfg.hold = Boolean(event.target.checked);
+        if (activeCfg.hold) setModuleEnabled(openConfigModule, false, { persist: false });
+        saveSettings();
+      });
+    }
 
     if (currentSetBindBtn) {
       currentSetBindBtn.addEventListener("click", () => {
@@ -10835,7 +10863,7 @@
       loosePanelPositions: state.loosePanelPositions,
       collapsedPanels: state.collapsedPanels,
       hiddenCategories: state.hiddenCategories,
-      enabledModules: Array.from(state.enabledModules),
+      enabledModules: Array.from(state.enabledModules).filter((moduleName) => !moduleCfg(moduleName).hold),
       moduleConfig: Array.from(ensureModuleConfigStore().entries()),
     };
   }
@@ -11350,6 +11378,8 @@
       setBindLabel(item, moduleName);
 
       item.addEventListener("click", () => {
+        const cfg = moduleCfg(moduleName);
+        if (cfg.hold) return;
         toggleModule(moduleName);
       });
 
@@ -11857,7 +11887,7 @@
   hydrateHudConfigsFromStorage();
   for (const moduleName of pendingEnabledModules) {
     const moduleInstance = state.modules.get(moduleName);
-    if (!moduleInstance || moduleInstance.enabled) continue;
+    if (!moduleInstance || moduleInstance.enabled || moduleCfg(moduleName).hold) continue;
     toggleModule(moduleName);
   }
 
@@ -11945,9 +11975,21 @@
     }
 
     for (const [moduleName, cfg] of ensureModuleConfigStore()) {
-      if (cfg.keybind && cfg.keybind === event.key) {
+      if (!cfg.keybind || cfg.keybind !== event.key) continue;
+      event.preventDefault();
+      if (cfg.hold) {
+        if (!event.repeat) setModuleEnabled(moduleName, true, { persist: false });
+      } else if (!event.repeat) {
         toggleModule(moduleName);
       }
+    }
+  });
+
+  document.addEventListener("keyup", (event) => {
+    for (const [moduleName, cfg] of ensureModuleConfigStore()) {
+      if (!cfg.hold || !cfg.keybind || cfg.keybind !== event.key) continue;
+      event.preventDefault();
+      setModuleEnabled(moduleName, false, { persist: false });
     }
   });
 
