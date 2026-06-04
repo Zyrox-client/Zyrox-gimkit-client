@@ -1474,7 +1474,16 @@
   const GAME_FINDER_MIN_DELAY_MS = 0;
   const GAME_FINDER_MAX_DELAY_MS = 500;
   const GAME_FINDER_DEFAULT_DELAY_MS = 0;
-  const GAME_FINDER_RETRY_DELAY_MS = 2000;
+  const GAME_FINDER_MIN_CONCURRENCY = 1;
+  const GAME_FINDER_MAX_CONCURRENCY = 32;
+  const GAME_FINDER_DEFAULT_CONCURRENCY = 12;
+  const GAME_FINDER_RETRY_DELAY_MS = 500;
+  const GAME_FINDER_PIN_MIN = 100_000;
+  const GAME_FINDER_PIN_MAX = 999_999;
+  const GAME_FINDER_PIN_SPACE = GAME_FINDER_PIN_MAX - GAME_FINDER_PIN_MIN + 1;
+  const GAME_FINDER_STATS_INTERVAL_MS = 1000;
+  const GAME_FINDER_RATE_LIMIT_STATUS_CHECK_INTERVAL = 4;
+  const GAME_FINDER_RATE_LIMIT_RESULT = Object.freeze({ rateLimited: true });
   const GAME_FINDER_BUTTON_LABEL = "Find Game";
   const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
   const gameFinderState = {
@@ -1482,6 +1491,7 @@
     scanning: false,
     scanId: 0,
     delayMs: GAME_FINDER_DEFAULT_DELAY_MS,
+    concurrency: GAME_FINDER_DEFAULT_CONCURRENCY,
     button: null,
     input: null,
     wrapper: null,
@@ -1490,6 +1500,17 @@
     attachScheduled: false,
     attachTimer: null,
     foundCode: null,
+    attemptedPins: null,
+    attemptedCount: 0,
+    fallbackCursor: 0,
+    attempts: 0,
+    inFlight: 0,
+    startedAt: 0,
+    abortController: null,
+    workers: [],
+    statsTimer: null,
+    lastStatsLogAt: 0,
+    rateLimited: false,
   };
 
   function gameFinderWarn(message, extra) {
@@ -1504,7 +1525,58 @@
   }
 
   function randomGameFinderPin() {
-    return Math.floor(Math.random() * (1_000_000 - 100_000) + 100_000);
+    return GAME_FINDER_PIN_MIN + randomGameFinderOffset(GAME_FINDER_PIN_SPACE);
+  }
+
+  function randomGameFinderOffset(maxExclusive) {
+    const max = Math.floor(Number(maxExclusive));
+    if (!Number.isFinite(max) || max <= 0) return 0;
+    const cryptoApi = globalThis.crypto;
+    if (cryptoApi?.getRandomValues) {
+      const bucketSize = Math.floor(0x1_0000_0000 / max) * max;
+      const buffer = new Uint32Array(1);
+      do {
+        cryptoApi.getRandomValues(buffer);
+      } while (buffer[0] >= bucketSize);
+      return buffer[0] % max;
+    }
+    return Math.floor(Math.random() * max);
+  }
+
+  function createGameFinderAttemptedPins() {
+    return new Uint8Array(Math.ceil(GAME_FINDER_PIN_SPACE / 8));
+  }
+
+  function markGameFinderAttemptedOffset(offset) {
+    const bitset = gameFinderState.attemptedPins;
+    if (!bitset || offset < 0 || offset >= GAME_FINDER_PIN_SPACE) return false;
+    const byteIndex = offset >> 3;
+    const bitMask = 1 << (offset & 7);
+    if (bitset[byteIndex] & bitMask) return false;
+    bitset[byteIndex] |= bitMask;
+    gameFinderState.attemptedCount += 1;
+    return true;
+  }
+
+  function nextGameFinderPin() {
+    if (!gameFinderState.attemptedPins || gameFinderState.attemptedCount >= GAME_FINDER_PIN_SPACE) return null;
+
+    const attemptsBeforeFallback = 24;
+    for (let i = 0; i < attemptsBeforeFallback; i += 1) {
+      const offset = randomGameFinderOffset(GAME_FINDER_PIN_SPACE);
+      if (markGameFinderAttemptedOffset(offset)) return GAME_FINDER_PIN_MIN + offset;
+    }
+
+    // Late in a scan, random duplicate rejection can become expensive. Walk a
+    // randomized cursor through the remaining space instead of spinning.
+    for (let i = 0; i < GAME_FINDER_PIN_SPACE; i += 1) {
+      const offset = (gameFinderState.fallbackCursor + i) % GAME_FINDER_PIN_SPACE;
+      if (markGameFinderAttemptedOffset(offset)) {
+        gameFinderState.fallbackCursor = (offset + 1) % GAME_FINDER_PIN_SPACE;
+        return GAME_FINDER_PIN_MIN + offset;
+      }
+    }
+    return null;
   }
 
   function normalizeGameFinderDelay(value) {
@@ -1514,10 +1586,17 @@
     return clamped <= 1 ? 0 : clamped;
   }
 
+  function normalizeGameFinderConcurrency(value) {
+    const concurrency = Number(value);
+    if (!Number.isFinite(concurrency)) return GAME_FINDER_DEFAULT_CONCURRENCY;
+    return Math.max(GAME_FINDER_MIN_CONCURRENCY, Math.min(GAME_FINDER_MAX_CONCURRENCY, Math.round(concurrency)));
+  }
+
   function syncGameFinderConfig() {
     const cfg = getModuleConfigSafe(GAME_FINDER_MODULE_NAME, {});
     gameFinderState.delayMs = normalizeGameFinderDelay(cfg.delay);
-    return { delayMs: gameFinderState.delayMs };
+    gameFinderState.concurrency = normalizeGameFinderConcurrency(cfg.concurrency);
+    return { delayMs: gameFinderState.delayMs, concurrency: gameFinderState.concurrency };
   }
 
   function syncGameFinderDelayFromConfig() {
@@ -1531,6 +1610,15 @@
   function setGameFinderDelay(value) {
     gameFinderState.delayMs = normalizeGameFinderDelay(value);
     return gameFinderState.delayMs;
+  }
+
+  function setGameFinderConcurrency(value) {
+    gameFinderState.concurrency = normalizeGameFinderConcurrency(value);
+    updateGameFinderButton();
+    // Existing scans keep their worker count. The new concurrency value is
+    // applied the next time Game Finder is started, while the delay slider is
+    // still read live by each worker between requests.
+    return gameFinderState.concurrency;
   }
 
   function isVisibleGameFinderInput(input) {
@@ -1610,15 +1698,48 @@
     return true;
   }
 
+  function getGameFinderStats() {
+    const elapsedSeconds = gameFinderState.startedAt ? Math.max(0.001, (Date.now() - gameFinderState.startedAt) / 1000) : 0;
+    const requestsPerSecond = elapsedSeconds ? gameFinderState.attempts / elapsedSeconds : 0;
+    return {
+      attempts: gameFinderState.attempts,
+      inFlight: gameFinderState.inFlight,
+      requestsPerSecond,
+      concurrency: gameFinderState.concurrency,
+      foundCode: gameFinderState.foundCode,
+    };
+  }
+
   function updateGameFinderButton() {
     const button = gameFinderState.button;
     if (!button) return;
+    const stats = getGameFinderStats();
+    const activeLabel = `Stop Game Finder. Attempts: ${stats.attempts}; in flight: ${stats.inFlight}; ${stats.requestsPerSecond.toFixed(1)} req/s; concurrency: ${stats.concurrency}.`;
     button.classList.toggle("zyrox-game-finder-active", gameFinderState.scanning);
     button.setAttribute("aria-pressed", String(gameFinderState.scanning));
-    button.setAttribute("aria-label", gameFinderState.scanning ? "Stop Game Finder" : "Start Game Finder");
+    button.setAttribute("aria-label", gameFinderState.scanning ? activeLabel : "Start Game Finder");
     button.title = gameFinderState.scanning
-      ? "Game Finder is enabled. Press to stop trying random codes."
+      ? `${activeLabel}${stats.foundCode ? ` Found: ${stats.foundCode}.` : " Press to stop trying random codes."}`
       : "Press to enable Game Finder and try random codes.";
+  }
+
+  function startGameFinderStatsTimer() {
+    if (gameFinderState.statsTimer) clearInterval(gameFinderState.statsTimer);
+    gameFinderState.statsTimer = setInterval(() => {
+      if (!gameFinderState.scanning) return;
+      updateGameFinderButton();
+      const now = Date.now();
+      if (now - gameFinderState.lastStatsLogAt >= 5000) {
+        gameFinderState.lastStatsLogAt = now;
+        console.debug(`${GAME_FINDER_LOG_PREFIX} scan stats`, getGameFinderStats());
+      }
+    }, GAME_FINDER_STATS_INTERVAL_MS);
+  }
+
+  function clearGameFinderStatsTimer() {
+    if (!gameFinderState.statsTimer) return;
+    clearInterval(gameFinderState.statsTimer);
+    gameFinderState.statsTimer = null;
   }
 
   function ensureGameFinderStyle() {
@@ -1923,7 +2044,7 @@
     gameFinderState.observer.observe(observerTarget, { childList: true, subtree: true });
   }
 
-  async function checkGameFinderPin(pin) {
+  async function checkGameFinderPin(pin, signal, checkRateLimitStatus = false) {
     try {
       const response = await fetch(GAME_FINDER_API_URL, {
         method: "POST",
@@ -1932,56 +2053,142 @@
           "Accept": "application/json, text/plain, */*",
         },
         body: JSON.stringify({ code: String(pin) }),
+        signal,
       });
 
-      const remaining = parseInt(response.headers.get("x-ratelimit-remaining") ?? "999", 10);
-      const resetTs = parseInt(response.headers.get("x-ratelimit-reset") ?? "0", 10);
-      if (remaining <= 1 && resetTs > 0) {
-        const waitMs = Math.max(500, resetTs * 1000 - Date.now() + 200);
-        gameFinderWarn(`Rate limit nearly reached; waiting ${Math.round(waitMs)}ms.`);
-        await gameFinderDelay(waitMs);
+      if (checkRateLimitStatus && response.status === 429) return GAME_FINDER_RATE_LIMIT_RESULT;
+
+      const remainingHeader = response.headers.get("x-ratelimit-remaining");
+      const resetHeader = response.headers.get("x-ratelimit-reset");
+      const remaining = remainingHeader === null ? null : parseInt(remainingHeader, 10);
+      const resetTs = resetHeader === null ? null : parseInt(resetHeader, 10);
+      if (Number.isFinite(remaining) && Number.isFinite(resetTs) && remaining <= 1 && resetTs > 0) {
+        const waitMs = Math.max(0, resetTs * 1000 - Date.now() + 200);
+        if (waitMs > 0 && waitMs <= 30_000) {
+          gameFinderWarn(`Rate limit header present; worker waiting ${Math.round(waitMs)}ms.`);
+          await gameFinderDelay(waitMs);
+        }
       }
 
-      const data = await response.json();
-      return data?.code === 404 ? null : data;
-    } catch (_) {
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (_) {
+        data = null;
+      }
+      if (!response.ok || data?.code === 404) return null;
+      return data;
+    } catch (error) {
+      if (error?.name === "AbortError" || signal?.aborted) return null;
       await gameFinderDelay(GAME_FINDER_RETRY_DELAY_MS);
       return null;
     }
   }
 
-  async function runGameFinderScanLoop(scanId) {
-    while (gameFinderState.scanning && gameFinderState.scanId === scanId) {
-      const pin = randomGameFinderPin();
-      const delayMs = gameFinderState.delayMs;
-      const delayPromise = delayMs > 0 ? gameFinderDelay(delayMs) : null;
-      const result = await checkGameFinderPin(pin);
+  function handleGameFinderRateLimit(scanId) {
+    if (!gameFinderState.scanning || gameFinderState.scanId !== scanId || gameFinderState.rateLimited) return;
+    gameFinderState.rateLimited = true;
+    gameFinderState.abortController?.abort();
+    stopGameFinderScan();
+    setTimeout(() => {
+      alert("Game Finder was rate limited by Gimkit. Please wait about a minute before turning it on again.");
+    }, 0);
+  }
 
-      if (gameFinderState.scanning && gameFinderState.scanId === scanId && result) {
-        await enterFoundGameCode(pin);
-        gameFinderState.foundCode = String(pin).padStart(6, "0");
+  async function runGameFinderWorker(scanId, workerId, signal) {
+    while (gameFinderState.scanning && gameFinderState.scanId === scanId && !signal.aborted && !gameFinderState.foundCode) {
+      const pin = nextGameFinderPin();
+      if (pin === null) {
+        gameFinderWarn("All 6-digit game codes were attempted without finding an active game.");
         stopGameFinderScan();
         return;
       }
 
-      if (delayPromise) await delayPromise;
+      gameFinderState.attempts += 1;
+      const attemptNumber = gameFinderState.attempts;
+      const checkRateLimitStatus = attemptNumber % GAME_FINDER_RATE_LIMIT_STATUS_CHECK_INTERVAL === 0;
+      gameFinderState.inFlight += 1;
+      updateGameFinderButton();
+
+      let result = null;
+      try {
+        result = await checkGameFinderPin(pin, signal, checkRateLimitStatus);
+      } finally {
+        gameFinderState.inFlight = Math.max(0, gameFinderState.inFlight - 1);
+      }
+
+      if (result === GAME_FINDER_RATE_LIMIT_RESULT) {
+        handleGameFinderRateLimit(scanId);
+        return;
+      }
+
+      if (gameFinderState.scanning && gameFinderState.scanId === scanId && !signal.aborted && result && !gameFinderState.foundCode) {
+        const foundCode = String(pin).padStart(6, "0");
+        gameFinderState.foundCode = foundCode;
+        gameFinderState.abortController?.abort();
+        console.debug(`${GAME_FINDER_LOG_PREFIX} worker ${workerId} found code ${foundCode}`, getGameFinderStats());
+        await enterFoundGameCode(foundCode);
+        stopGameFinderScan();
+        return;
+      }
+
+      const delayMs = gameFinderState.delayMs;
+      if (delayMs > 0 && gameFinderState.scanning && gameFinderState.scanId === scanId && !signal.aborted) {
+        await gameFinderDelay(delayMs);
+      } else if (delayMs <= 0) {
+        await Promise.resolve();
+      }
+    }
+  }
+
+  async function runGameFinderScanLoop(scanId) {
+    const controller = new AbortController();
+    gameFinderState.abortController = controller;
+    const workerCount = gameFinderState.concurrency;
+    gameFinderState.workers = Array.from({ length: workerCount }, (_, index) => (
+      runGameFinderWorker(scanId, index + 1, controller.signal)
+    ));
+    await Promise.allSettled(gameFinderState.workers);
+    if (gameFinderState.scanId === scanId) {
+      gameFinderState.workers = [];
+      gameFinderState.abortController = null;
+      if (gameFinderState.scanning) stopGameFinderScan();
+      else updateGameFinderButton();
     }
   }
 
   function startGameFinderScan() {
     if (gameFinderState.scanning) return;
+    syncGameFinderConfig();
     gameFinderState.scanning = true;
     gameFinderState.scanId += 1;
     gameFinderState.foundCode = null;
-    syncGameFinderConfig();
+    gameFinderState.rateLimited = false;
+    gameFinderState.attemptedPins = createGameFinderAttemptedPins();
+    gameFinderState.attemptedCount = 0;
+    gameFinderState.fallbackCursor = randomGameFinderOffset(GAME_FINDER_PIN_SPACE);
+    gameFinderState.attempts = 0;
+    gameFinderState.inFlight = 0;
+    gameFinderState.startedAt = Date.now();
+    gameFinderState.workers = [];
+    gameFinderState.lastStatsLogAt = 0;
+    startGameFinderStatsTimer();
     updateGameFinderButton();
-    runGameFinderScanLoop(gameFinderState.scanId);
+    runGameFinderScanLoop(gameFinderState.scanId).catch((error) => {
+      gameFinderWarn("Scan workers stopped unexpectedly.", error);
+      stopGameFinderScan();
+    });
   }
 
   function stopGameFinderScan() {
-    if (!gameFinderState.scanning) return;
+    if (!gameFinderState.scanning && !gameFinderState.abortController) return;
     gameFinderState.scanning = false;
     gameFinderState.scanId += 1;
+    gameFinderState.abortController?.abort();
+    gameFinderState.abortController = null;
+    gameFinderState.workers = [];
+    gameFinderState.inFlight = 0;
+    clearGameFinderStatsTimer();
     updateGameFinderButton();
   }
 
@@ -7358,6 +7565,7 @@
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
                 { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 1, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
+                { id: "concurrency", label: "Concurrency", type: "slider", min: GAME_FINDER_MIN_CONCURRENCY, max: GAME_FINDER_MAX_CONCURRENCY, step: 1, default: GAME_FINDER_DEFAULT_CONCURRENCY, unit: "" },
               ],
             },
             {
@@ -10129,6 +10337,12 @@
                 event.target.value = String(nextDelay);
                 if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
               }
+              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "concurrency") {
+                const nextConcurrency = setGameFinderConcurrency(newVal);
+                cfg[setting.id] = nextConcurrency;
+                event.target.value = String(nextConcurrency);
+                if (valueLabel) valueLabel.textContent = `${nextConcurrency}${valueUnit}`;
+              }
               saveSettings();
             });
             settingInput.addEventListener("change", (event) => {
@@ -10147,6 +10361,12 @@
                 cfg[setting.id] = nextDelay;
                 event.target.value = String(nextDelay);
                 if (valueLabel) valueLabel.textContent = `${nextDelay}${valueUnit}`;
+              }
+              if (moduleName === GAME_FINDER_MODULE_NAME && setting.id === "concurrency") {
+                const nextConcurrency = setGameFinderConcurrency(newVal);
+                cfg[setting.id] = nextConcurrency;
+                event.target.value = String(nextConcurrency);
+                if (valueLabel) valueLabel.textContent = `${nextConcurrency}${valueUnit}`;
               }
               saveSettings();
             });
