@@ -1180,6 +1180,8 @@
             })()
           : null;
         if (blueboatDecoded) {
+          if (blueboatDecoded?.payload?.room) this.blueboatRoomId = blueboatDecoded.payload.room;
+          if (blueboatDecoded?.payload?.roomId) this.blueboatRoomId = blueboatDecoded.payload.roomId;
           const normalizedBlueboat = blueboatDecoded?.payload && typeof blueboatDecoded.payload === "object"
             ? { ...blueboatDecoded.payload, eventName: blueboatDecoded.eventName, payload: blueboatDecoded.payload, raw: blueboatDecoded.raw }
             : blueboatDecoded;
@@ -1224,6 +1226,12 @@
       if (outbound) {
         this.dispatchEvent(new CustomEvent("blueboatSend", { detail: outbound }));
       }
+    }
+    sendBlueboatMessage(channel, data) {
+      if (!this.socket || !this.blueboatRoomId) return false;
+      const encoded = blueboat.encode(channel, data, this.blueboatRoomId);
+      this.socket.send(encoded);
+      return true;
     }
     sendMessage(channel, data) {
       if (!this.socket) return;
@@ -6847,9 +6855,43 @@
     pendingTargetAbility: null,
     pendingTargetRequestedAt: 0,
     selfPlayerId: null,
+    isRichMode: false,
+    specialGameTypes: [],
     config: { ...ABILITY_HUD_CONFIG_DEFAULTS },
     iconTiles: [],
   };
+
+  function normalizeAbilityHudSpecialGameTypes(value) {
+    const values = Array.isArray(value) ? value : (value == null ? [] : [value]);
+    return values.map((item) => String(item || "").trim().toUpperCase()).filter(Boolean);
+  }
+
+  function extractAbilityHudGameOptions(packet) {
+    return packet?.data?.gameOptions
+      || packet?.payload?.data?.gameOptions
+      || packet?.payload?.gameOptions
+      || packet?.gameOptions
+      || null;
+  }
+
+  function applyAbilityHudSpecialGameType(packet, target = abilityHudState) {
+    const gameOptions = extractAbilityHudGameOptions(packet);
+    const specialGameTypes = normalizeAbilityHudSpecialGameTypes(gameOptions?.specialGameType);
+    if (!specialGameTypes.length) return false;
+    target.specialGameTypes = specialGameTypes;
+    target.isRichMode = specialGameTypes.includes("RICH");
+    console.debug(`${ABILITY_HUD_LOG} special game type detected`, { specialGameTypes, isRichMode: target.isRichMode });
+    return true;
+  }
+
+  function sendAbilityHudMessage(channel, data) {
+    if (abilityHudState.isRichMode) {
+      const sent = socketManager.sendBlueboatMessage(channel, data);
+      if (!sent) console.warn(`${ABILITY_HUD_LOG} RICH mode requires Blueboat packet but room id/socket is unavailable`, { channel, room: socketManager.blueboatRoomId });
+      return;
+    }
+    socketManager.sendMessage(channel, data);
+  }
 
   function calculateAbilityCost(ability, playerState = {}) {
     const baseCost = Number(ability?.baseCost) || 0;
@@ -7164,6 +7206,7 @@
     const packet = event?.detail;
     const key = packet?.key ?? packet?.payload?.key;
     if (key === "PLAYER_JOINS_STATIC_STATE") {
+      applyAbilityHudSpecialGameType(packet);
       abilityHudState.purchasedAbilities.clear();
       abilityHudState.usedAbilities.clear();
     }
@@ -7273,7 +7316,7 @@
     if (ability.name === "Icer") {
       console.debug(`${ABILITY_HUD_LOG} ASSERT freeze mapping ok: display="${ability.displayName}" payload="${ability.name}"`);
     }
-    socketManager.sendMessage("POWERUP_PURCHASED", ability.name);
+    sendAbilityHudMessage("POWERUP_PURCHASED", ability.name);
     abilityHudState.purchasedAbilities.add(ability.name);
     requestAbilityHudRender();
   }
@@ -7308,7 +7351,7 @@
     abilityHudState.pendingTargetRequestedAt = Date.now();
     const payload = { room: roomId, key: "PLAYER_LEADERBOARD_REQUESTED", data: null };
     console.debug(`${ABILITY_HUD_LOG} [Step 2] requesting leaderboard for target selection`, payload);
-    socketManager.sendMessage("PLAYER_LEADERBOARD_REQUESTED", null);
+    sendAbilityHudMessage("PLAYER_LEADERBOARD_REQUESTED", null);
   }
 
   function openTargetSelectionMenu(ability, players) {
@@ -7362,7 +7405,7 @@
     const data = { name: ability.name, target: targetId };
     const payload = { room: roomId, key: "POWERUP_ATTACK", data };
     console.debug(`${ABILITY_HUD_LOG} [Step 4] sending targeted ability payload`, payload);
-    socketManager.sendMessage("POWERUP_ATTACK", data);
+    sendAbilityHudMessage("POWERUP_ATTACK", data);
     abilityHudState.usedAbilities.add(ability.name);
     abilityHudState.pendingTargetAbility = null;
     requestAbilityHudRender();
@@ -7373,7 +7416,7 @@
     if (abilityHudState.usedAbilities.has(ability.name)) return;
     const activatePayload = { room: socketManager.blueboatRoomId, key: "POWERUP_ACTIVATED", data: ability.name };
     console.debug(`${ABILITY_HUD_LOG} [Step 0] sending regular activate payload`, activatePayload);
-    socketManager.sendMessage("POWERUP_ACTIVATED", ability.name);
+    sendAbilityHudMessage("POWERUP_ACTIVATED", ability.name);
 
     if (abilityRequiresTargetSelection(ability)) {
       requestLeaderboardForAbilityTarget(ability);
@@ -7535,6 +7578,8 @@
     if (abilityHudBootstrap.selfPlayerId) {
       abilityHudState.selfPlayerId = abilityHudBootstrap.selfPlayerId;
     }
+    abilityHudState.isRichMode = Boolean(abilityHudBootstrap.isRichMode);
+    abilityHudState.specialGameTypes = Array.isArray(abilityHudBootstrap.specialGameTypes) ? [...abilityHudBootstrap.specialGameTypes] : [];
     requestAbilityHudRender();
   }
 
@@ -7578,6 +7623,8 @@
     purchasedAbilities: new Set(),
     usedAbilities: new Set(),
     selfPlayerId: null,
+    isRichMode: false,
+    specialGameTypes: [],
   };
 
   socketManager.addEventListener("blueboatMessage", (event) => {
@@ -7594,6 +7641,7 @@
     if (!key) return;
     if (key === "PLAYER_JOINS_STATIC_STATE") {
       abilityHudBootstrap.latestPacket = packet;
+      applyAbilityHudSpecialGameType(packet, abilityHudBootstrap);
       abilityHudBootstrap.usedAbilities.clear();
       const count = Array.isArray(packet?.data?.powerups) ? packet.data.powerups.length : 0;
       console.debug(`${ABILITY_HUD_LOG} bootstrap captured static state`, { count });
