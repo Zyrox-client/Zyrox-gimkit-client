@@ -3333,8 +3333,15 @@
 
   const quickFireState = {
     enabled: false,
-    intervalId: null,
-    intervalMs: 50,
+    timerId: null,
+    rafId: null,
+    messageChannel: null,
+    loopPending: false,
+    fireIntervalMs: 5,
+    lastLoopAt: 0,
+    nextShotAt: 0,
+    packetTokens: 0,
+    lastTokenAt: 0,
     lastStatus: "Idle",
     statusText: "Idle",
   };
@@ -3385,7 +3392,12 @@
   function getQuickFireConfig() {
     const defaults = {
       enabled: true,
-      fireIntervalMs: 50,
+      fireIntervalMs: 5,
+      maxBurstPerTick: 8,
+      maxPacketsPerSecond: 500,
+      maxCatchupMs: 100,
+      socketBufferLimitBytes: 262144,
+      schedulerMode: "auto",
       onlyWhenMouseDown: true,
       onlyWhenGameFocused: true,
     };
@@ -3976,7 +3988,27 @@
     return { stores, phaser, scene, mousePointer, body };
   }
 
-  function sendQuickFireMessage(angle, bodyX, bodyY) {
+  function normalizeQuickFireConfig(cfg = getQuickFireConfig()) {
+    const rawInterval = Number(cfg.fireIntervalMs);
+    const rawBurst = Number(cfg.maxBurstPerTick);
+    const rawPps = Number(cfg.maxPacketsPerSecond);
+    const rawCatchup = Number(cfg.maxCatchupMs);
+    const rawBufferLimit = Number(cfg.socketBufferLimitBytes);
+    const schedulerMode = ["auto", "timer", "raf", "messageChannel"].includes(cfg.schedulerMode)
+      ? cfg.schedulerMode
+      : "auto";
+    return {
+      ...cfg,
+      fireIntervalMs: Number.isFinite(rawInterval) ? Math.max(0, Math.min(250, rawInterval)) : 5,
+      maxBurstPerTick: Number.isFinite(rawBurst) ? Math.max(1, Math.min(100, Math.floor(rawBurst))) : 8,
+      maxPacketsPerSecond: Number.isFinite(rawPps) ? Math.max(1, Math.min(2000, Math.floor(rawPps))) : 500,
+      maxCatchupMs: Number.isFinite(rawCatchup) ? Math.max(0, Math.min(1000, rawCatchup)) : 100,
+      socketBufferLimitBytes: Number.isFinite(rawBufferLimit) ? Math.max(0, Math.min(4194304, Math.floor(rawBufferLimit))) : 262144,
+      schedulerMode,
+    };
+  }
+
+  function isQuickFireSocketReady() {
     if (!socketManager?.socket) {
       setQuickFireStatus("Waiting for socket");
       return false;
@@ -3989,37 +4021,42 @@
       setQuickFireStatus("Waiting for room");
       return false;
     }
+    return true;
+  }
+
+  function getQuickFireBufferedAmount() {
+    const socket = socketManager?.socket;
+    const directAmount = Number(socket?.bufferedAmount);
+    if (Number.isFinite(directAmount)) return directAmount;
+    const transportAmount = Number(socket?.conn?.transport?.ws?.bufferedAmount ?? socket?.transport?.ws?.bufferedAmount);
+    return Number.isFinite(transportAmount) ? transportAmount : 0;
+  }
+
+  function sendQuickFireMessage(angle, bodyX, bodyY) {
+    if (!isQuickFireSocketReady()) return false;
     socketManager.sendMessage("FIRE", { angle, x: bodyX, y: bodyY });
     return true;
   }
 
-  function quickFireTick() {
-    if (!quickFireState.enabled) return;
-    const cfg = getQuickFireConfig();
+  function buildQuickFireShot(cfg) {
     if (!cfg.enabled) {
       setQuickFireStatus("Disabled in config");
-      return;
+      return null;
     }
     if (cfg.onlyWhenGameFocused && (!document.hasFocus() || document.visibilityState !== "visible")) {
       setQuickFireStatus("Waiting for focus");
-      return;
+      return null;
     }
+    if (!isQuickFireSocketReady()) return null;
 
     const { scene, mousePointer, body } = getQuickFireGameObjects();
     if (!mousePointer || !body) {
       setQuickFireStatus("Waiting for game objects");
-      return;
+      return null;
     }
     if (cfg.onlyWhenMouseDown && !isQuickFireMouseDown(mousePointer)) {
       setQuickFireStatus("Waiting for left click");
-      return;
-    }
-
-    const Vector2 = window.Phaser?.Math?.Vector2;
-    const angleBetween = window.Phaser?.Math?.Angle?.Between;
-    if (typeof Vector2 !== "function" || typeof angleBetween !== "function") {
-      setQuickFireStatus("Waiting for Phaser math");
-      return;
+      return null;
     }
 
     const bodyX = Number(body.x);
@@ -4029,31 +4066,164 @@
     const worldY = Number(pointerWorld?.y);
     if (![bodyX, bodyY, worldX, worldY].every(Number.isFinite)) {
       setQuickFireStatus("Waiting for coordinates");
+      return null;
+    }
+
+    return { angle: Math.atan2(worldY - (bodyY - 3), worldX - bodyX), bodyX, bodyY };
+  }
+
+  function refillQuickFirePacketTokens(now, cfg) {
+    if (!quickFireState.lastTokenAt) quickFireState.lastTokenAt = now;
+    const elapsedSeconds = Math.max(0, (now - quickFireState.lastTokenAt) / 1000);
+    quickFireState.lastTokenAt = now;
+    quickFireState.packetTokens = Math.min(
+      cfg.maxPacketsPerSecond,
+      quickFireState.packetTokens + elapsedSeconds * cfg.maxPacketsPerSecond
+    );
+  }
+
+  function getQuickFireDueCount(now, cfg) {
+    if (cfg.fireIntervalMs <= 0) return cfg.maxBurstPerTick;
+    if (!quickFireState.nextShotAt) quickFireState.nextShotAt = now;
+    if (now < quickFireState.nextShotAt) return 0;
+    const catchupMs = Math.min(cfg.maxCatchupMs, now - quickFireState.nextShotAt);
+    return 1 + Math.floor(catchupMs / cfg.fireIntervalMs);
+  }
+
+  function sendQuickFireBurst(shot, requestedCount, cfg) {
+    if (!shot || requestedCount <= 0) return 0;
+    const bufferLimit = cfg.socketBufferLimitBytes;
+    const bufferedAmount = getQuickFireBufferedAmount();
+    if (bufferLimit > 0 && bufferedAmount >= bufferLimit) {
+      setQuickFireStatus("Throttled: socket buffer");
+      return 0;
+    }
+
+    const tokenCount = Math.floor(quickFireState.packetTokens);
+    let count = Math.min(requestedCount, cfg.maxBurstPerTick, tokenCount);
+    if (count <= 0) {
+      setQuickFireStatus("Throttled: rate limit");
+      return 0;
+    }
+
+    let sent = 0;
+    for (; sent < count; sent += 1) {
+      if (bufferLimit > 0 && sent > 0 && getQuickFireBufferedAmount() >= bufferLimit) {
+        setQuickFireStatus("Throttled: socket buffer");
+        break;
+      }
+      if (!sendQuickFireMessage(shot.angle, shot.bodyX, shot.bodyY)) break;
+    }
+    quickFireState.packetTokens = Math.max(0, quickFireState.packetTokens - sent);
+    if (sent > 0) setQuickFireStatus(sent === 1 ? "Fired" : `Fired x${sent}`);
+    return sent;
+  }
+
+  function scheduleQuickFireLoop(cfg = normalizeQuickFireConfig(), delayMs = 0) {
+    if (!quickFireState.enabled || quickFireState.loopPending) return;
+    const delay = Number(delayMs);
+    quickFireState.loopPending = true;
+    if (Number.isFinite(delay) && delay > 0) {
+      quickFireState.timerId = setTimeout(quickFireLoop, Math.min(100, delay));
       return;
     }
 
-    const vector = new Vector2(worldX - bodyX, worldY - (bodyY - 3)).normalize();
-    const angle = angleBetween(0, 0, vector.x, vector.y);
-    if (sendQuickFireMessage(angle, bodyX, bodyY)) setQuickFireStatus("Fired");
+    const mode = cfg.schedulerMode === "auto" ? "messageChannel" : cfg.schedulerMode;
+    if (mode === "raf") {
+      quickFireState.rafId = requestAnimationFrame(quickFireLoop);
+      return;
+    }
+    if (mode === "messageChannel" && typeof MessageChannel === "function") {
+      if (!quickFireState.messageChannel) {
+        quickFireState.messageChannel = new MessageChannel();
+        quickFireState.messageChannel.port1.onmessage = () => quickFireLoop();
+      }
+      quickFireState.messageChannel.port2.postMessage(0);
+      return;
+    }
+    quickFireState.timerId = setTimeout(quickFireLoop, 0);
+  }
+
+  function getQuickFireNextDelay(now, cfg) {
+    const tokenShortfall = quickFireState.packetTokens < 1
+      ? ((1 - quickFireState.packetTokens) / cfg.maxPacketsPerSecond) * 1000
+      : 0;
+    const shotDelay = cfg.fireIntervalMs > 0 && quickFireState.nextShotAt > now
+      ? quickFireState.nextShotAt - now
+      : 0;
+    if (tokenShortfall > 0 && shotDelay > 0) return Math.min(tokenShortfall, shotDelay);
+    return Math.max(tokenShortfall, shotDelay);
+  }
+
+  function quickFireLoop() {
+    quickFireState.loopPending = false;
+    quickFireState.timerId = null;
+    quickFireState.rafId = null;
+    if (!quickFireState.enabled) return;
+
+    const now = performance.now();
+    const cfg = normalizeQuickFireConfig();
+    quickFireState.fireIntervalMs = cfg.fireIntervalMs;
+    quickFireState.lastLoopAt = now;
+    refillQuickFirePacketTokens(now, cfg);
+
+    const shot = buildQuickFireShot(cfg);
+    if (!shot) {
+      quickFireState.nextShotAt = cfg.fireIntervalMs > 0 ? now + cfg.fireIntervalMs : now;
+      scheduleQuickFireLoop(cfg, 16);
+      return;
+    }
+
+    const dueCount = getQuickFireDueCount(now, cfg);
+    const requestedCount = cfg.fireIntervalMs <= 0 ? cfg.maxBurstPerTick : Math.min(dueCount, cfg.maxBurstPerTick);
+    const sent = sendQuickFireBurst(shot, requestedCount, cfg);
+    if (cfg.fireIntervalMs > 0 && dueCount > 0) {
+      const accountedCount = Math.max(1, sent || requestedCount);
+      quickFireState.nextShotAt += accountedCount * cfg.fireIntervalMs;
+      const earliestCatchupAt = now - cfg.maxCatchupMs;
+      if (quickFireState.nextShotAt < earliestCatchupAt) quickFireState.nextShotAt = earliestCatchupAt;
+    } else if (cfg.fireIntervalMs <= 0) {
+      quickFireState.nextShotAt = now;
+    }
+
+    scheduleQuickFireLoop(cfg, getQuickFireNextDelay(now, cfg));
   }
 
   function startQuickFire() {
     stopQuickFire();
     quickFireState.enabled = true;
+    const cfg = normalizeQuickFireConfig();
+    const now = performance.now();
+    quickFireState.fireIntervalMs = cfg.fireIntervalMs;
+    quickFireState.lastLoopAt = now;
+    quickFireState.nextShotAt = now;
+    quickFireState.lastTokenAt = now;
+    quickFireState.packetTokens = Math.min(cfg.maxBurstPerTick, cfg.maxPacketsPerSecond);
     setQuickFireStatus("Armed");
-    const cfg = getQuickFireConfig();
-    const intervalMs = Math.max(1, Math.min(250, Number(cfg.fireIntervalMs) || 50));
-    quickFireState.intervalMs = intervalMs;
-    quickFireState.intervalId = setInterval(quickFireTick, intervalMs);
+    scheduleQuickFireLoop(cfg);
   }
 
   function stopQuickFire() {
-    if (quickFireState.intervalId != null) {
-      clearInterval(quickFireState.intervalId);
-      quickFireState.intervalId = null;
+    if (quickFireState.timerId != null) {
+      clearTimeout(quickFireState.timerId);
+      quickFireState.timerId = null;
     }
+    if (quickFireState.rafId != null) {
+      cancelAnimationFrame(quickFireState.rafId);
+      quickFireState.rafId = null;
+    }
+    if (quickFireState.messageChannel) {
+      quickFireState.messageChannel.port1.onmessage = null;
+      quickFireState.messageChannel.port1.close?.();
+      quickFireState.messageChannel.port2.close?.();
+      quickFireState.messageChannel = null;
+    }
+    quickFireState.loopPending = false;
     quickFireState.enabled = false;
-    quickFireState.intervalMs = 50;
+    quickFireState.fireIntervalMs = 5;
+    quickFireState.nextShotAt = 0;
+    quickFireState.packetTokens = 0;
+    quickFireState.lastTokenAt = 0;
     setQuickFireStatus("Idle");
   }
 
@@ -7732,7 +7902,17 @@
               description: MODULE_DESCRIPTIONS["Quick Fire"],
               settings: [
                 { id: "enabled",             label: "Enabled",              type: "checkbox", default: true },
-                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 50, min: 1, max: 250, step: 1, unit: "ms" },
+                { id: "fireIntervalMs",      label: "Fire Interval",        type: "slider",   default: 5, min: 0, max: 250, step: 0.1, unit: "ms" },
+                { id: "maxBurstPerTick",    label: "Max Burst / Tick",     type: "slider",   default: 8, min: 1, max: 100, step: 1, unit: "" },
+                { id: "maxPacketsPerSecond", label: "Max Packets / Sec",   type: "slider",   default: 500, min: 1, max: 2000, step: 1, unit: "" },
+                { id: "maxCatchupMs",       label: "Max Catch-up",        type: "slider",   default: 100, min: 0, max: 1000, step: 10, unit: "ms" },
+                { id: "socketBufferLimitBytes", label: "Socket Buffer Limit", type: "slider", default: 262144, min: 0, max: 1048576, step: 4096, unit: "B" },
+                { id: "schedulerMode",      label: "Scheduler",            type: "select",   default: "auto", options: [
+                  { value: "auto", label: "Auto" },
+                  { value: "messageChannel", label: "MessageChannel" },
+                  { value: "timer", label: "Timer" },
+                  { value: "raf", label: "RAF" },
+                ] },
                 { id: "onlyWhenMouseDown",   label: "Only While Left Click", type: "checkbox", default: true },
                 { id: "onlyWhenGameFocused", label: "Only When Focused",     type: "checkbox", default: true },
               ],
