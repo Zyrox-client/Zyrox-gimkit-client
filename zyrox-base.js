@@ -1482,6 +1482,8 @@
   const GAME_FINDER_PIN_MAX = 999_999;
   const GAME_FINDER_PIN_SPACE = GAME_FINDER_PIN_MAX - GAME_FINDER_PIN_MIN + 1;
   const GAME_FINDER_STATS_INTERVAL_MS = 1000;
+  const GAME_FINDER_RATE_LIMIT_STATUS_CHECK_INTERVAL = 4;
+  const GAME_FINDER_RATE_LIMIT_RESULT = Object.freeze({ rateLimited: true });
   const GAME_FINDER_BUTTON_LABEL = "Find Game";
   const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
   const gameFinderState = {
@@ -1508,6 +1510,7 @@
     workers: [],
     statsTimer: null,
     lastStatsLogAt: 0,
+    rateLimited: false,
   };
 
   function gameFinderWarn(message, extra) {
@@ -2041,7 +2044,7 @@
     gameFinderState.observer.observe(observerTarget, { childList: true, subtree: true });
   }
 
-  async function checkGameFinderPin(pin, signal) {
+  async function checkGameFinderPin(pin, signal, checkRateLimitStatus = false) {
     try {
       const response = await fetch(GAME_FINDER_API_URL, {
         method: "POST",
@@ -2052,6 +2055,8 @@
         body: JSON.stringify({ code: String(pin) }),
         signal,
       });
+
+      if (checkRateLimitStatus && response.status === 429) return GAME_FINDER_RATE_LIMIT_RESULT;
 
       const remainingHeader = response.headers.get("x-ratelimit-remaining");
       const resetHeader = response.headers.get("x-ratelimit-reset");
@@ -2080,6 +2085,16 @@
     }
   }
 
+  function handleGameFinderRateLimit(scanId) {
+    if (!gameFinderState.scanning || gameFinderState.scanId !== scanId || gameFinderState.rateLimited) return;
+    gameFinderState.rateLimited = true;
+    gameFinderState.abortController?.abort();
+    stopGameFinderScan();
+    setTimeout(() => {
+      alert("Game Finder was rate limited by Gimkit. Please wait about a minute before turning it on again.");
+    }, 0);
+  }
+
   async function runGameFinderWorker(scanId, workerId, signal) {
     while (gameFinderState.scanning && gameFinderState.scanId === scanId && !signal.aborted && !gameFinderState.foundCode) {
       const pin = nextGameFinderPin();
@@ -2090,14 +2105,21 @@
       }
 
       gameFinderState.attempts += 1;
+      const attemptNumber = gameFinderState.attempts;
+      const checkRateLimitStatus = attemptNumber % GAME_FINDER_RATE_LIMIT_STATUS_CHECK_INTERVAL === 0;
       gameFinderState.inFlight += 1;
       updateGameFinderButton();
 
       let result = null;
       try {
-        result = await checkGameFinderPin(pin, signal);
+        result = await checkGameFinderPin(pin, signal, checkRateLimitStatus);
       } finally {
         gameFinderState.inFlight = Math.max(0, gameFinderState.inFlight - 1);
+      }
+
+      if (result === GAME_FINDER_RATE_LIMIT_RESULT) {
+        handleGameFinderRateLimit(scanId);
+        return;
       }
 
       if (gameFinderState.scanning && gameFinderState.scanId === scanId && !signal.aborted && result && !gameFinderState.foundCode) {
@@ -2141,6 +2163,7 @@
     gameFinderState.scanning = true;
     gameFinderState.scanId += 1;
     gameFinderState.foundCode = null;
+    gameFinderState.rateLimited = false;
     gameFinderState.attemptedPins = createGameFinderAttemptedPins();
     gameFinderState.attemptedCount = 0;
     gameFinderState.fallbackCursor = randomGameFinderOffset(GAME_FINDER_PIN_SPACE);
@@ -7542,7 +7565,7 @@
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
                 { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 1, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
-                { id: "concurrency", label: "Concurrency", type: "slider", min: GAME_FINDER_MIN_CONCURRENCY, max: GAME_FINDER_MAX_CONCURRENCY, step: 1, default: GAME_FINDER_DEFAULT_CONCURRENCY },
+                { id: "concurrency", label: "Concurrency", type: "slider", min: GAME_FINDER_MIN_CONCURRENCY, max: GAME_FINDER_MAX_CONCURRENCY, step: 1, default: GAME_FINDER_DEFAULT_CONCURRENCY, unit: "" },
               ],
             },
             {
