@@ -1473,7 +1473,7 @@
   const GAME_FINDER_API_URL = "https://www.gimkit.com/api/matchmaker/find-info-from-code";
   const GAME_FINDER_MIN_DELAY_MS = 0;
   const GAME_FINDER_MAX_DELAY_MS = 500;
-  const GAME_FINDER_DEFAULT_DELAY_MS = 0;
+  const GAME_FINDER_DEFAULT_DELAY_MS = 25;
   const GAME_FINDER_MIN_CONCURRENCY = 1;
   const GAME_FINDER_MAX_CONCURRENCY = 32;
   const GAME_FINDER_DEFAULT_CONCURRENCY = 12;
@@ -1482,7 +1482,7 @@
   const GAME_FINDER_PIN_MAX = 999_999;
   const GAME_FINDER_PIN_SPACE = GAME_FINDER_PIN_MAX - GAME_FINDER_PIN_MIN + 1;
   const GAME_FINDER_STATS_INTERVAL_MS = 1000;
-  const GAME_FINDER_RATE_LIMIT_STATUS_CHECK_INTERVAL = 4;
+  const GAME_FINDER_RATE_LIMIT_STATUS_CHECK_INTERVAL = 16;
   const GAME_FINDER_RATE_LIMIT_RESULT = Object.freeze({ rateLimited: true });
   const GAME_FINDER_BUTTON_LABEL = "Find Game";
   const GAME_FINDER_BUTTON_ACTIVE_LABEL = "Finding…";
@@ -1714,7 +1714,7 @@
     const button = gameFinderState.button;
     if (!button) return;
     const stats = getGameFinderStats();
-    const activeLabel = `Stop Game Finder. Attempts: ${stats.attempts}; in flight: ${stats.inFlight}; ${stats.requestsPerSecond.toFixed(1)} req/s; concurrency: ${stats.concurrency}.`;
+    const activeLabel = `Stop Game Finder. Attempts: ${stats.attempts}; in flight: ${stats.inFlight}; ${stats.requestsPerSecond.toFixed(1)} req/s; threads: ${stats.concurrency}.`;
     button.classList.toggle("zyrox-game-finder-active", gameFinderState.scanning);
     button.setAttribute("aria-pressed", String(gameFinderState.scanning));
     button.setAttribute("aria-label", gameFinderState.scanning ? activeLabel : "Start Game Finder");
@@ -7565,7 +7565,7 @@
               description: MODULE_DESCRIPTIONS[GAME_FINDER_MODULE_NAME],
               settings: [
                 { id: "delay", label: "Delay", type: "slider", min: GAME_FINDER_MIN_DELAY_MS, max: GAME_FINDER_MAX_DELAY_MS, step: 1, default: GAME_FINDER_DEFAULT_DELAY_MS, unit: "ms" },
-                { id: "concurrency", label: "Concurrency", type: "slider", min: GAME_FINDER_MIN_CONCURRENCY, max: GAME_FINDER_MAX_CONCURRENCY, step: 1, default: GAME_FINDER_DEFAULT_CONCURRENCY, unit: "" },
+                { id: "concurrency", label: "Threads", type: "slider", min: GAME_FINDER_MIN_CONCURRENCY, max: GAME_FINDER_MAX_CONCURRENCY, step: 1, default: GAME_FINDER_DEFAULT_CONCURRENCY, unit: "" },
               ],
             },
             {
