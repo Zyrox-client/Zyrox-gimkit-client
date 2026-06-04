@@ -1659,19 +1659,103 @@
         box-shadow: 0 8px 18px rgba(8, 36, 92, 0.32);
         vertical-align: middle;
       }
-      .zyrox-game-finder-button::before {
-        content: "";
-        width: 0;
-        height: 0;
-        margin-left: 3px;
-        border-top: calc(var(--zyrox-game-finder-size) * 0.18) solid transparent;
-        border-bottom: calc(var(--zyrox-game-finder-size) * 0.18) solid transparent;
-        border-left: calc(var(--zyrox-game-finder-size) * 0.28) solid currentColor;
+      .zyrox-game-finder-icon {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
       }
+      .zyrox-game-finder-dice {
+        opacity: 1;
+        transform: scale(1);
+        transition: opacity 160ms ease, transform 160ms ease;
+      }
+      .zyrox-game-finder-dice-face {
+        position: relative;
+        width: calc(var(--zyrox-game-finder-size) * 0.5);
+        height: calc(var(--zyrox-game-finder-size) * 0.5);
+        border: calc(var(--zyrox-game-finder-size) * 0.045) solid currentColor;
+        border-radius: calc(var(--zyrox-game-finder-size) * 0.13);
+        box-sizing: border-box;
+        background: rgba(255, 255, 255, 0.12);
+        box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.12), inset 0 2px 0 rgba(255, 255, 255, 0.14);
+        transform: rotate(-8deg);
+      }
+      .zyrox-game-finder-dice-pip {
+        position: absolute;
+        width: calc(var(--zyrox-game-finder-size) * 0.075);
+        height: calc(var(--zyrox-game-finder-size) * 0.075);
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+        transform: translate(-50%, -50%);
+      }
+      .zyrox-game-finder-dice-pip:nth-child(1) { left: 28%; top: 28%; }
+      .zyrox-game-finder-dice-pip:nth-child(2) { left: 72%; top: 28%; }
+      .zyrox-game-finder-dice-pip:nth-child(3) { left: 50%; top: 50%; }
+      .zyrox-game-finder-dice-pip:nth-child(4) { left: 28%; top: 72%; }
+      .zyrox-game-finder-dice-pip:nth-child(5) { left: 72%; top: 72%; }
+      .zyrox-game-finder-loader {
+        opacity: 0;
+        transform: scale(0.82);
+        transition: opacity 160ms ease, transform 160ms ease;
+      }
+      .zyrox-game-finder-loader-orbit {
+        position: relative;
+        width: calc(var(--zyrox-game-finder-size) * 0.58);
+        height: calc(var(--zyrox-game-finder-size) * 0.58);
+        animation: zyrox-game-finder-loader-spin 1.05s linear infinite;
+      }
+      .zyrox-game-finder-loader-dot {
+        --zyrox-game-finder-loader-dot-size: calc(var(--zyrox-game-finder-size) * 0.105);
+        --zyrox-game-finder-loader-radius: calc(var(--zyrox-game-finder-size) * 0.22);
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: var(--zyrox-game-finder-loader-dot-size);
+        height: var(--zyrox-game-finder-loader-dot-size);
+        margin: calc(var(--zyrox-game-finder-loader-dot-size) / -2) 0 0 calc(var(--zyrox-game-finder-loader-dot-size) / -2);
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 calc(var(--zyrox-game-finder-size) * 0.12) rgba(255, 255, 255, 0.36);
+        opacity: var(--zyrox-game-finder-loader-opacity, 1);
+        transform: rotate(var(--zyrox-game-finder-loader-angle)) translateY(calc(var(--zyrox-game-finder-loader-radius) * -1));
+      }
+      .zyrox-game-finder-loader-dot:nth-child(1) { --zyrox-game-finder-loader-angle: 0deg; --zyrox-game-finder-loader-opacity: 1; }
+      .zyrox-game-finder-loader-dot:nth-child(2) { --zyrox-game-finder-loader-angle: 60deg; --zyrox-game-finder-loader-opacity: 0.86; }
+      .zyrox-game-finder-loader-dot:nth-child(3) { --zyrox-game-finder-loader-angle: 120deg; --zyrox-game-finder-loader-opacity: 0.72; }
+      .zyrox-game-finder-loader-dot:nth-child(4) { --zyrox-game-finder-loader-angle: 180deg; --zyrox-game-finder-loader-opacity: 0.58; }
+      .zyrox-game-finder-loader-dot:nth-child(5) { --zyrox-game-finder-loader-angle: 240deg; --zyrox-game-finder-loader-opacity: 0.44; }
+      .zyrox-game-finder-loader-dot:nth-child(6) { --zyrox-game-finder-loader-angle: 300deg; --zyrox-game-finder-loader-opacity: 0.3; }
       .zyrox-game-finder-button:hover { background: #0b327f; }
       .zyrox-game-finder-button.zyrox-game-finder-active {
         background: #0f4bb8;
         box-shadow: 0 8px 18px rgba(15, 75, 184, 0.34);
+      }
+      .zyrox-game-finder-button.zyrox-game-finder-active .zyrox-game-finder-dice {
+        opacity: 0;
+        transform: scale(0.82);
+      }
+      .zyrox-game-finder-button.zyrox-game-finder-active .zyrox-game-finder-loader {
+        opacity: 1;
+        transform: scale(1);
+      }
+      @keyframes zyrox-game-finder-loader-spin {
+        to { transform: rotate(360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .zyrox-game-finder-dice,
+        .zyrox-game-finder-loader {
+          transition: none;
+        }
+        .zyrox-game-finder-loader-orbit {
+          animation: none;
+        }
+        .zyrox-game-finder-button.zyrox-game-finder-active .zyrox-game-finder-loader-dot {
+          opacity: 1;
+        }
       }
     `;
     styleHost.appendChild(style);
@@ -1785,7 +1869,27 @@
       button = document.createElement("button");
       button.type = "button";
       button.className = "zyrox-game-finder-button";
-      button.textContent = "";
+      button.innerHTML = `
+        <span class="zyrox-game-finder-icon zyrox-game-finder-dice" aria-hidden="true">
+          <span class="zyrox-game-finder-dice-face">
+            <span class="zyrox-game-finder-dice-pip"></span>
+            <span class="zyrox-game-finder-dice-pip"></span>
+            <span class="zyrox-game-finder-dice-pip"></span>
+            <span class="zyrox-game-finder-dice-pip"></span>
+            <span class="zyrox-game-finder-dice-pip"></span>
+          </span>
+        </span>
+        <span class="zyrox-game-finder-icon zyrox-game-finder-loader" aria-hidden="true">
+          <span class="zyrox-game-finder-loader-orbit">
+            <span class="zyrox-game-finder-loader-dot"></span>
+            <span class="zyrox-game-finder-loader-dot"></span>
+            <span class="zyrox-game-finder-loader-dot"></span>
+            <span class="zyrox-game-finder-loader-dot"></span>
+            <span class="zyrox-game-finder-loader-dot"></span>
+            <span class="zyrox-game-finder-loader-dot"></span>
+          </span>
+        </span>
+      `;
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
