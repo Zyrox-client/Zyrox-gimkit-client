@@ -195,11 +195,69 @@ function terrainKey(name) {
 /** Return the fill colour for the global map background. */
 const backgroundColour = () => TERRAIN_COLOUR[terrainKey(findBackgroundTerrain())] ?? TERRAIN_COLOUR.Snow;
 
+/** Return the first finite number from a list of possible values. */
+function firstFiniteNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+/** Pull a useful terrain name out of Gimkit terrain schemas/objects. */
+function terrainName(tile) {
+  const terrain = tile?.terrain ?? tile?.type ?? tile?.name ?? tile?.terrainName ?? tile?.tileType;
+  if (typeof terrain === 'string') return terrain;
+  if (typeof terrain?.name === 'string') return terrain.name;
+  if (typeof terrain?.id === 'string') return terrain.id;
+  if (typeof terrain?.key === 'string') return terrain.key;
+  return null;
+}
+
 /** Return the fill colour for a tile object. */
-const tileColour = (t) => TERRAIN_COLOUR[terrainKey(t.terrain)] ?? COLOUR_FALLBACK;
+const tileColour = (t) => TERRAIN_COLOUR[terrainKey(terrainName(t))] ?? COLOUR_FALLBACK;
 
 /** Keep frozen water blue even when Gimkit marks it as collidable. */
-const shouldDrawCollision = (t) => t.collides && terrainKey(t.terrain) !== 'Frozen Lake';
+const shouldDrawCollision = (t) => Boolean(t?.collides ?? t?.collision ?? t?.solid) && terrainKey(terrainName(t)) !== 'Frozen Lake';
+
+/** Read tile coordinates from either the tile schema or its collection key. */
+function tileCoords(tile, key) {
+  let x = firstFiniteNumber(tile?.x, tile?.tileX, tile?.gridX, tile?.col, tile?.column, tile?.position?.x, tile?.pos?.x);
+  let y = firstFiniteNumber(tile?.y, tile?.tileY, tile?.gridY, tile?.row, tile?.position?.y, tile?.pos?.y);
+  if (x != null && y != null) return { x, y };
+
+  if (typeof key === 'string') {
+    const match = key.match(/-?\d+(?:\.\d+)?/g);
+    if (match?.length >= 2) {
+      x = Number(match[0]);
+      y = Number(match[1]);
+      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+    }
+  }
+
+  return null;
+}
+
+/** Iterate normal Maps, Colyseus MapSchemas, arrays, and plain keyed objects. */
+function tileEntries(tiles) {
+  if (!tiles) return [];
+  const source = tiles.$items instanceof Map ? tiles.$items : tiles;
+  if (source instanceof Map || typeof source?.entries === 'function') return Array.from(source.entries());
+  if (Array.isArray(source)) return source.map((tile, index) => [index, tile]);
+  if (typeof source === 'object') return Object.entries(source);
+  return [];
+}
+
+/** Normalize Gimkit's terrain collection into renderable tile records. */
+function normalizeTiles(tiles) {
+  const normalized = [];
+  for (const [key, tile] of tileEntries(tiles)) {
+    const coords = tileCoords(tile, key);
+    if (!coords) continue;
+    normalized.push({ ...tile, x: coords.x, y: coords.y });
+  }
+  return normalized;
+}
 
 /** Convert a Phaser world-space point/body into tile-coordinate space. */
 function phaserPointToTile(point, rotation = 0) {
@@ -298,14 +356,18 @@ class TileRenderer {
    */
   render(zoom) {
     const tiles = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
-    if (!tiles || tiles.size === 0) { this._drawWaiting(); return; }
+    const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
+    if (!tiles || tileCount === 0) { this._drawWaiting(); return; }
 
-    if (tiles.size !== this._knownCount) {
-      this._buildCache(tiles);
-      this._knownCount = tiles.size;
+    const renderTiles = normalizeTiles(tiles);
+    if (renderTiles.length === 0) { this._drawWaiting('Tile data found, but coordinates were unreadable…'); return; }
+
+    if (renderTiles.length !== this._knownCount) {
+      this._buildCache(renderTiles);
+      this._knownCount = renderTiles.length;
     }
 
-    this._composite(zoom, findPlayer(), tiles.size);
+    this._composite(zoom, findPlayer(), renderTiles.length);
   }
 
   /**
@@ -323,7 +385,7 @@ class TileRenderer {
   _buildCache(tiles) {
     // Compute bounding box
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const t of tiles.values()) {
+    for (const t of tiles) {
       if (t.x < minX) minX = t.x;  if (t.x > maxX) maxX = t.x;
       if (t.y < minY) minY = t.y;  if (t.y > maxY) maxY = t.y;
     }
@@ -340,7 +402,7 @@ class TileRenderer {
     ctx.fillRect(0, 0, off.width, off.height);
 
     // Draw each tile; solid tiles get a translucent red overlay
-    for (const t of tiles.values()) {
+    for (const t of tiles) {
       const px = (t.x - minX) * ts;
       const py = (t.y - minY) * ts;
       ctx.fillStyle = tileColour(t);
@@ -352,7 +414,7 @@ class TileRenderer {
     }
 
     this._cache = off;
-    console.debug(`[GimkitMap] Cache rebuilt: ${tiles.size} tiles, ` +
+    console.debug(`[GimkitMap] Cache rebuilt: ${tiles.length} tiles, ` +
                   `bounds ${this._bounds.w}×${this._bounds.h} tiles`);
   }
 
@@ -373,9 +435,14 @@ class TileRenderer {
     const scaledW = cache.width  * zoom;
     const scaledH = cache.height * zoom;
 
-    // Tile-space focal point (what we want at the canvas centre)
-    const cx = player != null ? (player.x - b.minX) : b.w / 2;
-    const cy = player != null ? (player.y - b.minY) : b.h / 2;
+    const displayPlayer = this._playerInBounds(player, b);
+
+    // Tile-space focal point (what we want at the canvas centre). If a player
+    // probe returns Phaser/world-pixel coordinates, convert it to tiles; if it
+    // is still outside the known map, fall back to the map centre instead of
+    // panning the cached map completely out of view.
+    const cx = displayPlayer != null ? (displayPlayer.x - b.minX) : b.w / 2;
+    const cy = displayPlayer != null ? (displayPlayer.y - b.minY) : b.h / 2;
 
     // Top-left corner of the scaled tile image in canvas coordinates
     const ox = Math.round(cw / 2 - cx * ts);
@@ -388,14 +455,38 @@ class TileRenderer {
     // Tile image scaled to current zoom
     ctx.drawImage(cache, ox, oy, scaledW, scaledH);
 
-    // Player marker (always at canvas centre when player is known)
-    if (player != null) {
-      this._drawPlayer(ctx, cw / 2, ch / 2, player.rotation);
+    // Player marker (always at canvas centre when the player is on this map)
+    if (displayPlayer != null) {
+      this._drawPlayer(ctx, cw / 2, ch / 2, displayPlayer.rotation);
     }
 
     // Tile-count badge at the top of the map, then compass in the corner
     this._drawTileCount(ctx, cw / 2, 18, tileCount);
     this._drawCompass(ctx, cw - 24, 24);
+  }
+
+
+  /**
+   * Return player coordinates in tile-space when they overlap the known map.
+   * Some Gimkit stores expose x/y as Phaser world pixels instead of tile units;
+   * checking both spaces prevents the minimap from centering on an off-map point.
+   */
+  _playerInBounds(player, bounds) {
+    if (!player) return null;
+    const margin = 2;
+    const inBounds = (point) => point.x >= bounds.minX - margin
+      && point.x <= bounds.minX + bounds.w + margin
+      && point.y >= bounds.minY - margin
+      && point.y <= bounds.minY + bounds.h + margin;
+
+    if (inBounds(player)) return player;
+
+    const converted = {
+      x: player.x / CFG.PHASER_TILE_PX,
+      y: player.y / CFG.PHASER_TILE_PX,
+      rotation: player.rotation ?? 0,
+    };
+    return inBounds(converted) ? converted : null;
   }
 
   /**
@@ -481,7 +572,7 @@ class TileRenderer {
   /**
    * Shown when window.stores.world.terrain.tiles is absent or empty.
    */
-  _drawWaiting() {
+  _drawWaiting(message = 'Waiting for tile data…') {
     const cv  = this._cv;
     const ctx = this._ctx;
     const cw  = cv.parentElement?.clientWidth  || CFG.DEFAULT_W;
@@ -493,7 +584,7 @@ class TileRenderer {
     ctx.font         = '13px monospace';
     ctx.textAlign    = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Waiting for tile data…', cw / 2, ch / 2 - 10);
+    ctx.fillText(message, cw / 2, ch / 2 - 10);
     ctx.font      = '10px monospace';
     ctx.fillStyle = '#334455';
     ctx.fillText('(Join a game and wait a moment)', cw / 2, ch / 2 + 10);
@@ -699,8 +790,9 @@ class MapPanel {
   _tick() {
     this._renderer.render(this.zoom);
     const tiles  = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
+    const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
     const player = findPlayer();
-    const tileStr  = tiles?.size ? `${tiles.size} tiles` : 'No tile data';
+    const tileStr  = tileCount ? `${tileCount} tiles` : 'No tile data';
     const playerStr = player
       ? `  ·  player (${Math.round(player.x)}, ${Math.round(player.y)})`
       : '';
