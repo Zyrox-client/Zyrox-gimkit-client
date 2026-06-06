@@ -28,6 +28,9 @@ const CFG = {
   LS_POS:          'gk_map_pos',   // localStorage key for window position
   LS_ZOOM:         'gk_map_zoom_v2',  // localStorage key for zoom level
   PLAYER_R:        4,     // Player dot radius (px)
+  OTHER_PLAYER_R:  3.5,   // Other player dot radius (px)
+  DEVICE_R:        3,     // Device/object marker radius (px)
+  DEVICE_LIMIT:    450,   // Safety cap for drawing map objects each frame
   PHASER_TILE_PX:  50,    // Phaser world-pixels per terrain tile (fallback)
   INIT_WAIT_MS:    20_000, // How long to wait for game stores before giving up
   SMOOTH_MS:       140,   // Camera smoothing time constant for player-follow
@@ -245,13 +248,22 @@ function tileCoords(tile, key) {
   return keyTileCoords(key) ?? objectTileCoords(tile);
 }
 
-/** Iterate normal Maps, Colyseus MapSchemas, arrays, and plain keyed objects. */
+/** Unwrap MobX ObservableValue wrappers used inside ObservableMap.data_. */
+function unwrapObservableValue(value) {
+  if (value?.value_ && (value.name_ || value.observers_ || value.enhancer || value.equals)) return value.value_;
+  return value;
+}
+
+/** Iterate normal Maps, MobX ObservableMaps, Colyseus MapSchemas, arrays, and plain keyed objects. */
 function tileEntries(tiles) {
   if (!tiles) return [];
-  const source = tiles.$items instanceof Map ? tiles.$items : tiles;
-  if (source instanceof Map || typeof source?.entries === 'function') return Array.from(source.entries());
-  if (Array.isArray(source)) return source.map((tile, index) => [index, tile]);
-  if (typeof source === 'object') return Object.entries(source);
+  const source = tiles.$items instanceof Map
+    ? tiles.$items
+    : (tiles.data_ instanceof Map ? tiles.data_ : tiles);
+  const normalize = ([key, value]) => [key, unwrapObservableValue(value)];
+  if (source instanceof Map || typeof source?.entries === 'function') return Array.from(source.entries(), normalize);
+  if (Array.isArray(source)) return source.map((tile, index) => [index, unwrapObservableValue(tile)]);
+  if (typeof source === 'object') return Object.entries(source).map(normalize);
   return [];
 }
 
@@ -274,27 +286,49 @@ function normalizeTiles(tiles) {
   return normalized;
 }
 
-/** Estimate how many Phaser/world pixels correspond to one rendered map unit. */
-function inferWorldPixelsPerMapUnit(tiles) {
+/** Estimate how Phaser/world pixels map onto rendered terrain tile coordinates. */
+function inferWorldToMapTransform(tiles) {
   const keyed = tiles.filter((tile) => tile.__usedKeyCoords
     && Number.isFinite(tile.__rawX)
     && Number.isFinite(tile.__rawY)
     && (Math.abs(tile.__rawX - tile.x) > 1 || Math.abs(tile.__rawY - tile.y) > 1));
-  if (keyed.length < 2) return CFG.PHASER_TILE_PX;
+  if (keyed.length < 2) return { scale: CFG.PHASER_TILE_PX, scaleX: CFG.PHASER_TILE_PX, scaleY: CFG.PHASER_TILE_PX, offsetX: 0, offsetY: 0 };
 
-  const minMapX = Math.min(...keyed.map((tile) => tile.x));
-  const maxMapX = Math.max(...keyed.map((tile) => tile.x));
-  const minRawX = Math.min(...keyed.map((tile) => tile.__rawX));
-  const maxRawX = Math.max(...keyed.map((tile) => tile.__rawX));
-  const minMapY = Math.min(...keyed.map((tile) => tile.y));
-  const maxMapY = Math.max(...keyed.map((tile) => tile.y));
-  const minRawY = Math.min(...keyed.map((tile) => tile.__rawY));
-  const maxRawY = Math.max(...keyed.map((tile) => tile.__rawY));
+  // Fit raw = scale * map + intercept using the actual paired coordinates.
+  // This is more reliable than min/max when maps use negative tile positions or
+  // when the world origin is not near the map origin.
+  const fitAxis = (mapKey, rawKey) => {
+    const points = keyed
+      .map((tile) => ({ map: Number(tile[mapKey]), raw: Number(tile[rawKey]) }))
+      .filter((point) => Number.isFinite(point.map) && Number.isFinite(point.raw));
+    const n = points.length;
+    if (n < 2) return null;
+    const meanMap = points.reduce((sum, point) => sum + point.map, 0) / n;
+    const meanRaw = points.reduce((sum, point) => sum + point.raw, 0) / n;
+    const variance = points.reduce((sum, point) => sum + (point.map - meanMap) ** 2, 0);
+    if (variance <= 0) return null;
+    const covariance = points.reduce((sum, point) => sum + (point.map - meanMap) * (point.raw - meanRaw), 0);
+    const scale = covariance / variance;
+    if (!Number.isFinite(scale) || Math.abs(scale) <= 1) return null;
+    const intercept = meanRaw - scale * meanMap;
+    return { scale, offset: -intercept / scale };
+  };
 
-  const scaleX = maxMapX !== minMapX ? Math.abs((maxRawX - minRawX) / (maxMapX - minMapX)) : null;
-  const scaleY = maxMapY !== minMapY ? Math.abs((maxRawY - minRawY) / (maxMapY - minMapY)) : null;
-  const scales = [scaleX, scaleY].filter((scale) => Number.isFinite(scale) && scale > 1);
-  return scales.length ? scales.reduce((sum, scale) => sum + scale, 0) / scales.length : CFG.PHASER_TILE_PX;
+  const xFit = fitAxis('x', '__rawX');
+  const yFit = fitAxis('y', '__rawY');
+  const usableScales = [xFit?.scale, yFit?.scale].filter((scale) => Number.isFinite(scale) && Math.abs(scale) > 1);
+  const scale = usableScales.length
+    ? usableScales.reduce((sum, value) => sum + Math.abs(value), 0) / usableScales.length
+    : CFG.PHASER_TILE_PX;
+  const scaleX = xFit?.scale ?? scale;
+  const scaleY = yFit?.scale ?? scale;
+  return {
+    scale,
+    scaleX,
+    scaleY,
+    offsetX: xFit?.offset ?? 0,
+    offsetY: yFit?.offset ?? 0,
+  };
 }
 
 /** Return raw Phaser/world-space coordinates for a point/body. */
@@ -303,6 +337,343 @@ function phaserPointToWorld(point, rotation = 0) {
   const w = point.width ?? point.w ?? 0;
   const h = point.height ?? point.h ?? 0;
   return { x: point.x + w / 2, y: point.y + h / 2, rotation, worldSpace: true };
+}
+
+/** Return Phaser body origin coordinates; character markers use these in Gimkit's renderer. */
+function phaserBodyOrigin(body, rotation = 0) {
+  if (body?.x == null || body?.y == null) return null;
+  return { x: Number(body.x), y: Number(body.y), rotation, worldSpace: true };
+}
+
+
+/** Return useful character coordinates from Phaser/Gimkit objects. */
+function characterPosition(character) {
+  const point = character?.body?.center ?? character?.body?.position ?? character?.position ?? character?.body ?? character;
+  const raw = phaserPointToWorld(point, character?.rotation ?? character?.body?.rotation ?? ((character?.angle ?? 0) * Math.PI / 180));
+  return raw ? { ...raw, worldSpace: true } : null;
+}
+
+/** Return a stable ID from the common player/character schemas. */
+function characterId(character, fallback = null) {
+  return character?.id ?? character?.characterId ?? character?.playerId ?? character?.entityId ?? fallback;
+}
+
+/** Return a display name from common player/character schemas. */
+function characterName(character, fallback = '') {
+  return character?.nametag?.name
+    ?? character?.name
+    ?? character?.nickname
+    ?? character?.displayName
+    ?? character?.username
+    ?? character?.state?.name
+    ?? fallback;
+}
+
+/** Return a team identifier when Gimkit exposes one. */
+function characterTeam(character) {
+  return character?.teamId ?? character?.team?.id ?? character?.state?.teamId ?? character?.data?.teamId ?? null;
+}
+
+/** Iterate Phaser's character manager as [{ id, character }]. */
+function characterEntries() {
+  const stores = safeGet(gameWindow(), ['stores']);
+  const manager = stores?.phaser?.scene?.characterManager;
+  const map = manager?.characters;
+  if (!map) return [];
+  if (typeof map.entries === 'function') return Array.from(map.entries(), ([id, character]) => ({ id, character }));
+  if (Array.isArray(map)) return map.map((character, index) => ({ id: characterId(character, index), character }));
+  if (typeof map === 'object') return Object.entries(map).map(([id, character]) => ({ id, character }));
+  return [];
+}
+
+/** Return the local player/character ID when Gimkit exposes it. */
+function localPlayerId() {
+  const stores = safeGet(gameWindow(), ['stores']);
+  return stores?.phaser?.mainCharacter?.id
+    ?? stores?.world?.localPlayerId
+    ?? stores?.world?.myPlayerId
+    ?? stores?.me?.id
+    ?? stores?.me?.playerId
+    ?? null;
+}
+
+/** Return the local player's team when available. */
+function localPlayerTeam() {
+  const stores = safeGet(gameWindow(), ['stores']);
+  const mainId = localPlayerId();
+  if (mainId != null) {
+    const match = characterEntries().find(({ id, character }) => String(id ?? characterId(character)) === String(mainId));
+    const team = characterTeam(match?.character);
+    if (team != null) return team;
+  }
+  return characterTeam(stores?.phaser?.mainCharacter) ?? characterTeam(stores?.me);
+}
+
+/** Collect non-local players to render on the minimap. */
+function findOtherPlayers() {
+  const localId = localPlayerId();
+  const players = [];
+  const seen = new Set();
+  const directPosition = (source) => (source?.x != null && source?.y != null
+    ? { x: Number(source.x), y: Number(source.y), rotation: source.rotation ?? 0 }
+    : null);
+  const phaserBodyPosition = (source) => (source?.body?.x != null && source?.body?.y != null
+    ? { x: Number(source.body.x), y: Number(source.body.y), rotation: source.rotation ?? source.body.rotation ?? 0, worldSpace: true }
+    : null);
+  const add = (id, source, fallbackName = '', preferPhaser = true) => {
+    // Match the working player-position logic from tests/example.js: iterate
+    // phaser.scene.characterManager.characters and use each player's body.x/y.
+    const pos = preferPhaser
+      ? (phaserBodyPosition(source) ?? characterPosition(source) ?? directPosition(source))
+      : (directPosition(source) ?? phaserBodyPosition(source) ?? characterPosition(source));
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+    const resolvedId = characterId(source, id);
+    const key = String(resolvedId ?? `${pos.x}:${pos.y}`);
+    if (localId != null && key === String(localId)) return;
+    if (seen.has(key)) return;
+    seen.add(key);
+    players.push({ ...pos, id: resolvedId, name: characterName(source, fallbackName), teamId: characterTeam(source) });
+  };
+
+  for (const { id, character } of characterEntries()) add(id, character, String(id ?? ''));
+
+  const worldPlayers = safeGet(gameWindow(), ['stores', 'world', 'players']);
+  for (const [id, player] of tileEntries(worldPlayers)) add(id, player, String(id ?? ''), false);
+
+  return players;
+}
+
+/** Pull raw coordinates out of device/object-like records. */
+function devicePosition(device) {
+  const candidates = [
+    device?.body?.center,
+    device?.body?.position,
+    device?.physicsBody?.center,
+    device?.physicsBody?.position,
+    device?.position,
+    device?.pos,
+    device?.transform,
+    device?.state,
+    device?.body,
+    device?.physicsBody,
+    device?.sprite,
+    device?.displayObject,
+    device?.container,
+    device,
+  ];
+  for (const candidate of candidates) {
+    const point = phaserPointToWorld(candidate, device?.rotation ?? device?.body?.rotation ?? 0);
+    if (point) return { ...point, worldSpace: true };
+  }
+  return null;
+}
+
+/** Return device/object collections from likely Gimkit state paths. */
+function deviceCollections() {
+  const root = gameWindow();
+  return [
+    safeGet(root, ['stores', 'phaser', 'scene', 'worldManager', 'devices', 'allDevices']),
+    safeGet(root, ['stores', 'phaser', 'scene', 'worldManager', 'devices', 'devices']),
+    safeGet(root, ['stores', 'world', 'devices']),
+    safeGet(root, ['stores', 'world', 'devices', 'devices']),
+    safeGet(root, ['stores', 'world', 'devices', 'devices', 'data_']),
+    safeGet(root, ['stores', 'world', 'objects']),
+    safeGet(root, ['serializer', 'state', 'devices', '$items']),
+    safeGet(root, ['serializer', 'state', 'objects', '$items']),
+  ].filter(Boolean);
+}
+
+
+/** Return a useful device/object type label from world.devices device schemas. */
+function deviceKind(device) {
+  return device?.options?.propId
+    ?? device?.deviceOption?.id
+    ?? device?.type
+    ?? device?.kind
+    ?? device?.key
+    ?? device?.options?.type
+    ?? device?.options?.group
+    ?? 'device';
+}
+
+/** Return a display label for a device/object marker. */
+function deviceName(device) {
+  return device?.name
+    ?? device?.label
+    ?? device?.options?.name
+    ?? device?.options?.label
+    ?? device?.options?.propId
+    ?? device?.deviceOption?.id
+    ?? '';
+}
+
+
+/** Return raw device entries from every known device collection for debugging. */
+function rawDeviceEntries() {
+  const entries = [];
+  const seen = new Set();
+  for (const collection of deviceCollections()) {
+    for (const [id, device] of tileEntries(collection)) {
+      if (!device) continue;
+      const resolvedId = device?.id ?? device?.deviceId ?? id ?? entries.length;
+      const key = String(resolvedId);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({ id: resolvedId, device });
+    }
+  }
+  return entries;
+}
+
+/** Return Phaser's texture manager when the active scene exposes one. */
+function phaserTextureManager() {
+  return safeGet(gameWindow(), ['stores', 'phaser', 'scene', 'textures'])
+    ?? safeGet(gameWindow(), ['stores', 'phaser', 'scene', 'sys', 'textures'])
+    ?? safeGet(gameWindow(), ['stores', 'phaser', 'scene', 'game', 'textures'])
+    ?? safeGet(gameWindow(), ['game', 'textures'])
+    ?? safeGet(gameWindow(), ['_phaserGame', 'textures'])
+    ?? null;
+}
+
+/** Extract all known texture keys from Phaser's texture manager. */
+function phaserTextureKeys(filter = '') {
+  const textures = phaserTextureManager();
+  const lower = String(filter ?? '').toLowerCase();
+  let keys = [];
+  if (textures?.list && typeof textures.list === 'object') keys = Object.keys(textures.list);
+  else if (textures?.keys && typeof textures.keys === 'object') keys = Object.keys(textures.keys);
+  else if (typeof textures?.getTextureKeys === 'function') keys = textures.getTextureKeys();
+  else if (typeof textures?.each === 'function') {
+    textures.each((texture) => { if (texture?.key) keys.push(texture.key); });
+  }
+  return [...new Set(keys)].filter((key) => !lower || String(key).toLowerCase().includes(lower)).sort();
+}
+
+/** Read a probable image/source URL from a Phaser texture object. */
+function textureSourceUrl(texture) {
+  const sources = [
+    texture?.source?.[0]?.image,
+    texture?.source?.image,
+    texture?.dataSource?.[0]?.image,
+    texture?.dataSource?.image,
+    texture?.frames?.__BASE?.source?.image,
+  ];
+  for (const image of sources) {
+    const url = image?.currentSrc ?? image?.src ?? image?.dataset?.src;
+    if (url) return url;
+  }
+  return null;
+}
+
+/** Inspect a Phaser texture key and return source/frame information. */
+function inspectTexture(key) {
+  const textures = phaserTextureManager();
+  const texture = typeof textures?.get === 'function' ? textures.get(key) : textures?.list?.[key] ?? textures?.keys?.[key];
+  if (!texture) return null;
+  return {
+    key,
+    source: textureSourceUrl(texture),
+    frameNames: texture?.frames ? Object.keys(texture.frames).slice(0, 50) : [],
+    raw: texture,
+  };
+}
+
+/** Walk likely render objects on a device and collect texture/frame references. */
+function deviceTextureRefs(device, maxDepth = 4) {
+  const refs = [];
+  const seen = new Set();
+  const visit = (value, path, depth) => {
+    if (!value || (typeof value !== 'object' && typeof value !== 'function') || depth > maxDepth || seen.has(value)) return;
+    seen.add(value);
+
+    const textureKey = value?.texture?.key ?? value?.textureKey ?? value?.key;
+    const frameName = value?.frame?.name ?? value?.frame?.key ?? value?.frameKey;
+    if (textureKey && (value?.texture || value?.frame || /sprite|image|texture|frame/i.test(path))) {
+      refs.push({ path, textureKey, frameName, object: value });
+    }
+
+    const childCollections = [value.list, value.children?.entries, value.children?.list, value.sprites, value.images];
+    for (const collection of childCollections) {
+      if (Array.isArray(collection)) collection.forEach((child, index) => visit(child, `${path}.children[${index}]`, depth + 1));
+    }
+
+    for (const key of ['sprite', 'image', 'body', 'container', 'displayObject', 'gameObject', 'object', 'view', 'renderer']) {
+      if (value[key]) visit(value[key], `${path}.${key}`, depth + 1);
+    }
+  };
+  visit(device, 'device', 0);
+  return refs;
+}
+
+/** Build a concise device→texture report for console debugging. */
+function deviceTextureReport(filter = '', limit = 25) {
+  const lower = String(filter ?? '').toLowerCase();
+  const rows = [];
+  for (const { id, device } of rawDeviceEntries()) {
+    const kind = deviceKind(device);
+    const name = deviceName(device);
+    const searchable = `${id} ${kind} ${name}`.toLowerCase();
+    if (lower && !searchable.includes(lower)) continue;
+    rows.push({
+      id,
+      kind,
+      name,
+      propId: device?.options?.propId ?? null,
+      deviceOptionId: device?.deviceOption?.id ?? null,
+      textures: deviceTextureRefs(device).map((ref) => ({
+        path: ref.path,
+        textureKey: ref.textureKey,
+        frameName: ref.frameName,
+        source: inspectTexture(ref.textureKey)?.source ?? null,
+      })),
+      raw: device,
+    });
+    if (rows.length >= limit) break;
+  }
+  return rows;
+}
+
+/** Expose console helpers for investigating device texture links in DevTools. */
+function installDebugHelpers() {
+  const root = gameWindow();
+  root.GimkitMapDebug = {
+    stores: () => safeGet(root, ['stores']),
+    rawDeviceEntries,
+    devices: findDevices,
+    deviceTextureRefs,
+    deviceTextureReport,
+    textureKeys: phaserTextureKeys,
+    inspectTexture,
+    textureManager: phaserTextureManager,
+  };
+  console.log('[GimkitMap] Debug helpers installed on window.GimkitMapDebug');
+  console.log('[GimkitMap] Try: GimkitMapDebug.deviceTextureReport("snow", 10)');
+  console.log('[GimkitMap] Try: GimkitMapDebug.textureKeys("snow").map(GimkitMapDebug.inspectTexture)');
+}
+
+/** Collect map objects/devices such as trees, stations, barriers, and pickups. */
+function findDevices() {
+  const devices = [];
+  const seen = new Set();
+  for (const collection of deviceCollections()) {
+    for (const [id, device] of tileEntries(collection)) {
+      if (!device) continue;
+      const pos = devicePosition(device);
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+      const resolvedId = device?.id ?? device?.deviceId ?? id ?? `${pos.x}:${pos.y}`;
+      const key = String(resolvedId);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      devices.push({
+        ...pos,
+        id: resolvedId,
+        kind: deviceKind(device),
+        name: deviceName(device),
+      });
+      if (devices.length >= CFG.DEVICE_LIMIT) return devices;
+    }
+  }
+  return devices;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -315,8 +686,8 @@ function findPlayer() {
   try {
     const main = safeGet(gameWindow(), ['stores', 'phaser', 'mainCharacter']);
     const rotation = main?.rotation ?? main?.body?.rotation ?? ((main?.angle ?? 0) * Math.PI / 180);
-    const point = main?.body?.center ?? main?.body?.position ?? main?.body ?? main;
-    const player = phaserPointToWorld(point, rotation);
+    const player = phaserBodyOrigin(main?.body, rotation)
+      ?? phaserPointToWorld(main?.body?.center ?? main?.body?.position ?? main?.body ?? main, rotation);
     if (player) return player;
   } catch {}
 
@@ -331,8 +702,8 @@ function findPlayer() {
       : null;
     const body = managed?.body ?? managed ?? phaser?.mainCharacter?.body;
     const rotation = managed?.rotation ?? body?.rotation ?? phaser?.mainCharacter?.rotation ?? ((managed?.angle ?? phaser?.mainCharacter?.angle ?? 0) * Math.PI / 180);
-    const point = body?.center ?? body?.position ?? body;
-    const player = phaserPointToWorld(point, rotation);
+    const player = phaserBodyOrigin(body, rotation)
+      ?? phaserPointToWorld(body?.center ?? body?.position ?? body, rotation);
     if (player) return player;
   } catch {}
 
@@ -340,8 +711,8 @@ function findPlayer() {
   try {
     const me = safeGet(gameWindow(), ['stores', 'me']);
     if (me?.x != null || me?.position?.x != null || me?.body?.x != null) {
-      const point = me?.body ?? me?.position ?? me;
-      const player = phaserPointToWorld(point, me?.rotation ?? 0);
+      const player = phaserBodyOrigin(me?.body, me?.rotation ?? 0)
+        ?? phaserPointToWorld(me?.body ?? me?.position ?? me, me?.rotation ?? 0);
       if (player) return player;
     }
   } catch {}
@@ -412,6 +783,7 @@ class TileRenderer {
     this._smoothedFocus = null; // Last drawn player/camera focus in map coords
     this._lastFocus  = null;   // Last resolved unsmoothed player focus
     this._lastFrameT = 0;      // Timestamp used for frame-rate independent smoothing
+    this._lastStats  = { tiles: 0, players: 0, devices: 0, playerPosition: null };
   }
 
   /**
@@ -421,10 +793,18 @@ class TileRenderer {
   render(zoom) {
     const tiles = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
     const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
-    if (!tiles || tileCount === 0) { this._drawWaiting(); return; }
+    if (!tiles || tileCount === 0) {
+      this._lastStats = { tiles: 0, players: 0, devices: 0, playerPosition: null };
+      this._drawWaiting();
+      return;
+    }
 
     const renderTiles = normalizeTiles(tiles);
-    if (renderTiles.length === 0) { this._drawWaiting('Tile data found, but coordinates were unreadable…'); return; }
+    if (renderTiles.length === 0) {
+      this._lastStats = { tiles: tileCount, players: 0, devices: 0, playerPosition: null };
+      this._drawWaiting('Tile data found, but coordinates were unreadable…');
+      return;
+    }
 
     if (renderTiles.length !== this._knownCount) {
       this._buildCache(renderTiles);
@@ -433,6 +813,9 @@ class TileRenderer {
 
     this._composite(zoom, findPlayer(), renderTiles.length);
   }
+
+  /** Return the latest minimap discovery counts for the status bar. */
+  stats() { return { ...this._lastStats }; }
 
   /**
    * Force a full cache rebuild on the next render call.
@@ -454,7 +837,7 @@ class TileRenderer {
       if (t.y < minY) minY = t.y;  if (t.y > maxY) maxY = t.y;
     }
     this._bounds = { minX, minY, w: maxX - minX + 1, h: maxY - minY + 1 };
-    this._worldPixelsPerMapUnit = inferWorldPixelsPerMapUnit(tiles);
+    this._worldToMap = inferWorldToMapTransform(tiles);
 
     const ts  = CFG.TILE_PX;
     const off = document.createElement('canvas');
@@ -501,7 +884,7 @@ class TileRenderer {
     const scaledH = cache.height * zoom;
 
     const targetFocus = player != null
-      ? this._playerFocus(player, b, this._worldPixelsPerMapUnit)
+      ? this._playerFocus(player, b, this._worldToMap)
       : this._lastFocus;
     const focusedPlayer = this._smoothFocus(targetFocus);
 
@@ -523,8 +906,40 @@ class TileRenderer {
     // Tile image scaled to current zoom
     ctx.drawImage(cache, ox, oy, scaledW, scaledH);
 
-    // Player marker is fixed in the minimap center; the map moves underneath.
+    const devices = findDevices();
+    const otherPlayers = findOtherPlayers();
+    this._lastStats = {
+      tiles: tileCount,
+      players: otherPlayers.length,
+      devices: devices.length,
+      playerPosition: focusedPlayer ? { x: focusedPlayer.x, y: focusedPlayer.y } : null,
+    };
+
     if (focusedPlayer != null) {
+      const toCanvas = (point) => ({
+        x: ox + (point.x - b.minX) * ts,
+        y: oy + (point.y - b.minY) * ts,
+      });
+
+      // Devices/objects are drawn under players so dots stay readable.
+      for (const device of devices) {
+        const point = this._mapPoint(device, b, this._worldToMap);
+        if (!point) continue;
+        const screen = toCanvas(point);
+        if (!this._isVisible(screen, cw, ch, 24)) continue;
+        this._drawDevice(ctx, screen.x, screen.y, device.kind);
+      }
+
+      const localTeam = localPlayerTeam();
+      for (const other of otherPlayers) {
+        const point = this._mapPoint(other, b, this._worldToMap);
+        if (!point) continue;
+        const screen = toCanvas(point);
+        if (!this._isVisible(screen, cw, ch, 18)) continue;
+        this._drawOtherPlayer(ctx, screen.x, screen.y, other, localTeam);
+      }
+
+      // Player marker is fixed in the minimap center; the map moves underneath.
       this._drawPlayer(ctx, cw / 2, ch / 2);
     }
 
@@ -538,8 +953,16 @@ class TileRenderer {
    * may expose character coordinates in either tile units or Phaser pixels, so
    * prefer the representation that overlaps (or is closest to) known terrain.
    */
-  _playerFocus(player, bounds, inferredScale = CFG.PHASER_TILE_PX) {
+  _playerFocus(player, bounds, transform = { scale: CFG.PHASER_TILE_PX, offsetX: 0, offsetY: 0 }) {
     if (!player) return null;
+    const best = this._mapPoint(player, bounds, transform, true);
+    if (best) this._lastFocus = best;
+    return best;
+  }
+
+  /** Convert raw tile/world coordinates into minimap tile coordinates. */
+  _mapPoint(source, bounds, transform = { scale: CFG.PHASER_TILE_PX, offsetX: 0, offsetY: 0 }, preferPrevious = false) {
+    if (!source || !Number.isFinite(Number(source.x)) || !Number.isFinite(Number(source.y))) return null;
 
     const margin = 3;
     const inBounds = (point) => point.x >= bounds.minX - margin
@@ -547,33 +970,56 @@ class TileRenderer {
       && point.y >= bounds.minY - margin
       && point.y <= bounds.minY + bounds.h + margin;
 
-    const rotation = player.rotation ?? 0;
-    const previous = this._lastFocus ?? this._smoothedFocus;
-    const previousScale = previous?.scale;
-    const baseScales = player.worldSpace
-      ? [previousScale, inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16, 1]
-      : [previousScale, 1, inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16];
-    const uniqueScales = [...new Set(baseScales
-      .filter((scale) => Number.isFinite(scale) && scale > 0)
-      .map((scale) => Math.round(scale * 1000) / 1000))];
+    const rotation = source.rotation ?? 0;
+    const previous = preferPrevious ? (this._lastFocus ?? this._smoothedFocus) : null;
+    const transforms = [];
+    const addCandidate = (scaleX, offsetX = 0, offsetY = 0, label = 'scale', scaleY = scaleX) => {
+      if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || Math.abs(scaleX) <= 0 || Math.abs(scaleY) <= 0) return;
+      const roundedScaleX = Math.round(scaleX * 1000) / 1000;
+      const roundedScaleY = Math.round(scaleY * 1000) / 1000;
+      const roundedScale = Math.round(((Math.abs(scaleX) + Math.abs(scaleY)) / 2) * 1000) / 1000;
+      const roundedOffsetX = Math.round(offsetX * 1000) / 1000;
+      const roundedOffsetY = Math.round(offsetY * 1000) / 1000;
+      const key = `${roundedScaleX}:${roundedScaleY}:${roundedOffsetX}:${roundedOffsetY}`;
+      if (transforms.some((item) => item.key === key)) return;
+      transforms.push({
+        key,
+        scale: roundedScale,
+        scaleX: roundedScaleX,
+        scaleY: roundedScaleY,
+        offsetX: roundedOffsetX,
+        offsetY: roundedOffsetY,
+        label,
+      });
+    };
+
+    addCandidate(transform.scaleX ?? transform.scale, transform.offsetX, transform.offsetY, 'inferred', transform.scaleY ?? transform.scale);
+    addCandidate(previous?.scaleX ?? previous?.scale, previous?.offsetX ?? 0, previous?.offsetY ?? 0, 'previous', previous?.scaleY ?? previous?.scale);
+    if (!source.worldSpace) addCandidate(1, 0, 0, 'tile');
+    for (const scale of [CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16, 1]) addCandidate(scale, 0, 0, 'fallback');
 
     const centerX = bounds.minX + bounds.w / 2;
     const centerY = bounds.minY + bounds.h / 2;
     const mapDistance = (point) => Math.hypot(point.x - centerX, point.y - centerY);
     const previousDistance = (point) => previous ? Math.hypot(point.x - previous.x, point.y - previous.y) : 0;
-    const scalePenalty = (scale) => previousScale ? Math.abs(Math.log(scale / previousScale)) * 4 : 0;
-    const candidates = uniqueScales.map((scale) => {
-      const point = { x: player.x / scale, y: player.y / scale, rotation, scale };
+    const candidates = transforms.map(({ scale, scaleX, scaleY, offsetX, offsetY, label }) => {
+      const point = { x: Number(source.x) / scaleX + offsetX, y: Number(source.y) / scaleY + offsetY, rotation, scale, scaleX, scaleY, offsetX, offsetY, label };
       point.onMap = inBounds(point);
-      point.score = (previous ? previousDistance(point) * 10 : mapDistance(point))
-        + scalePenalty(scale)
-        + (point.onMap ? 0 : Math.max(bounds.w, bounds.h) * 2);
+      point.score = mapDistance(point)
+        + (previous ? previousDistance(point) * 2 : 0)
+        + (point.onMap ? 0 : Math.max(bounds.w, bounds.h) * 2)
+        + (label === 'inferred' ? -10 : 0)
+        + (!source.worldSpace && label === 'tile' ? -1 : 0);
       return point;
     });
 
-    const best = candidates.reduce((winner, point) => point.score < winner.score ? point : winner);
-    this._lastFocus = best;
-    return best;
+    return candidates.reduce((winner, point) => point.score < winner.score ? point : winner);
+  }
+
+  /** Check whether a screen-space marker is inside or near the minimap viewport. */
+  _isVisible(point, width, height, margin = 0) {
+    return point.x >= -margin && point.x <= width + margin
+      && point.y >= -margin && point.y <= height + margin;
   }
 
   /** Ease the minimap camera toward the latest player focus to avoid snapping. */
@@ -595,29 +1041,83 @@ class TileRenderer {
       y: this._smoothedFocus.y + (target.y - this._smoothedFocus.y) * alpha,
       rotation: target.rotation ?? this._smoothedFocus.rotation ?? 0,
       scale: target.scale ?? this._smoothedFocus.scale,
+      scaleX: target.scaleX ?? target.scale ?? this._smoothedFocus.scaleX ?? this._smoothedFocus.scale,
+      scaleY: target.scaleY ?? target.scale ?? this._smoothedFocus.scaleY ?? this._smoothedFocus.scale,
+      offsetX: target.offsetX ?? this._smoothedFocus.offsetX ?? 0,
+      offsetY: target.offsetY ?? this._smoothedFocus.offsetY ?? 0,
     };
     return this._smoothedFocus;
   }
 
-  /**
-   * Draw a small fixed player dot at the minimap center.
-   */
+  /** Draw a small fixed local-player dot at the minimap center. */
   _drawPlayer(ctx, px, py) {
-    const r = CFG.PLAYER_R;
+    this._drawDot(ctx, px, py, CFG.PLAYER_R, '#ff4444', '#ffffff', '#ff3333');
     ctx.save();
-    ctx.shadowColor = '#ff3333';
+    ctx.beginPath();
+    ctx.arc(px, py, CFG.PLAYER_R + 4, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Draw a green friendly/unknown or red enemy non-local player marker. */
+  _drawOtherPlayer(ctx, px, py, player = {}, localTeam = null) {
+    const isEnemy = localTeam != null && player.teamId != null && String(player.teamId) !== String(localTeam);
+    this._drawDot(
+      ctx,
+      px,
+      py,
+      CFG.OTHER_PLAYER_R,
+      isEnemy ? '#ff3b3b' : '#37e66f',
+      isEnemy ? '#4b0909' : '#073b17',
+      isEnemy ? '#ff3b3b' : '#37e66f',
+    );
+  }
+
+  /** Draw a map object/device marker; trees get a slightly earthier icon. */
+  _drawDevice(ctx, px, py, kind = '') {
+    const text = String(kind ?? '').toLowerCase();
+    const isTree = text.includes('tree') || text.includes('plant') || text.includes('bush');
+    const r = CFG.DEVICE_R;
+    ctx.save();
+    ctx.shadowColor = isTree ? '#1b8f3a' : '#7ecfff';
+    ctx.shadowBlur = 5;
+    ctx.beginPath();
+    if (isTree) {
+      ctx.moveTo(px, py - r - 2);
+      ctx.lineTo(px - r - 2, py + r + 1);
+      ctx.lineTo(px + r + 2, py + r + 1);
+      ctx.closePath();
+      ctx.fillStyle = '#1fa447';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#0f4f22';
+      ctx.stroke();
+      ctx.fillStyle = '#8b5a2b';
+      ctx.fillRect(px - 1, py + r, 2, 3);
+    } else {
+      ctx.rect(px - r, py - r, r * 2, r * 2);
+      ctx.fillStyle = '#62d8ff';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#09354a';
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** Shared circular marker renderer. */
+  _drawDot(ctx, px, py, r, fill, stroke, glow) {
+    ctx.save();
+    ctx.shadowColor = glow;
     ctx.shadowBlur  = 8;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.fillStyle   = '#ff4444';
+    ctx.fillStyle   = fill;
     ctx.fill();
     ctx.lineWidth   = 2;
-    ctx.strokeStyle = '#ffffff';
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(px, py, r + 4, 0, Math.PI * 2);
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.strokeStyle = stroke;
     ctx.stroke();
     ctx.restore();
   }
@@ -790,10 +1290,12 @@ class MapPanel {
       fontWeight:     '600',
       display:        'flex',
       justifyContent: 'space-between',
+      gap:            '8px',
       flexShrink:     '0',
     });
-    this._statusL = document.createElement('span');   // Left: tile count
+    this._statusL = document.createElement('span');   // Left: tile/player/device counts
     this._statusR = document.createElement('span');   // Right: zoom %
+    this._statusL.style.whiteSpace = 'nowrap';
     this._statusR.style.color = '#bfefff';
     statusBar.append(this._statusL, this._statusR);
 
@@ -839,10 +1341,12 @@ class MapPanel {
   /** One render tick: draw the map and refresh the status bar text. */
   _tick() {
     this._renderer.render(this.zoom);
-    const tiles  = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
-    const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
-    const tileStr  = tileCount ? `${tileCount} tiles` : 'No tile data';
-    this._statusL.textContent = tileStr;
+    const stats = this._renderer.stats();
+    const tileStr = stats.tiles ? `${stats.tiles} tiles` : 'No tile data';
+    const playerStr = stats.playerPosition
+      ? `pos ${stats.playerPosition.x.toFixed(1)}, ${stats.playerPosition.y.toFixed(1)}`
+      : 'pos ?';
+    this._statusL.textContent = `${tileStr} • ${stats.players} players • ${stats.devices} devices • ${playerStr}`;
     this._statusR.textContent = `${(this.zoom * 100).toFixed(0)}%`;
   }
 
@@ -890,6 +1394,7 @@ class MapPanel {
 // ─────────────────────────────────────────────────────────────────────────────
 async function init() {
   console.log('[GimkitMap] Waiting for Gimkit game stores…');
+  installDebugHelpers();
   exposeStores().catch((error) => console.warn('[GimkitMap] Initial stores resolve failed; retrying while waiting', error));
 
   let waited = 0;
