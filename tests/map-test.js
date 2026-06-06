@@ -28,7 +28,7 @@ const CFG = {
   LS_POS:          'gk_map_pos',   // localStorage key for window position
   LS_ZOOM:         'gk_map_zoom_v2',  // localStorage key for zoom level
   PLAYER_R:        6,     // Player arrow half-size (px)
-  PHASER_TILE_PX:  16,    // Phaser world-pixels per tile (for coord conversion)
+  PHASER_TILE_PX:  50,    // Phaser world-pixels per terrain tile (fallback)
   INIT_WAIT_MS:    20_000, // How long to wait for game stores before giving up
 };
 
@@ -220,22 +220,28 @@ const tileColour = (t) => TERRAIN_COLOUR[terrainKey(terrainName(t))] ?? COLOUR_F
 /** Keep frozen water blue even when Gimkit marks it as collidable. */
 const shouldDrawCollision = (t) => Boolean(t?.collides ?? t?.collision ?? t?.solid) && terrainKey(terrainName(t)) !== 'Frozen Lake';
 
-/** Read tile coordinates from either the tile schema or its collection key. */
+/** Read object-space coordinates directly from a tile-like object. */
+function objectTileCoords(tile) {
+  const x = firstFiniteNumber(tile?.x, tile?.tileX, tile?.gridX, tile?.col, tile?.column, tile?.position?.x, tile?.pos?.x);
+  const y = firstFiniteNumber(tile?.y, tile?.tileY, tile?.gridY, tile?.row, tile?.position?.y, tile?.pos?.y);
+  return x != null && y != null ? { x, y } : null;
+}
+
+/** Read authoritative grid coordinates from common keyed terrain maps. */
+function keyTileCoords(key) {
+  if (typeof key !== 'string') return null;
+  const trimmed = key.trim();
+  if (!trimmed || !/[,:|;_\s]/.test(trimmed)) return null;
+  const match = trimmed.match(/-?\d+(?:\.\d+)?/g);
+  if (match?.length !== 2) return null;
+  const x = Number(match[0]);
+  const y = Number(match[1]);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+}
+
+/** Read tile coordinates from the collection key first, then the tile schema. */
 function tileCoords(tile, key) {
-  let x = firstFiniteNumber(tile?.x, tile?.tileX, tile?.gridX, tile?.col, tile?.column, tile?.position?.x, tile?.pos?.x);
-  let y = firstFiniteNumber(tile?.y, tile?.tileY, tile?.gridY, tile?.row, tile?.position?.y, tile?.pos?.y);
-  if (x != null && y != null) return { x, y };
-
-  if (typeof key === 'string') {
-    const match = key.match(/-?\d+(?:\.\d+)?/g);
-    if (match?.length >= 2) {
-      x = Number(match[0]);
-      y = Number(match[1]);
-      if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
-    }
-  }
-
-  return null;
+  return keyTileCoords(key) ?? objectTileCoords(tile);
 }
 
 /** Iterate normal Maps, Colyseus MapSchemas, arrays, and plain keyed objects. */
@@ -254,25 +260,54 @@ function normalizeTiles(tiles) {
   for (const [key, tile] of tileEntries(tiles)) {
     const coords = tileCoords(tile, key);
     if (!coords) continue;
-    normalized.push({ ...tile, x: coords.x, y: coords.y });
+    const objectCoords = objectTileCoords(tile);
+    normalized.push({
+      ...tile,
+      x: coords.x,
+      y: coords.y,
+      __rawX: objectCoords?.x,
+      __rawY: objectCoords?.y,
+      __usedKeyCoords: keyTileCoords(key) != null,
+    });
   }
   return normalized;
 }
 
-/** Convert a Phaser world-space point/body into tile-coordinate space. */
-function phaserPointToTile(point, rotation = 0) {
+/** Estimate how many Phaser/world pixels correspond to one rendered map unit. */
+function inferWorldPixelsPerMapUnit(tiles) {
+  const keyed = tiles.filter((tile) => tile.__usedKeyCoords
+    && Number.isFinite(tile.__rawX)
+    && Number.isFinite(tile.__rawY)
+    && (Math.abs(tile.__rawX - tile.x) > 1 || Math.abs(tile.__rawY - tile.y) > 1));
+  if (keyed.length < 2) return CFG.PHASER_TILE_PX;
+
+  const minMapX = Math.min(...keyed.map((tile) => tile.x));
+  const maxMapX = Math.max(...keyed.map((tile) => tile.x));
+  const minRawX = Math.min(...keyed.map((tile) => tile.__rawX));
+  const maxRawX = Math.max(...keyed.map((tile) => tile.__rawX));
+  const minMapY = Math.min(...keyed.map((tile) => tile.y));
+  const maxMapY = Math.max(...keyed.map((tile) => tile.y));
+  const minRawY = Math.min(...keyed.map((tile) => tile.__rawY));
+  const maxRawY = Math.max(...keyed.map((tile) => tile.__rawY));
+
+  const scaleX = maxMapX !== minMapX ? Math.abs((maxRawX - minRawX) / (maxMapX - minMapX)) : null;
+  const scaleY = maxMapY !== minMapY ? Math.abs((maxRawY - minRawY) / (maxMapY - minMapY)) : null;
+  const scales = [scaleX, scaleY].filter((scale) => Number.isFinite(scale) && scale > 1);
+  return scales.length ? scales.reduce((sum, scale) => sum + scale, 0) / scales.length : CFG.PHASER_TILE_PX;
+}
+
+/** Return raw Phaser/world-space coordinates for a point/body. */
+function phaserPointToWorld(point, rotation = 0) {
   if (point?.x == null || point?.y == null) return null;
   const w = point.width ?? point.w ?? 0;
   const h = point.height ?? point.h ?? 0;
-  const x = (point.x + w / 2) / CFG.PHASER_TILE_PX;
-  const y = (point.y + h / 2) / CFG.PHASER_TILE_PX;
-  return { x, y, rotation };
+  return { x: point.x + w / 2, y: point.y + h / 2, rotation, worldSpace: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PLAYER POSITION FINDER
 // Probes several known Gimkit / Phaser state paths.
-// Returns { x, y, rotation } in tile-coordinate space, or null.
+// Returns { x, y, rotation } in the source coordinate space, or null.
 // ─────────────────────────────────────────────────────────────────────────────
 function findPlayer() {
   // ── Probe 0: exposed Zyrox/Gimkit Phaser main character ───────────────────
@@ -280,7 +315,7 @@ function findPlayer() {
     const main = safeGet(gameWindow(), ['stores', 'phaser', 'mainCharacter']);
     const rotation = main?.rotation ?? main?.body?.rotation ?? ((main?.angle ?? 0) * Math.PI / 180);
     const point = main?.body?.center ?? main?.body?.position ?? main?.body ?? main;
-    const player = phaserPointToTile(point, rotation);
+    const player = phaserPointToWorld(point, rotation);
     if (player) return player;
   } catch {}
 
@@ -296,7 +331,7 @@ function findPlayer() {
     const body = managed?.body ?? managed ?? phaser?.mainCharacter?.body;
     const rotation = managed?.rotation ?? body?.rotation ?? phaser?.mainCharacter?.rotation ?? ((managed?.angle ?? phaser?.mainCharacter?.angle ?? 0) * Math.PI / 180);
     const point = body?.center ?? body?.position ?? body;
-    const player = phaserPointToTile(point, rotation);
+    const player = phaserPointToWorld(point, rotation);
     if (player) return player;
   } catch {}
 
@@ -305,7 +340,7 @@ function findPlayer() {
     const me = safeGet(gameWindow(), ['stores', 'me']);
     if (me?.x != null || me?.position?.x != null || me?.body?.x != null) {
       const point = me?.body ?? me?.position ?? me;
-      const player = phaserPointToTile(point, me?.rotation ?? 0);
+      const player = phaserPointToWorld(point, me?.rotation ?? 0);
       if (player) return player;
     }
   } catch {}
@@ -348,8 +383,7 @@ function findPlayer() {
       for (const s of scenes) {
         const p = s.player ?? s.localPlayer ?? s.character;
         if (p?.x != null) {
-          const tp = CFG.PHASER_TILE_PX;
-          return { x: p.x / tp, y: p.y / tp, rotation: p.rotation ?? 0 };
+          return { x: p.x, y: p.y, rotation: p.rotation ?? 0, worldSpace: true };
         }
       }
     }
@@ -416,6 +450,7 @@ class TileRenderer {
       if (t.y < minY) minY = t.y;  if (t.y > maxY) maxY = t.y;
     }
     this._bounds = { minX, minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+    this._worldPixelsPerMapUnit = inferWorldPixelsPerMapUnit(tiles);
 
     const ts  = CFG.TILE_PX;
     const off = document.createElement('canvas');
@@ -461,7 +496,7 @@ class TileRenderer {
     const scaledW = cache.width  * zoom;
     const scaledH = cache.height * zoom;
 
-    const focusedPlayer = this._playerFocus(player, b);
+    const focusedPlayer = this._playerFocus(player, b, this._worldPixelsPerMapUnit);
 
     // Tile-space focal point (what we want at the canvas centre). This is the
     // key minimap behavior: when the player is known, keep the fixed center
@@ -497,7 +532,7 @@ class TileRenderer {
    * may expose character coordinates in either tile units or Phaser pixels, so
    * prefer the representation that overlaps (or is closest to) known terrain.
    */
-  _playerFocus(player, bounds) {
+  _playerFocus(player, bounds, inferredScale = CFG.PHASER_TILE_PX) {
     if (!player) return null;
 
     const margin = 3;
@@ -506,24 +541,25 @@ class TileRenderer {
       && point.y >= bounds.minY - margin
       && point.y <= bounds.minY + bounds.h + margin;
 
-    const tileSpace = {
-      x: player.x,
-      y: player.y,
-      rotation: player.rotation ?? 0,
-    };
-    if (inBounds(tileSpace)) return tileSpace;
+    const rotation = player.rotation ?? 0;
+    const scales = player.worldSpace
+      ? [inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16, 1]
+      : [1, inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16];
+    const uniqueScales = [...new Set(scales.filter((scale) => Number.isFinite(scale) && scale > 0).map((scale) => Math.round(scale * 1000) / 1000))];
+    const candidates = uniqueScales.map((scale) => ({
+      x: player.x / scale,
+      y: player.y / scale,
+      rotation,
+      scale,
+    }));
 
-    const phaserSpace = {
-      x: player.x / CFG.PHASER_TILE_PX,
-      y: player.y / CFG.PHASER_TILE_PX,
-      rotation: player.rotation ?? 0,
-    };
-    if (inBounds(phaserSpace)) return phaserSpace;
+    const onMap = candidates.find(inBounds);
+    if (onMap) return onMap;
 
     const centerX = bounds.minX + bounds.w / 2;
     const centerY = bounds.minY + bounds.h / 2;
     const distanceToMap = (point) => Math.hypot(point.x - centerX, point.y - centerY);
-    return distanceToMap(phaserSpace) < distanceToMap(tileSpace) ? phaserSpace : tileSpace;
+    return candidates.reduce((best, point) => distanceToMap(point) < distanceToMap(best) ? point : best);
   }
 
   /**
