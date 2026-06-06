@@ -17,17 +17,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const CFG = {
   TOGGLE_KEY:      'm',   // Key that opens/closes the map
-  REFRESH_MS:      50,    // Fallback redraw interval (ms) while map is open
+  REFRESH_MS:      25,    // Redraw interval (ms) while map is open
   TILE_PX:         5,     // Canvas pixels per tile at zoom 1.0×
   DEFAULT_ZOOM:    4,     // Minimap starts close-up and follows the player
   MIN_ZOOM:        0.5,
   MAX_ZOOM:        12,
   ZOOM_STEP:       0.5,
-  DEFAULT_W:       260,   // Initial minimap panel width (px)
-  DEFAULT_H:       220,   // Initial minimap panel height (px)
+  DEFAULT_W:       320,   // Fixed minimap panel width (px)
+  DEFAULT_H:       280,   // Fixed minimap panel height (px)
   LS_POS:          'gk_map_pos',   // localStorage key for window position
   LS_ZOOM:         'gk_map_zoom_v2',  // localStorage key for zoom level
-  PLAYER_R:        6,     // Player arrow half-size (px)
+  PLAYER_R:        4,     // Player dot radius (px)
   PHASER_TILE_PX:  50,    // Phaser world-pixels per terrain tile (fallback)
   INIT_WAIT_MS:    20_000, // How long to wait for game stores before giving up
   SMOOTH_MS:       140,   // Camera smoothing time constant for player-follow
@@ -525,11 +525,10 @@ class TileRenderer {
 
     // Player marker is fixed in the minimap center; the map moves underneath.
     if (focusedPlayer != null) {
-      this._drawPlayer(ctx, cw / 2, ch / 2, focusedPlayer.rotation);
+      this._drawPlayer(ctx, cw / 2, ch / 2);
     }
 
-    // Tile-count badge at the top of the map, then compass in the corner
-    this._drawTileCount(ctx, cw / 2, 18, tileCount);
+    // Compass stays in the corner; tile count lives in the bottom status bar.
     this._drawCompass(ctx, cw - 24, 24);
   }
 
@@ -601,26 +600,24 @@ class TileRenderer {
   }
 
   /**
-   * Draw a directional arrow at (px, py) rotated to `rotation` radians.
+   * Draw a small fixed player dot at the minimap center.
    */
-  _drawPlayer(ctx, px, py, rotation) {
+  _drawPlayer(ctx, px, py) {
     const r = CFG.PLAYER_R;
     ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(rotation);
     ctx.shadowColor = '#ff3333';
     ctx.shadowBlur  = 8;
-    // Arrow pointing "up" (north) before rotation
     ctx.beginPath();
-    ctx.moveTo(0,          -r * 2.2);   // tip
-    ctx.lineTo(r  * 1.1,   r * 1.2);
-    ctx.lineTo(0,           r * 0.5);   // notch
-    ctx.lineTo(-r * 1.1,   r * 1.2);
-    ctx.closePath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
     ctx.fillStyle   = '#ff4444';
     ctx.fill();
+    ctx.lineWidth   = 2;
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth   = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(px, py, r + 4, 0, Math.PI * 2);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
     ctx.stroke();
     ctx.restore();
   }
@@ -759,38 +756,9 @@ class MapPanel {
       flexDirection:'column',
       fontFamily:   '"Courier New", monospace',
       userSelect:   'none',
-      resize:       'both',          // User can drag to resize
+      resize:       'none',
       overflow:     'hidden',
-      minWidth:     '200px',
-      minHeight:    '200px',
     });
-
-    /* Title bar (drag handle) */
-    this._bar = document.createElement('div');
-    Object.assign(this._bar.style, {
-      display:        'flex',
-      alignItems:     'center',
-      justifyContent: 'space-between',
-      padding:        '5px 8px',
-      background:     '#13132b',
-      borderBottom:   '1px solid #2a2a5e',
-      cursor:         'grab',
-      flexShrink:     '0',
-    });
-
-    const titleEl = document.createElement('span');
-    titleEl.textContent = '🗺  Minimap';
-    Object.assign(titleEl.style, { color: '#7ecfff', fontSize: '12px', fontWeight: 'bold' });
-
-    /* Control buttons */
-    const btns = document.createElement('div');
-    Object.assign(btns.style, { display: 'flex', gap: '4px', alignItems: 'center' });
-    this._btnIn    = mkBtn('+', 'Zoom in   (scroll up)');
-    this._btnOut   = mkBtn('−', 'Zoom out  (scroll down)');
-    this._btnReset = mkBtn('⊙', `Reset zoom to ${CFG.DEFAULT_ZOOM}×`);
-    this._btnClose = mkBtn('✕', 'Close map  [M]', '#5a1515');
-    btns.append(this._btnIn, this._btnOut, this._btnReset, this._btnClose);
-    this._bar.append(titleEl, btns);
 
     /* Canvas wrapper — fills remaining vertical space */
     const wrap = document.createElement('div');
@@ -817,18 +785,19 @@ class MapPanel {
       padding:        '3px 8px',
       background:     '#13132b',
       borderTop:      '1px solid #2a2a5e',
-      color:          '#3a4a5a',
-      fontSize:       '10px',
+      color:          '#b9d8e8',
+      fontSize:       '11px',
+      fontWeight:     '600',
       display:        'flex',
       justifyContent: 'space-between',
       flexShrink:     '0',
     });
-    this._statusL = document.createElement('span');   // Left: tile count / player coords
+    this._statusL = document.createElement('span');   // Left: tile count
     this._statusR = document.createElement('span');   // Right: zoom %
-    this._statusR.style.color = '#7ecfff';
+    this._statusR.style.color = '#bfefff';
     statusBar.append(this._statusL, this._statusR);
 
-    this.el.append(this._bar, wrap, statusBar);
+    this.el.append(wrap, statusBar);
     document.body.appendChild(this.el);
 
     /* Invalidate renderer whenever the panel is resized via the CSS handle */
@@ -842,41 +811,11 @@ class MapPanel {
   // ── Event wiring ──────────────────────────────────────────────────────────
 
   _bindEvents() {
-    /* ── Drag ── */
-    this._bar.addEventListener('mousedown', e => {
-      if (e.button !== 0) return;
-      const r = this.el.getBoundingClientRect();
-      this._drag = { mx: e.clientX, my: e.clientY, left: r.left, top: r.top };
-      this._bar.style.cursor = 'grabbing';
-    });
-    document.addEventListener('mousemove', e => {
-      if (!this._drag) return;
-      const x = Math.max(0, this._drag.left + (e.clientX - this._drag.mx));
-      const y = Math.max(0, this._drag.top  + (e.clientY - this._drag.my));
-      this.el.style.left = `${x}px`;
-      this.el.style.top  = `${y}px`;
-      this._pos = { x, y };
-    });
-    document.addEventListener('mouseup', () => {
-      if (!this._drag) return;
-      this._drag = null;
-      this._bar.style.cursor = 'grab';
-      lsSet(CFG.LS_POS, this._pos);   // Persist final position
-    });
-
-    /* ── Zoom ── */
-    this._btnIn.addEventListener('click',    () => this._adjustZoom(+CFG.ZOOM_STEP));
-    this._btnOut.addEventListener('click',   () => this._adjustZoom(-CFG.ZOOM_STEP));
-    this._btnReset.addEventListener('click', () => this._adjustZoom(null));
-
     // Mouse-wheel zoom directly on the canvas
     this._canvas.addEventListener('wheel', e => {
       e.preventDefault();
       this._adjustZoom(e.deltaY < 0 ? +CFG.ZOOM_STEP : -CFG.ZOOM_STEP);
     }, { passive: false });
-
-    /* ── Close ── */
-    this._btnClose.addEventListener('click', () => this.hide());
   }
 
   // ── Zoom ──────────────────────────────────────────────────────────────────
@@ -902,12 +841,8 @@ class MapPanel {
     this._renderer.render(this.zoom);
     const tiles  = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
     const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
-    const player = findPlayer();
     const tileStr  = tileCount ? `${tileCount} tiles` : 'No tile data';
-    const playerStr = player
-      ? `  ·  player (${Math.round(player.x)}, ${Math.round(player.y)})`
-      : '';
-    this._statusL.textContent = tileStr + playerStr;
+    this._statusL.textContent = tileStr;
     this._statusR.textContent = `${(this.zoom * 100).toFixed(0)}%`;
   }
 
@@ -921,9 +856,13 @@ class MapPanel {
       return;
     }
 
-    const loop = () => {
+    let lastTick = 0;
+    const loop = (now = 0) => {
       if (!this.visible) return;
-      this._tick();
+      if (!lastTick || now - lastTick >= CFG.REFRESH_MS) {
+        lastTick = now;
+        this._tick();
+      }
       this._timer = raf(loop);
     };
     this._timer = raf(loop);
