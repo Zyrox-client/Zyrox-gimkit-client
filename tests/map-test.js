@@ -18,16 +18,16 @@
 const CFG = {
   TOGGLE_KEY:      'm',   // Key that opens/closes the map
   REFRESH_MS:      350,   // Redraw interval (ms) while map is open
-  TILE_PX:         4,     // Canvas pixels per tile at zoom 1.0×
-  DEFAULT_ZOOM:    2,     // Minimap starts zoomed in and follows the player
-  MIN_ZOOM:        0.25,
-  MAX_ZOOM:        8,
-  ZOOM_STEP:       0.25,
+  TILE_PX:         5,     // Canvas pixels per tile at zoom 1.0×
+  DEFAULT_ZOOM:    4,     // Minimap starts close-up and follows the player
+  MIN_ZOOM:        0.5,
+  MAX_ZOOM:        12,
+  ZOOM_STEP:       0.5,
   DEFAULT_W:       260,   // Initial minimap panel width (px)
   DEFAULT_H:       220,   // Initial minimap panel height (px)
   LS_POS:          'gk_map_pos',   // localStorage key for window position
-  LS_ZOOM:         'gk_map_zoom',  // localStorage key for zoom level
-  PLAYER_R:        5,     // Player arrow half-size (px)
+  LS_ZOOM:         'gk_map_zoom_v2',  // localStorage key for zoom level
+  PLAYER_R:        6,     // Player arrow half-size (px)
   PHASER_TILE_PX:  16,    // Phaser world-pixels per tile (for coord conversion)
   INIT_WAIT_MS:    20_000, // How long to wait for game stores before giving up
 };
@@ -284,7 +284,33 @@ function findPlayer() {
     if (player) return player;
   } catch {}
 
-  // ── Probe 1: world.players Map + local player ID ──────────────────────────
+  // ── Probe 1: Phaser character manager body for the local character ─────────
+  try {
+    const stores = safeGet(gameWindow(), ['stores']);
+    const phaser = stores?.phaser;
+    const mainId = phaser?.mainCharacter?.id;
+    const characters = phaser?.scene?.characterManager?.characters;
+    const managed = mainId != null && typeof characters?.get === 'function'
+      ? characters.get(mainId)
+      : null;
+    const body = managed?.body ?? managed ?? phaser?.mainCharacter?.body;
+    const rotation = managed?.rotation ?? body?.rotation ?? phaser?.mainCharacter?.rotation ?? ((managed?.angle ?? phaser?.mainCharacter?.angle ?? 0) * Math.PI / 180);
+    const point = body?.center ?? body?.position ?? body;
+    const player = phaserPointToTile(point, rotation);
+    if (player) return player;
+  } catch {}
+
+  // ── Probe 2: stores.me / local user model ─────────────────────────────────
+  try {
+    const me = safeGet(gameWindow(), ['stores', 'me']);
+    if (me?.x != null || me?.position?.x != null || me?.body?.x != null) {
+      const point = me?.body ?? me?.position ?? me;
+      const player = phaserPointToTile(point, me?.rotation ?? 0);
+      if (player) return player;
+    }
+  } catch {}
+
+  // ── Probe 3: world.players Map + local player ID ──────────────────────────
   try {
     const players = safeGet(gameWindow(), ['stores', 'world', 'players']);
     if (players instanceof Map && players.size > 0) {
@@ -295,7 +321,7 @@ function findPlayer() {
     }
   } catch {}
 
-  // ── Probe 2: direct character / local-character object ────────────────────
+  // ── Probe 4: direct character / local-character object ────────────────────
   try {
     const c = safeGet(gameWindow(), ['stores', 'world', 'character'])
            ?? safeGet(gameWindow(), ['stores', 'world', 'localCharacter'])
@@ -303,7 +329,7 @@ function findPlayer() {
     if (c?.x != null) return { x: c.x, y: c.y, rotation: c.rotation ?? 0 };
   } catch {}
 
-  // ── Probe 3: generic entities Map — look for isLocal flag ─────────────────
+  // ── Probe 5: generic entities Map — look for isLocal flag ─────────────────
   try {
     const entities = safeGet(gameWindow(), ['stores', 'world', 'entities']);
     if (entities instanceof Map) {
@@ -314,7 +340,7 @@ function findPlayer() {
     }
   } catch {}
 
-  // ── Probe 4: Phaser scene player object (world-pixel → tile coords) ────────
+  // ── Probe 6: Phaser scene player object (world-pixel → tile coords) ────────
   try {
     const scenes = safeGet(gameWindow(), ['game', 'scene', 'scenes'])
                 ?? safeGet(gameWindow(), ['_phaserGame', 'scene', 'scenes']);
@@ -435,29 +461,29 @@ class TileRenderer {
     const scaledW = cache.width  * zoom;
     const scaledH = cache.height * zoom;
 
-    const displayPlayer = this._playerInBounds(player, b);
+    const focusedPlayer = this._playerFocus(player, b);
 
-    // Tile-space focal point (what we want at the canvas centre). If a player
-    // probe returns Phaser/world-pixel coordinates, convert it to tiles; if it
-    // is still outside the known map, fall back to the map centre instead of
-    // panning the cached map completely out of view.
-    const cx = displayPlayer != null ? (displayPlayer.x - b.minX) : b.w / 2;
-    const cy = displayPlayer != null ? (displayPlayer.y - b.minY) : b.h / 2;
+    // Tile-space focal point (what we want at the canvas centre). This is the
+    // key minimap behavior: when the player is known, keep the fixed center
+    // marker on the player's map position and slide the terrain underneath it.
+    const cx = focusedPlayer != null ? (focusedPlayer.x - b.minX) : b.w / 2;
+    const cy = focusedPlayer != null ? (focusedPlayer.y - b.minY) : b.h / 2;
 
     // Top-left corner of the scaled tile image in canvas coordinates
     const ox = Math.round(cw / 2 - cx * ts);
     const oy = Math.round(ch / 2 - cy * ts);
 
-    // Background (visible when zoomed in and map doesn't fill canvas)
-    ctx.fillStyle = '#0d0d1a';
+    // Background terrain fills the minimap even when explicit tiles do not
+    // cover the whole viewport around the player.
+    ctx.fillStyle = backgroundColour();
     ctx.fillRect(0, 0, cw, ch);
 
     // Tile image scaled to current zoom
     ctx.drawImage(cache, ox, oy, scaledW, scaledH);
 
-    // Player marker (always at canvas centre when the player is on this map)
-    if (displayPlayer != null) {
-      this._drawPlayer(ctx, cw / 2, ch / 2, displayPlayer.rotation);
+    // Player marker is fixed in the minimap center; the map moves underneath.
+    if (focusedPlayer != null) {
+      this._drawPlayer(ctx, cw / 2, ch / 2, focusedPlayer.rotation);
     }
 
     // Tile-count badge at the top of the map, then compass in the corner
@@ -467,26 +493,37 @@ class TileRenderer {
 
 
   /**
-   * Return player coordinates in tile-space when they overlap the known map.
-   * Some Gimkit stores expose x/y as Phaser world pixels instead of tile units;
-   * checking both spaces prevents the minimap from centering on an off-map point.
+   * Return the best tile-space player position for minimap centering. Gimkit
+   * may expose character coordinates in either tile units or Phaser pixels, so
+   * prefer the representation that overlaps (or is closest to) known terrain.
    */
-  _playerInBounds(player, bounds) {
+  _playerFocus(player, bounds) {
     if (!player) return null;
-    const margin = 2;
+
+    const margin = 3;
     const inBounds = (point) => point.x >= bounds.minX - margin
       && point.x <= bounds.minX + bounds.w + margin
       && point.y >= bounds.minY - margin
       && point.y <= bounds.minY + bounds.h + margin;
 
-    if (inBounds(player)) return player;
+    const tileSpace = {
+      x: player.x,
+      y: player.y,
+      rotation: player.rotation ?? 0,
+    };
+    if (inBounds(tileSpace)) return tileSpace;
 
-    const converted = {
+    const phaserSpace = {
       x: player.x / CFG.PHASER_TILE_PX,
       y: player.y / CFG.PHASER_TILE_PX,
       rotation: player.rotation ?? 0,
     };
-    return inBounds(converted) ? converted : null;
+    if (inBounds(phaserSpace)) return phaserSpace;
+
+    const centerX = bounds.minX + bounds.w / 2;
+    const centerY = bounds.minY + bounds.h / 2;
+    const distanceToMap = (point) => Math.hypot(point.x - centerX, point.y - centerY);
+    return distanceToMap(phaserSpace) < distanceToMap(tileSpace) ? phaserSpace : tileSpace;
   }
 
   /**
