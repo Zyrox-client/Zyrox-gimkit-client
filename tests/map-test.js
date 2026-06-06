@@ -30,6 +30,7 @@ const CFG = {
   PLAYER_R:        4,     // Player dot radius (px)
   OTHER_PLAYER_R:  3.5,   // Other player dot radius (px)
   DEVICE_R:        3,     // Device/object marker radius (px)
+  DEVICE_ICON_PX:  14,    // Device texture thumbnail size (px)
   DEVICE_LIMIT:    450,   // Safety cap for drawing map objects each frame
   PHASER_TILE_PX:  50,    // Phaser world-pixels per terrain tile (fallback)
   INIT_WAIT_MS:    20_000, // How long to wait for game stores before giving up
@@ -605,6 +606,105 @@ function deviceTextureRefs(device, maxDepth = 4) {
   return refs;
 }
 
+
+/** Return a concrete image/crop asset for a Phaser texture/frame pair. */
+function textureAsset(texture, frameName = null) {
+  if (!texture) return null;
+  const frames = texture.frames ?? {};
+  const frame = frameName != null && frames[frameName]
+    ? frames[frameName]
+    : (texture?.firstFrame && frames[texture.firstFrame] ? frames[texture.firstFrame] : frames.__BASE);
+  const image = frame?.source?.image
+    ?? texture?.source?.[frame?.sourceIndex ?? 0]?.image
+    ?? texture?.source?.[0]?.image
+    ?? texture?.source?.image
+    ?? texture?.dataSource?.[0]?.image
+    ?? texture?.dataSource?.image
+    ?? null;
+  if (!image) return null;
+  const sw = Number(frame?.cutWidth ?? frame?.width ?? image.naturalWidth ?? image.width);
+  const sh = Number(frame?.cutHeight ?? frame?.height ?? image.naturalHeight ?? image.height);
+  if (!Number.isFinite(sw) || !Number.isFinite(sh) || sw <= 0 || sh <= 0) return null;
+  return {
+    image,
+    sx: Number(frame?.cutX ?? frame?.x ?? 0) || 0,
+    sy: Number(frame?.cutY ?? frame?.y ?? 0) || 0,
+    sw,
+    sh,
+    textureKey: texture.key ?? null,
+    frameName: frame?.name ?? frameName ?? null,
+  };
+}
+
+/** Return a concrete image/crop asset from a Phaser Sprite/Image-like object. */
+function textureAssetFromObject(value) {
+  if (!value || typeof value !== 'object') return null;
+  const texture = value.texture
+    ?? (value.textureKey ? (typeof phaserTextureManager()?.get === 'function' ? phaserTextureManager().get(value.textureKey) : null) : null);
+  const frameName = value.frame?.name ?? value.frame?.key ?? value.frameKey ?? null;
+  const direct = textureAsset(texture, frameName);
+  if (direct) return direct;
+  const image = value.image ?? value.canvas ?? value.source?.image ?? value.source?.[0]?.image ?? null;
+  if (!image) return null;
+  const sw = Number(image.naturalWidth ?? image.width);
+  const sh = Number(image.naturalHeight ?? image.height);
+  return Number.isFinite(sw) && Number.isFinite(sh) && sw > 0 && sh > 0
+    ? { image, sx: 0, sy: 0, sw, sh, textureKey: value.key ?? null, frameName: null }
+    : null;
+}
+
+/** Search Phaser textures by possible device/prop labels as a fallback. */
+function findTextureAssetByDeviceName(device) {
+  const textures = phaserTextureManager();
+  if (!textures) return null;
+  const labels = [
+    device?.options?.propId,
+    device?.deviceOption?.id,
+    device?.name,
+    device?.label,
+    device?.options?.name,
+    device?.options?.label,
+  ].filter(Boolean).map((value) => String(value).toLowerCase());
+  if (!labels.length) return null;
+
+  for (const key of phaserTextureKeys()) {
+    const lowerKey = String(key).toLowerCase();
+    if (!labels.some((label) => lowerKey.includes(label) || label.includes(lowerKey))) continue;
+    const texture = typeof textures.get === 'function' ? textures.get(key) : textures.list?.[key] ?? textures.keys?.[key];
+    const asset = textureAsset(texture);
+    if (asset) return asset;
+  }
+  return null;
+}
+
+const deviceTextureAssetCache = new WeakMap();
+
+/** Find the image/crop that Phaser is using to render a device, if available. */
+function deviceTextureAsset(device) {
+  if (device && typeof device === 'object' && deviceTextureAssetCache.has(device)) return deviceTextureAssetCache.get(device);
+  for (const ref of deviceTextureRefs(device, 5)) {
+    const direct = textureAssetFromObject(ref.object);
+    if (direct) {
+      if (device && typeof device === 'object') deviceTextureAssetCache.set(device, direct);
+      return direct;
+    }
+    const inspected = inspectTexture(ref.textureKey)?.raw;
+    const fromKey = textureAsset(inspected, ref.frameName);
+    if (fromKey) {
+      if (device && typeof device === 'object') deviceTextureAssetCache.set(device, fromKey);
+      return fromKey;
+    }
+  }
+  const asset = textureAssetFromObject(device)
+    ?? textureAssetFromObject(device?.sprite)
+    ?? textureAssetFromObject(device?.image)
+    ?? textureAssetFromObject(device?.displayObject)
+    ?? textureAssetFromObject(device?.container)
+    ?? findTextureAssetByDeviceName(device);
+  if (asset && device && typeof device === 'object') deviceTextureAssetCache.set(device, asset);
+  return asset;
+}
+
 /** Build a concise device→texture report for console debugging. */
 function deviceTextureReport(filter = '', limit = 25) {
   const lower = String(filter ?? '').toLowerCase();
@@ -620,6 +720,10 @@ function deviceTextureReport(filter = '', limit = 25) {
       name,
       propId: device?.options?.propId ?? null,
       deviceOptionId: device?.deviceOption?.id ?? null,
+      textureAsset: (() => {
+        const asset = deviceTextureAsset(device);
+        return asset ? { textureKey: asset.textureKey, frameName: asset.frameName, source: asset.image?.currentSrc ?? asset.image?.src ?? null } : null;
+      })(),
       textures: deviceTextureRefs(device).map((ref) => ({
         path: ref.path,
         textureKey: ref.textureKey,
@@ -641,6 +745,7 @@ function installDebugHelpers() {
     rawDeviceEntries,
     devices: findDevices,
     deviceTextureRefs,
+    deviceTextureAsset,
     deviceTextureReport,
     textureKeys: phaserTextureKeys,
     inspectTexture,
@@ -669,6 +774,7 @@ function findDevices() {
         id: resolvedId,
         kind: deviceKind(device),
         name: deviceName(device),
+        textureAsset: deviceTextureAsset(device),
       });
       if (devices.length >= CFG.DEVICE_LIMIT) return devices;
     }
@@ -927,7 +1033,7 @@ class TileRenderer {
         if (!point) continue;
         const screen = toCanvas(point);
         if (!this._isVisible(screen, cw, ch, 24)) continue;
-        this._drawDevice(ctx, screen.x, screen.y, device.kind);
+        this._drawDevice(ctx, screen.x, screen.y, device);
       }
 
       const localTeam = localPlayerTeam();
@@ -1075,8 +1181,35 @@ class TileRenderer {
     );
   }
 
-  /** Draw a map object/device marker; trees get a slightly earthier icon. */
-  _drawDevice(ctx, px, py, kind = '') {
+  /** Draw a map object/device marker, preferring its actual Phaser texture. */
+  _drawDevice(ctx, px, py, device = {}) {
+    const kind = device.kind ?? device;
+    const asset = device.textureAsset;
+    if (asset?.image && asset.image.complete !== false) {
+      const size = CFG.DEVICE_ICON_PX;
+      const x = px - size / 2;
+      const y = py - size / 2;
+      ctx.save();
+      ctx.shadowColor = 'rgba(126,207,255,0.85)';
+      ctx.shadowBlur = 5;
+      ctx.fillStyle = 'rgba(7, 19, 31, 0.72)';
+      ctx.strokeStyle = 'rgba(126,207,255,0.8)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(x - 1, y - 1, size + 2, size + 2, 3);
+      else ctx.rect(x - 1, y - 1, size + 2, size + 2);
+      ctx.fill();
+      ctx.stroke();
+      try {
+        ctx.drawImage(asset.image, asset.sx, asset.sy, asset.sw, asset.sh, x, y, size, size);
+        ctx.restore();
+        return;
+      } catch (error) {
+        ctx.restore();
+        console.debug('[GimkitMap] Device texture draw failed; falling back to marker', asset, error);
+      }
+    }
+
     const text = String(kind ?? '').toLowerCase();
     const isTree = text.includes('tree') || text.includes('plant') || text.includes('bush');
     const r = CFG.DEVICE_R;
