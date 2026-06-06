@@ -17,7 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const CFG = {
   TOGGLE_KEY:      'm',   // Key that opens/closes the map
-  REFRESH_MS:      350,   // Redraw interval (ms) while map is open
+  REFRESH_MS:      50,    // Fallback redraw interval (ms) while map is open
   TILE_PX:         5,     // Canvas pixels per tile at zoom 1.0×
   DEFAULT_ZOOM:    4,     // Minimap starts close-up and follows the player
   MIN_ZOOM:        0.5,
@@ -30,6 +30,7 @@ const CFG = {
   PLAYER_R:        6,     // Player arrow half-size (px)
   PHASER_TILE_PX:  50,    // Phaser world-pixels per terrain tile (fallback)
   INIT_WAIT_MS:    20_000, // How long to wait for game stores before giving up
+  SMOOTH_MS:       140,   // Camera smoothing time constant for player-follow
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -408,6 +409,9 @@ class TileRenderer {
     this._cache      = null;   // Offscreen canvas (1× zoom, all tiles)
     this._bounds     = null;   // { minX, minY, w, h } in tile coords
     this._knownCount = -1;     // Tile count when cache was last built
+    this._smoothedFocus = null; // Last drawn player/camera focus in map coords
+    this._lastFocus  = null;   // Last resolved unsmoothed player focus
+    this._lastFrameT = 0;      // Timestamp used for frame-rate independent smoothing
   }
 
   /**
@@ -496,7 +500,10 @@ class TileRenderer {
     const scaledW = cache.width  * zoom;
     const scaledH = cache.height * zoom;
 
-    const focusedPlayer = this._playerFocus(player, b, this._worldPixelsPerMapUnit);
+    const targetFocus = player != null
+      ? this._playerFocus(player, b, this._worldPixelsPerMapUnit)
+      : this._lastFocus;
+    const focusedPlayer = this._smoothFocus(targetFocus);
 
     // Tile-space focal point (what we want at the canvas centre). This is the
     // key minimap behavior: when the player is known, keep the fixed center
@@ -505,8 +512,8 @@ class TileRenderer {
     const cy = focusedPlayer != null ? (focusedPlayer.y - b.minY) : b.h / 2;
 
     // Top-left corner of the scaled tile image in canvas coordinates
-    const ox = Math.round(cw / 2 - cx * ts);
-    const oy = Math.round(ch / 2 - cy * ts);
+    const ox = cw / 2 - cx * ts;
+    const oy = ch / 2 - cy * ts;
 
     // Background terrain fills the minimap even when explicit tiles do not
     // cover the whole viewport around the player.
@@ -542,24 +549,55 @@ class TileRenderer {
       && point.y <= bounds.minY + bounds.h + margin;
 
     const rotation = player.rotation ?? 0;
-    const scales = player.worldSpace
-      ? [inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16, 1]
-      : [1, inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16];
-    const uniqueScales = [...new Set(scales.filter((scale) => Number.isFinite(scale) && scale > 0).map((scale) => Math.round(scale * 1000) / 1000))];
-    const candidates = uniqueScales.map((scale) => ({
-      x: player.x / scale,
-      y: player.y / scale,
-      rotation,
-      scale,
-    }));
-
-    const onMap = candidates.find(inBounds);
-    if (onMap) return onMap;
+    const previous = this._lastFocus ?? this._smoothedFocus;
+    const previousScale = previous?.scale;
+    const baseScales = player.worldSpace
+      ? [previousScale, inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16, 1]
+      : [previousScale, 1, inferredScale, CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16];
+    const uniqueScales = [...new Set(baseScales
+      .filter((scale) => Number.isFinite(scale) && scale > 0)
+      .map((scale) => Math.round(scale * 1000) / 1000))];
 
     const centerX = bounds.minX + bounds.w / 2;
     const centerY = bounds.minY + bounds.h / 2;
-    const distanceToMap = (point) => Math.hypot(point.x - centerX, point.y - centerY);
-    return candidates.reduce((best, point) => distanceToMap(point) < distanceToMap(best) ? point : best);
+    const mapDistance = (point) => Math.hypot(point.x - centerX, point.y - centerY);
+    const previousDistance = (point) => previous ? Math.hypot(point.x - previous.x, point.y - previous.y) : 0;
+    const scalePenalty = (scale) => previousScale ? Math.abs(Math.log(scale / previousScale)) * 4 : 0;
+    const candidates = uniqueScales.map((scale) => {
+      const point = { x: player.x / scale, y: player.y / scale, rotation, scale };
+      point.onMap = inBounds(point);
+      point.score = (previous ? previousDistance(point) * 10 : mapDistance(point))
+        + scalePenalty(scale)
+        + (point.onMap ? 0 : Math.max(bounds.w, bounds.h) * 2);
+      return point;
+    });
+
+    const best = candidates.reduce((winner, point) => point.score < winner.score ? point : winner);
+    this._lastFocus = best;
+    return best;
+  }
+
+  /** Ease the minimap camera toward the latest player focus to avoid snapping. */
+  _smoothFocus(target) {
+    if (!target) return this._smoothedFocus;
+
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const dt = this._lastFrameT ? Math.max(0, now - this._lastFrameT) : CFG.REFRESH_MS;
+    this._lastFrameT = now;
+
+    if (!this._smoothedFocus) {
+      this._smoothedFocus = { ...target };
+      return this._smoothedFocus;
+    }
+
+    const alpha = Math.min(1, 1 - Math.exp(-dt / CFG.SMOOTH_MS));
+    this._smoothedFocus = {
+      x: this._smoothedFocus.x + (target.x - this._smoothedFocus.x) * alpha,
+      y: this._smoothedFocus.y + (target.y - this._smoothedFocus.y) * alpha,
+      rotation: target.rotation ?? this._smoothedFocus.rotation ?? 0,
+      scale: target.scale ?? this._smoothedFocus.scale,
+    };
+    return this._smoothedFocus;
   }
 
   /**
@@ -875,13 +913,28 @@ class MapPanel {
 
   _startLoop() {
     if (this._timer) return;
-    this._timer = setInterval(() => this._tick(), CFG.REFRESH_MS);
+    const raf = gameWindow().requestAnimationFrame?.bind(gameWindow());
+    if (!raf) {
+      this._timer = setInterval(() => this._tick(), CFG.REFRESH_MS);
+      this._tick();
+      console.log('[GimkitMap] Render loop started');
+      return;
+    }
+
+    const loop = () => {
+      if (!this.visible) return;
+      this._tick();
+      this._timer = raf(loop);
+    };
+    this._timer = raf(loop);
     this._tick();   // Immediate first draw
     console.log('[GimkitMap] Render loop started');
   }
 
   _stopLoop() {
-    clearInterval(this._timer);
+    const cancelRaf = gameWindow().cancelAnimationFrame?.bind(gameWindow());
+    if (cancelRaf && typeof this._timer === 'number') cancelRaf(this._timer);
+    else clearInterval(this._timer);
     this._timer = null;
     console.log('[GimkitMap] Render loop stopped');
   }
