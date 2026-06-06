@@ -42,7 +42,7 @@ const TERRAIN_COLOUR = {
   'Dark Grass':      '#2d5a27',
   'Light Grass':     '#6ab04c',
   'Dry Grass':       '#a9944a',
-  'Snowy Grass':     '#c2dff0',
+  'Snowy Grass':     '#b8d6c1',
   // Ground / paths
   'Dirt':            '#8b6340',
   'Sand':            '#d4b483',
@@ -55,7 +55,8 @@ const TERRAIN_COLOUR = {
   'Water':           '#2a6db5',
   'Deep Water':      '#1a4d8a',
   'Ice':             '#aee3f5',
-  'Snow':            '#ddeeff',
+  'Frozen Lake':     '#8fd8f7',
+  'Snow':            '#eef7ff',
   // Hot / space
   'Lava':            '#e85c1a',
   'Void':            '#111111',
@@ -97,6 +98,43 @@ const lsGet = (k, fb) => {
   catch { return fb; }
 };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+
+/** Parse the map-options payload and return its configured background terrain. */
+function backgroundTerrainFromOptions(options) {
+  if (!options) return null;
+  try {
+    const parsed = typeof options === 'string' ? JSON.parse(options) : options;
+    return typeof parsed?.backgroundTerrain === 'string' ? parsed.backgroundTerrain : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Locate Gimkit's mapOptionsJSON payload, then read backgroundTerrain from it.
+ * The Snow map exposes this as { "backgroundTerrain": "Snow" }.
+ */
+function findBackgroundTerrain() {
+  const candidates = [
+    safeGet(window, ['mapOptionsJSON']),
+    safeGet(window, ['stores', 'world', 'mapOptionsJSON']),
+    safeGet(window, ['stores', 'world', 'map', 'mapOptionsJSON']),
+    safeGet(window, ['stores', 'world', 'map', 'options']),
+    safeGet(window, ['stores', 'world', 'mapOptions']),
+  ];
+
+  for (const candidate of candidates) {
+    const terrain = backgroundTerrainFromOptions(candidate);
+    if (terrain) return terrain;
+    if (typeof candidate?.backgroundTerrain === 'string') return candidate.backgroundTerrain;
+  }
+
+  return 'Snow';
+}
+
+/** Return the fill colour for the global map background. */
+const backgroundColour = () => TERRAIN_COLOUR[findBackgroundTerrain()] ?? TERRAIN_COLOUR.Snow;
 
 /** Return the fill colour for a tile object. */
 const tileColour = (t) => TERRAIN_COLOUR[t.terrain] ?? COLOUR_FALLBACK;
@@ -186,7 +224,7 @@ class TileRenderer {
       this._knownCount = tiles.size;
     }
 
-    this._composite(zoom, findPlayer());
+    this._composite(zoom, findPlayer(), tiles.size);
   }
 
   /**
@@ -216,6 +254,10 @@ class TileRenderer {
     off.height = this._bounds.h * ts;
     const ctx  = off.getContext('2d');
 
+    // Paint the global terrain first; explicit tiles are drawn over it.
+    ctx.fillStyle = backgroundColour();
+    ctx.fillRect(0, 0, off.width, off.height);
+
     // Draw each tile; solid tiles get a translucent red overlay
     for (const t of tiles.values()) {
       const px = (t.x - minX) * ts;
@@ -237,7 +279,7 @@ class TileRenderer {
    * Draw the cached tile image + player marker onto the visible canvas.
    * The view is centred on the player (or the map centre if player is unknown).
    */
-  _composite(zoom, player) {
+  _composite(zoom, player, tileCount) {
     const { _cv: cv, _ctx: ctx, _cache: cache, _bounds: b } = this;
     if (!cache || !b) return;
 
@@ -270,7 +312,8 @@ class TileRenderer {
       this._drawPlayer(ctx, cw / 2, ch / 2, player.rotation);
     }
 
-    // Small compass in the top-right corner
+    // Tile-count badge at the top of the map, then compass in the corner
+    this._drawTileCount(ctx, cw / 2, 18, tileCount);
     this._drawCompass(ctx, cw - 24, 24);
   }
 
@@ -296,6 +339,38 @@ class TileRenderer {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth   = 1;
     ctx.stroke();
+    ctx.restore();
+  }
+
+
+  /**
+   * Draw the number of discovered explicit tiles at the top of the map.
+   */
+  _drawTileCount(ctx, cx, cy, tileCount) {
+    const label = `${tileCount.toLocaleString()} tiles found`;
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const metrics = ctx.measureText(label);
+    const padX = 8;
+    const w = metrics.width + padX * 2;
+    const h = 18;
+    ctx.fillStyle = 'rgba(10, 22, 38, 0.78)';
+    ctx.strokeStyle = 'rgba(126, 207, 255, 0.75)';
+    ctx.lineWidth = 1;
+    const x = cx - w / 2;
+    const y = cy - h / 2;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, w, h, 6);
+    } else {
+      ctx.rect(x, y, w, h);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e9f8ff';
+    ctx.fillText(label, cx, cy + 0.5);
     ctx.restore();
   }
 
