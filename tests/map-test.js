@@ -42,7 +42,7 @@ const TERRAIN_COLOUR = {
   'Dark Grass':      '#2d5a27',
   'Light Grass':     '#6ab04c',
   'Dry Grass':       '#a9944a',
-  'Snowy Grass':     '#c2dff0',
+  'Snowy Grass':     '#b8d6c1',
   // Ground / paths
   'Dirt':            '#8b6340',
   'Sand':            '#d4b483',
@@ -55,7 +55,8 @@ const TERRAIN_COLOUR = {
   'Water':           '#2a6db5',
   'Deep Water':      '#1a4d8a',
   'Ice':             '#aee3f5',
-  'Snow':            '#ddeeff',
+  'Frozen Lake':     '#8fd8f7',
+  'Snow':            '#eef7ff',
   // Hot / space
   'Lava':            '#e85c1a',
   'Void':            '#111111',
@@ -82,9 +83,59 @@ const COLOUR_COLLIDE  = 'rgba(255,65,65,0.38)'; // Tinted overlay for solid tile
 /** Promise-based sleep. */
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** Return the real page window when userscript managers expose one. */
+const gameWindow = () => (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window);
+
+let storesPromise = null;
+
+/**
+ * Gimkit does not expose `stores` on the page window by default. Mirror the
+ * loader used by the Zyrox client: find the game module, import the
+ * FixSpinePlugin bundle, then publish the export that contains `assignment`.
+ */
+async function exposeStores() {
+  const root = gameWindow();
+  if (root.stores) return root.stores;
+  if (storesPromise) return storesPromise;
+
+  storesPromise = (async () => {
+    if (!document.body) {
+      await new Promise((resolve) => window.addEventListener('DOMContentLoaded', resolve, { once: true }));
+    }
+
+    const moduleScript = document.querySelector("script[src][type='module']");
+    if (!moduleScript?.src) throw new Error('Failed to find game module script');
+
+    const response = await fetch(moduleScript.src);
+    const text = await response.text();
+    const gameScriptPath =
+      text.match(/["'](\/assets\/FixSpinePlugin-[^"']+\.js(?:\?[^"']*)?)["']/)?.[1]
+      ?? text.match(/FixSpinePlugin-[^.]+\.js(?:\?\S+)?/)?.[0];
+    if (!gameScriptPath) throw new Error('Failed to find game script URL');
+
+    const gameAssetUrl = gameScriptPath.startsWith('http')
+      ? gameScriptPath
+      : new URL(gameScriptPath.startsWith('/') ? gameScriptPath : `/assets/${gameScriptPath}`, moduleScript.src).href;
+    const gameScript = await import(/* webpackIgnore: true */ gameAssetUrl);
+    const stores = Object.values(gameScript).find((value) => value && value.assignment);
+    if (!stores) throw new Error('Failed to resolve stores export');
+
+    root.stores = stores;
+    console.log('[GimkitMap] stores exposed via module import');
+    return stores;
+  })();
+
+  try {
+    return await storesPromise;
+  } catch (error) {
+    storesPromise = null;
+    throw error;
+  }
+}
+
 /**
  * Read a deeply-nested property without throwing.
- * E.g. safeGet(window, ['stores','world','terrain','tiles'])
+ * E.g. safeGet(gameWindow(), ['stores','world','terrain','tiles'])
  */
 function safeGet(root, path) {
   try { return path.reduce((o, k) => (o == null ? undefined : o[k]), root); }
@@ -98,6 +149,43 @@ const lsGet = (k, fb) => {
 };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
+
+/** Parse the map-options payload and return its configured background terrain. */
+function backgroundTerrainFromOptions(options) {
+  if (!options) return null;
+  try {
+    const parsed = typeof options === 'string' ? JSON.parse(options) : options;
+    return typeof parsed?.backgroundTerrain === 'string' ? parsed.backgroundTerrain : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Locate Gimkit's mapOptionsJSON payload, then read backgroundTerrain from it.
+ * The Snow map exposes this as { "backgroundTerrain": "Snow" }.
+ */
+function findBackgroundTerrain() {
+  const candidates = [
+    safeGet(gameWindow(), ['mapOptionsJSON']),
+    safeGet(gameWindow(), ['stores', 'world', 'mapOptionsJSON']),
+    safeGet(gameWindow(), ['stores', 'world', 'map', 'mapOptionsJSON']),
+    safeGet(gameWindow(), ['stores', 'world', 'map', 'options']),
+    safeGet(gameWindow(), ['stores', 'world', 'mapOptions']),
+  ];
+
+  for (const candidate of candidates) {
+    const terrain = backgroundTerrainFromOptions(candidate);
+    if (terrain) return terrain;
+    if (typeof candidate?.backgroundTerrain === 'string') return candidate.backgroundTerrain;
+  }
+
+  return 'Snow';
+}
+
+/** Return the fill colour for the global map background. */
+const backgroundColour = () => TERRAIN_COLOUR[findBackgroundTerrain()] ?? TERRAIN_COLOUR.Snow;
+
 /** Return the fill colour for a tile object. */
 const tileColour = (t) => TERRAIN_COLOUR[t.terrain] ?? COLOUR_FALLBACK;
 
@@ -109,10 +197,10 @@ const tileColour = (t) => TERRAIN_COLOUR[t.terrain] ?? COLOUR_FALLBACK;
 function findPlayer() {
   // ── Probe 1: world.players Map + local player ID ──────────────────────────
   try {
-    const players = safeGet(window, ['stores', 'world', 'players']);
+    const players = safeGet(gameWindow(), ['stores', 'world', 'players']);
     if (players instanceof Map && players.size > 0) {
-      const id = safeGet(window, ['stores', 'world', 'localPlayerId'])
-              ?? safeGet(window, ['stores', 'world', 'myPlayerId']);
+      const id = safeGet(gameWindow(), ['stores', 'world', 'localPlayerId'])
+              ?? safeGet(gameWindow(), ['stores', 'world', 'myPlayerId']);
       const p  = id ? players.get(id) : players.values().next().value;
       if (p?.x != null) return { x: p.x, y: p.y, rotation: p.rotation ?? 0 };
     }
@@ -120,15 +208,15 @@ function findPlayer() {
 
   // ── Probe 2: direct character / local-character object ────────────────────
   try {
-    const c = safeGet(window, ['stores', 'world', 'character'])
-           ?? safeGet(window, ['stores', 'world', 'localCharacter'])
-           ?? safeGet(window, ['stores', 'world', 'myCharacter']);
+    const c = safeGet(gameWindow(), ['stores', 'world', 'character'])
+           ?? safeGet(gameWindow(), ['stores', 'world', 'localCharacter'])
+           ?? safeGet(gameWindow(), ['stores', 'world', 'myCharacter']);
     if (c?.x != null) return { x: c.x, y: c.y, rotation: c.rotation ?? 0 };
   } catch {}
 
   // ── Probe 3: generic entities Map — look for isLocal flag ─────────────────
   try {
-    const entities = safeGet(window, ['stores', 'world', 'entities']);
+    const entities = safeGet(gameWindow(), ['stores', 'world', 'entities']);
     if (entities instanceof Map) {
       for (const e of entities.values()) {
         if ((e.isLocal || e.isLocalPlayer || e.local) && e.x != null)
@@ -139,8 +227,8 @@ function findPlayer() {
 
   // ── Probe 4: Phaser scene player object (world-pixel → tile coords) ────────
   try {
-    const scenes = safeGet(window, ['game', 'scene', 'scenes'])
-                ?? safeGet(window, ['_phaserGame', 'scene', 'scenes']);
+    const scenes = safeGet(gameWindow(), ['game', 'scene', 'scenes'])
+                ?? safeGet(gameWindow(), ['_phaserGame', 'scene', 'scenes']);
     if (Array.isArray(scenes)) {
       for (const s of scenes) {
         const p = s.player ?? s.localPlayer ?? s.character;
@@ -178,7 +266,7 @@ class TileRenderer {
    * Rebuilds the cache only when the tile set changes.
    */
   render(zoom) {
-    const tiles = safeGet(window, ['stores', 'world', 'terrain', 'tiles']);
+    const tiles = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
     if (!tiles || tiles.size === 0) { this._drawWaiting(); return; }
 
     if (tiles.size !== this._knownCount) {
@@ -186,7 +274,7 @@ class TileRenderer {
       this._knownCount = tiles.size;
     }
 
-    this._composite(zoom, findPlayer());
+    this._composite(zoom, findPlayer(), tiles.size);
   }
 
   /**
@@ -216,6 +304,10 @@ class TileRenderer {
     off.height = this._bounds.h * ts;
     const ctx  = off.getContext('2d');
 
+    // Paint the global terrain first; explicit tiles are drawn over it.
+    ctx.fillStyle = backgroundColour();
+    ctx.fillRect(0, 0, off.width, off.height);
+
     // Draw each tile; solid tiles get a translucent red overlay
     for (const t of tiles.values()) {
       const px = (t.x - minX) * ts;
@@ -237,7 +329,7 @@ class TileRenderer {
    * Draw the cached tile image + player marker onto the visible canvas.
    * The view is centred on the player (or the map centre if player is unknown).
    */
-  _composite(zoom, player) {
+  _composite(zoom, player, tileCount) {
     const { _cv: cv, _ctx: ctx, _cache: cache, _bounds: b } = this;
     if (!cache || !b) return;
 
@@ -270,7 +362,8 @@ class TileRenderer {
       this._drawPlayer(ctx, cw / 2, ch / 2, player.rotation);
     }
 
-    // Small compass in the top-right corner
+    // Tile-count badge at the top of the map, then compass in the corner
+    this._drawTileCount(ctx, cw / 2, 18, tileCount);
     this._drawCompass(ctx, cw - 24, 24);
   }
 
@@ -296,6 +389,38 @@ class TileRenderer {
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth   = 1;
     ctx.stroke();
+    ctx.restore();
+  }
+
+
+  /**
+   * Draw the number of discovered explicit tiles at the top of the map.
+   */
+  _drawTileCount(ctx, cx, cy, tileCount) {
+    const label = `${tileCount.toLocaleString()} tiles found`;
+    ctx.save();
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const metrics = ctx.measureText(label);
+    const padX = 8;
+    const w = metrics.width + padX * 2;
+    const h = 18;
+    ctx.fillStyle = 'rgba(10, 22, 38, 0.78)';
+    ctx.strokeStyle = 'rgba(126, 207, 255, 0.75)';
+    ctx.lineWidth = 1;
+    const x = cx - w / 2;
+    const y = cy - h / 2;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, w, h, 6);
+    } else {
+      ctx.rect(x, y, w, h);
+    }
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#e9f8ff';
+    ctx.fillText(label, cx, cy + 0.5);
     ctx.restore();
   }
 
@@ -542,7 +667,7 @@ class MapPanel {
   /** One render tick: draw the map and refresh the status bar text. */
   _tick() {
     this._renderer.render(this.zoom);
-    const tiles  = safeGet(window, ['stores', 'world', 'terrain', 'tiles']);
+    const tiles  = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
     const player = findPlayer();
     const tileStr  = tiles?.size ? `${tiles.size} tiles` : 'No tile data';
     const playerStr = player
@@ -577,20 +702,26 @@ class MapPanel {
 // ─────────────────────────────────────────────────────────────────────────────
 async function init() {
   console.log('[GimkitMap] Waiting for Gimkit game stores…');
+  exposeStores().catch((error) => console.warn('[GimkitMap] Initial stores resolve failed; retrying while waiting', error));
 
   let waited = 0;
   while (waited < CFG.INIT_WAIT_MS) {
-    if (safeGet(window, ['stores', 'world']) !== undefined) {
-      console.log('[GimkitMap] stores.world detected after', waited, 'ms');
+    if (safeGet(gameWindow(), ['stores']) !== undefined) {
+      console.log('[GimkitMap] stores detected after', waited, 'ms');
       break;
     }
+
+    if (!storesPromise) {
+      exposeStores().catch((error) => console.warn('[GimkitMap] stores resolve failed; retrying', error));
+    }
+
     await delay(500);
     waited += 500;
   }
 
   if (waited >= CFG.INIT_WAIT_MS) {
     // Launch anyway — the renderer shows "Waiting for tile data…" until they appear
-    console.warn('[GimkitMap] stores.world not found after', CFG.INIT_WAIT_MS, 'ms — launching anyway');
+    console.warn('[GimkitMap] stores not found after', CFG.INIT_WAIT_MS, 'ms — launching anyway');
   }
 
   const panel = new MapPanel();
