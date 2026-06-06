@@ -326,7 +326,13 @@ function characterId(character, fallback = null) {
 
 /** Return a display name from common player/character schemas. */
 function characterName(character, fallback = '') {
-  return character?.name ?? character?.nickname ?? character?.displayName ?? character?.username ?? character?.state?.name ?? fallback;
+  return character?.nametag?.name
+    ?? character?.name
+    ?? character?.nickname
+    ?? character?.displayName
+    ?? character?.username
+    ?? character?.state?.name
+    ?? fallback;
 }
 
 /** Return a team identifier when Gimkit exposes one. */
@@ -377,10 +383,15 @@ function findOtherPlayers() {
   const directPosition = (source) => (source?.x != null && source?.y != null
     ? { x: Number(source.x), y: Number(source.y), rotation: source.rotation ?? 0 }
     : null);
+  const phaserBodyPosition = (source) => (source?.body?.x != null && source?.body?.y != null
+    ? { x: Number(source.body.x), y: Number(source.body.y), rotation: source.rotation ?? source.body.rotation ?? 0, worldSpace: true }
+    : null);
   const add = (id, source, fallbackName = '', preferPhaser = true) => {
+    // Match the working player-position logic from tests/example.js: iterate
+    // phaser.scene.characterManager.characters and use each player's body.x/y.
     const pos = preferPhaser
-      ? (characterPosition(source) ?? directPosition(source))
-      : (directPosition(source) ?? characterPosition(source));
+      ? (phaserBodyPosition(source) ?? characterPosition(source) ?? directPosition(source))
+      : (directPosition(source) ?? phaserBodyPosition(source) ?? characterPosition(source));
     if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
     const resolvedId = characterId(source, id);
     const key = String(resolvedId ?? `${pos.x}:${pos.y}`);
@@ -561,6 +572,7 @@ class TileRenderer {
     this._smoothedFocus = null; // Last drawn player/camera focus in map coords
     this._lastFocus  = null;   // Last resolved unsmoothed player focus
     this._lastFrameT = 0;      // Timestamp used for frame-rate independent smoothing
+    this._lastStats  = { tiles: 0, players: 0, devices: 0 };
   }
 
   /**
@@ -570,10 +582,18 @@ class TileRenderer {
   render(zoom) {
     const tiles = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
     const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
-    if (!tiles || tileCount === 0) { this._drawWaiting(); return; }
+    if (!tiles || tileCount === 0) {
+      this._lastStats = { tiles: 0, players: 0, devices: 0 };
+      this._drawWaiting();
+      return;
+    }
 
     const renderTiles = normalizeTiles(tiles);
-    if (renderTiles.length === 0) { this._drawWaiting('Tile data found, but coordinates were unreadable…'); return; }
+    if (renderTiles.length === 0) {
+      this._lastStats = { tiles: tileCount, players: 0, devices: 0 };
+      this._drawWaiting('Tile data found, but coordinates were unreadable…');
+      return;
+    }
 
     if (renderTiles.length !== this._knownCount) {
       this._buildCache(renderTiles);
@@ -582,6 +602,9 @@ class TileRenderer {
 
     this._composite(zoom, findPlayer(), renderTiles.length);
   }
+
+  /** Return the latest minimap discovery counts for the status bar. */
+  stats() { return { ...this._lastStats }; }
 
   /**
    * Force a full cache rebuild on the next render call.
@@ -672,6 +695,10 @@ class TileRenderer {
     // Tile image scaled to current zoom
     ctx.drawImage(cache, ox, oy, scaledW, scaledH);
 
+    const devices = findDevices();
+    const otherPlayers = findOtherPlayers();
+    this._lastStats = { tiles: tileCount, players: otherPlayers.length, devices: devices.length };
+
     if (focusedPlayer != null) {
       const toCanvas = (point) => ({
         x: ox + (point.x - b.minX) * ts,
@@ -679,7 +706,7 @@ class TileRenderer {
       });
 
       // Devices/objects are drawn under players so dots stay readable.
-      for (const device of findDevices()) {
+      for (const device of devices) {
         const point = this._mapPoint(device, b, this._worldToMap);
         if (!point) continue;
         const screen = toCanvas(point);
@@ -688,7 +715,7 @@ class TileRenderer {
       }
 
       const localTeam = localPlayerTeam();
-      for (const other of findOtherPlayers()) {
+      for (const other of otherPlayers) {
         const point = this._mapPoint(other, b, this._worldToMap);
         if (!point) continue;
         const screen = toCanvas(point);
@@ -805,7 +832,7 @@ class TileRenderer {
     ctx.restore();
   }
 
-  /** Draw a green non-local player marker. */
+  /** Draw a green friendly/unknown or red enemy non-local player marker. */
   _drawOtherPlayer(ctx, px, py, player = {}, localTeam = null) {
     const isEnemy = localTeam != null && player.teamId != null && String(player.teamId) !== String(localTeam);
     this._drawDot(
@@ -1034,10 +1061,12 @@ class MapPanel {
       fontWeight:     '600',
       display:        'flex',
       justifyContent: 'space-between',
+      gap:            '8px',
       flexShrink:     '0',
     });
-    this._statusL = document.createElement('span');   // Left: tile count
+    this._statusL = document.createElement('span');   // Left: tile/player/device counts
     this._statusR = document.createElement('span');   // Right: zoom %
+    this._statusL.style.whiteSpace = 'nowrap';
     this._statusR.style.color = '#bfefff';
     statusBar.append(this._statusL, this._statusR);
 
@@ -1083,10 +1112,9 @@ class MapPanel {
   /** One render tick: draw the map and refresh the status bar text. */
   _tick() {
     this._renderer.render(this.zoom);
-    const tiles  = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
-    const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
-    const tileStr  = tileCount ? `${tileCount} tiles` : 'No tile data';
-    this._statusL.textContent = tileStr;
+    const stats = this._renderer.stats();
+    const tileStr = stats.tiles ? `${stats.tiles} tiles` : 'No tile data';
+    this._statusL.textContent = `${tileStr} • ${stats.players} players • ${stats.devices} devices`;
     this._statusR.textContent = `${(this.zoom * 100).toFixed(0)}%`;
   }
 
