@@ -19,11 +19,12 @@ const CFG = {
   TOGGLE_KEY:      'm',   // Key that opens/closes the map
   REFRESH_MS:      350,   // Redraw interval (ms) while map is open
   TILE_PX:         4,     // Canvas pixels per tile at zoom 1.0×
+  DEFAULT_ZOOM:    2,     // Minimap starts zoomed in and follows the player
   MIN_ZOOM:        0.25,
   MAX_ZOOM:        8,
   ZOOM_STEP:       0.25,
-  DEFAULT_W:       320,   // Initial panel width (px)
-  DEFAULT_H:       340,   // Initial panel height (px)
+  DEFAULT_W:       260,   // Initial minimap panel width (px)
+  DEFAULT_H:       220,   // Initial minimap panel height (px)
   LS_POS:          'gk_map_pos',   // localStorage key for window position
   LS_ZOOM:         'gk_map_zoom',  // localStorage key for zoom level
   PLAYER_R:        5,     // Player arrow half-size (px)
@@ -42,7 +43,7 @@ const TERRAIN_COLOUR = {
   'Dark Grass':      '#2d5a27',
   'Light Grass':     '#6ab04c',
   'Dry Grass':       '#a9944a',
-  'Snowy Grass':     '#b8d6c1',
+  'Snowy Grass':     '#abcbd8',
   // Ground / paths
   'Dirt':            '#8b6340',
   'Sand':            '#d4b483',
@@ -55,7 +56,7 @@ const TERRAIN_COLOUR = {
   'Water':           '#2a6db5',
   'Deep Water':      '#1a4d8a',
   'Ice':             '#aee3f5',
-  'Frozen Lake':     '#8fd8f7',
+  'Frozen Lake':     '#73d8ff',
   'Snow':            '#eef7ff',
   // Hot / space
   'Lava':            '#e85c1a',
@@ -183,11 +184,32 @@ function findBackgroundTerrain() {
   return 'Snow';
 }
 
+/** Match terrain names even if the game changes capitalization slightly. */
+function terrainKey(name) {
+  if (typeof name !== 'string') return null;
+  if (TERRAIN_COLOUR[name]) return name;
+  const lower = name.toLowerCase();
+  return Object.keys(TERRAIN_COLOUR).find((key) => key.toLowerCase() === lower) ?? null;
+}
+
 /** Return the fill colour for the global map background. */
-const backgroundColour = () => TERRAIN_COLOUR[findBackgroundTerrain()] ?? TERRAIN_COLOUR.Snow;
+const backgroundColour = () => TERRAIN_COLOUR[terrainKey(findBackgroundTerrain())] ?? TERRAIN_COLOUR.Snow;
 
 /** Return the fill colour for a tile object. */
-const tileColour = (t) => TERRAIN_COLOUR[t.terrain] ?? COLOUR_FALLBACK;
+const tileColour = (t) => TERRAIN_COLOUR[terrainKey(t.terrain)] ?? COLOUR_FALLBACK;
+
+/** Keep frozen water blue even when Gimkit marks it as collidable. */
+const shouldDrawCollision = (t) => t.collides && terrainKey(t.terrain) !== 'Frozen Lake';
+
+/** Convert a Phaser world-space point/body into tile-coordinate space. */
+function phaserPointToTile(point, rotation = 0) {
+  if (point?.x == null || point?.y == null) return null;
+  const w = point.width ?? point.w ?? 0;
+  const h = point.height ?? point.h ?? 0;
+  const x = (point.x + w / 2) / CFG.PHASER_TILE_PX;
+  const y = (point.y + h / 2) / CFG.PHASER_TILE_PX;
+  return { x, y, rotation };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PLAYER POSITION FINDER
@@ -195,6 +217,15 @@ const tileColour = (t) => TERRAIN_COLOUR[t.terrain] ?? COLOUR_FALLBACK;
 // Returns { x, y, rotation } in tile-coordinate space, or null.
 // ─────────────────────────────────────────────────────────────────────────────
 function findPlayer() {
+  // ── Probe 0: exposed Zyrox/Gimkit Phaser main character ───────────────────
+  try {
+    const main = safeGet(gameWindow(), ['stores', 'phaser', 'mainCharacter']);
+    const rotation = main?.rotation ?? main?.body?.rotation ?? ((main?.angle ?? 0) * Math.PI / 180);
+    const point = main?.body?.center ?? main?.body?.position ?? main?.body ?? main;
+    const player = phaserPointToTile(point, rotation);
+    if (player) return player;
+  } catch {}
+
   // ── Probe 1: world.players Map + local player ID ──────────────────────────
   try {
     const players = safeGet(gameWindow(), ['stores', 'world', 'players']);
@@ -314,7 +345,7 @@ class TileRenderer {
       const py = (t.y - minY) * ts;
       ctx.fillStyle = tileColour(t);
       ctx.fillRect(px, py, ts, ts);
-      if (t.collides) {
+      if (shouldDrawCollision(t)) {
         ctx.fillStyle = COLOUR_COLLIDE;
         ctx.fillRect(px, py, ts, ts);
       }
@@ -494,7 +525,7 @@ function mkBtn(label, title, bg = '#1e1e40') {
 class MapPanel {
   constructor() {
     this.visible  = false;
-    this.zoom     = lsGet(CFG.LS_ZOOM, 1);
+    this.zoom     = lsGet(CFG.LS_ZOOM, CFG.DEFAULT_ZOOM);
     this._pos     = lsGet(CFG.LS_POS,  { x: 20, y: 20 });
     this._drag    = null;   // Drag state: { mx, my, left, top } | null
     this._timer   = null;   // setInterval handle for the render loop
@@ -503,7 +534,7 @@ class MapPanel {
     this._renderer = new TileRenderer(this._canvas);
     this._bindEvents();
 
-    console.log('[GimkitMap] Panel created — press M to open');
+    console.log('[GimkitMap] Minimap created — press M to open');
   }
 
   // ── DOM construction ──────────────────────────────────────────────────────
@@ -546,7 +577,7 @@ class MapPanel {
     });
 
     const titleEl = document.createElement('span');
-    titleEl.textContent = '🗺  Live Map';
+    titleEl.textContent = '🗺  Minimap';
     Object.assign(titleEl.style, { color: '#7ecfff', fontSize: '12px', fontWeight: 'bold' });
 
     /* Control buttons */
@@ -554,7 +585,7 @@ class MapPanel {
     Object.assign(btns.style, { display: 'flex', gap: '4px', alignItems: 'center' });
     this._btnIn    = mkBtn('+', 'Zoom in   (scroll up)');
     this._btnOut   = mkBtn('−', 'Zoom out  (scroll down)');
-    this._btnReset = mkBtn('⊙', 'Reset zoom to 1×');
+    this._btnReset = mkBtn('⊙', `Reset zoom to ${CFG.DEFAULT_ZOOM}×`);
     this._btnClose = mkBtn('✕', 'Close map  [M]', '#5a1515');
     btns.append(this._btnIn, this._btnOut, this._btnReset, this._btnClose);
     this._bar.append(titleEl, btns);
@@ -649,12 +680,12 @@ class MapPanel {
   // ── Zoom ──────────────────────────────────────────────────────────────────
 
   /**
-   * Adjust zoom by `delta` (or reset to 1 if delta is null).
+   * Adjust zoom by `delta` (or reset to the minimap default if delta is null).
    * Clamps to [MIN_ZOOM, MAX_ZOOM], persists to localStorage, redraws.
    */
   _adjustZoom(delta) {
     this.zoom = delta === null
-      ? 1
+      ? CFG.DEFAULT_ZOOM
       : Math.min(CFG.MAX_ZOOM, Math.max(CFG.MIN_ZOOM,
           Math.round((this.zoom + delta) * 100) / 100));
     lsSet(CFG.LS_ZOOM, this.zoom);
