@@ -292,24 +292,43 @@ function inferWorldToMapTransform(tiles) {
     && Number.isFinite(tile.__rawX)
     && Number.isFinite(tile.__rawY)
     && (Math.abs(tile.__rawX - tile.x) > 1 || Math.abs(tile.__rawY - tile.y) > 1));
-  if (keyed.length < 2) return { scale: CFG.PHASER_TILE_PX, offsetX: 0, offsetY: 0 };
+  if (keyed.length < 2) return { scale: CFG.PHASER_TILE_PX, scaleX: CFG.PHASER_TILE_PX, scaleY: CFG.PHASER_TILE_PX, offsetX: 0, offsetY: 0 };
 
-  const minMapX = Math.min(...keyed.map((tile) => tile.x));
-  const maxMapX = Math.max(...keyed.map((tile) => tile.x));
-  const minRawX = Math.min(...keyed.map((tile) => tile.__rawX));
-  const maxRawX = Math.max(...keyed.map((tile) => tile.__rawX));
-  const minMapY = Math.min(...keyed.map((tile) => tile.y));
-  const maxMapY = Math.max(...keyed.map((tile) => tile.y));
-  const minRawY = Math.min(...keyed.map((tile) => tile.__rawY));
-  const maxRawY = Math.max(...keyed.map((tile) => tile.__rawY));
+  // Fit raw = scale * map + intercept using the actual paired coordinates.
+  // This is more reliable than min/max when maps use negative tile positions or
+  // when the world origin is not near the map origin.
+  const fitAxis = (mapKey, rawKey) => {
+    const points = keyed
+      .map((tile) => ({ map: Number(tile[mapKey]), raw: Number(tile[rawKey]) }))
+      .filter((point) => Number.isFinite(point.map) && Number.isFinite(point.raw));
+    const n = points.length;
+    if (n < 2) return null;
+    const meanMap = points.reduce((sum, point) => sum + point.map, 0) / n;
+    const meanRaw = points.reduce((sum, point) => sum + point.raw, 0) / n;
+    const variance = points.reduce((sum, point) => sum + (point.map - meanMap) ** 2, 0);
+    if (variance <= 0) return null;
+    const covariance = points.reduce((sum, point) => sum + (point.map - meanMap) * (point.raw - meanRaw), 0);
+    const scale = covariance / variance;
+    if (!Number.isFinite(scale) || Math.abs(scale) <= 1) return null;
+    const intercept = meanRaw - scale * meanMap;
+    return { scale, offset: -intercept / scale };
+  };
 
-  const scaleX = maxMapX !== minMapX ? Math.abs((maxRawX - minRawX) / (maxMapX - minMapX)) : null;
-  const scaleY = maxMapY !== minMapY ? Math.abs((maxRawY - minRawY) / (maxMapY - minMapY)) : null;
-  const scales = [scaleX, scaleY].filter((scale) => Number.isFinite(scale) && scale > 1);
-  const scale = scales.length ? scales.reduce((sum, value) => sum + value, 0) / scales.length : CFG.PHASER_TILE_PX;
-  const offsetX = minMapX - minRawX / scale;
-  const offsetY = minMapY - minRawY / scale;
-  return { scale, offsetX, offsetY };
+  const xFit = fitAxis('x', '__rawX');
+  const yFit = fitAxis('y', '__rawY');
+  const usableScales = [xFit?.scale, yFit?.scale].filter((scale) => Number.isFinite(scale) && Math.abs(scale) > 1);
+  const scale = usableScales.length
+    ? usableScales.reduce((sum, value) => sum + Math.abs(value), 0) / usableScales.length
+    : CFG.PHASER_TILE_PX;
+  const scaleX = xFit?.scale ?? scale;
+  const scaleY = yFit?.scale ?? scale;
+  return {
+    scale,
+    scaleX,
+    scaleY,
+    offsetX: xFit?.offset ?? 0,
+    offsetY: yFit?.offset ?? 0,
+  };
 }
 
 /** Return raw Phaser/world-space coordinates for a point/body. */
@@ -318,6 +337,12 @@ function phaserPointToWorld(point, rotation = 0) {
   const w = point.width ?? point.w ?? 0;
   const h = point.height ?? point.h ?? 0;
   return { x: point.x + w / 2, y: point.y + h / 2, rotation, worldSpace: true };
+}
+
+/** Return Phaser body origin coordinates; character markers use these in Gimkit's renderer. */
+function phaserBodyOrigin(body, rotation = 0) {
+  if (body?.x == null || body?.y == null) return null;
+  return { x: Number(body.x), y: Number(body.y), rotation, worldSpace: true };
 }
 
 
@@ -482,6 +507,150 @@ function deviceName(device) {
     ?? '';
 }
 
+
+/** Return raw device entries from every known device collection for debugging. */
+function rawDeviceEntries() {
+  const entries = [];
+  const seen = new Set();
+  for (const collection of deviceCollections()) {
+    for (const [id, device] of tileEntries(collection)) {
+      if (!device) continue;
+      const resolvedId = device?.id ?? device?.deviceId ?? id ?? entries.length;
+      const key = String(resolvedId);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push({ id: resolvedId, device });
+    }
+  }
+  return entries;
+}
+
+/** Return Phaser's texture manager when the active scene exposes one. */
+function phaserTextureManager() {
+  return safeGet(gameWindow(), ['stores', 'phaser', 'scene', 'textures'])
+    ?? safeGet(gameWindow(), ['stores', 'phaser', 'scene', 'sys', 'textures'])
+    ?? safeGet(gameWindow(), ['stores', 'phaser', 'scene', 'game', 'textures'])
+    ?? safeGet(gameWindow(), ['game', 'textures'])
+    ?? safeGet(gameWindow(), ['_phaserGame', 'textures'])
+    ?? null;
+}
+
+/** Extract all known texture keys from Phaser's texture manager. */
+function phaserTextureKeys(filter = '') {
+  const textures = phaserTextureManager();
+  const lower = String(filter ?? '').toLowerCase();
+  let keys = [];
+  if (textures?.list && typeof textures.list === 'object') keys = Object.keys(textures.list);
+  else if (textures?.keys && typeof textures.keys === 'object') keys = Object.keys(textures.keys);
+  else if (typeof textures?.getTextureKeys === 'function') keys = textures.getTextureKeys();
+  else if (typeof textures?.each === 'function') {
+    textures.each((texture) => { if (texture?.key) keys.push(texture.key); });
+  }
+  return [...new Set(keys)].filter((key) => !lower || String(key).toLowerCase().includes(lower)).sort();
+}
+
+/** Read a probable image/source URL from a Phaser texture object. */
+function textureSourceUrl(texture) {
+  const sources = [
+    texture?.source?.[0]?.image,
+    texture?.source?.image,
+    texture?.dataSource?.[0]?.image,
+    texture?.dataSource?.image,
+    texture?.frames?.__BASE?.source?.image,
+  ];
+  for (const image of sources) {
+    const url = image?.currentSrc ?? image?.src ?? image?.dataset?.src;
+    if (url) return url;
+  }
+  return null;
+}
+
+/** Inspect a Phaser texture key and return source/frame information. */
+function inspectTexture(key) {
+  const textures = phaserTextureManager();
+  const texture = typeof textures?.get === 'function' ? textures.get(key) : textures?.list?.[key] ?? textures?.keys?.[key];
+  if (!texture) return null;
+  return {
+    key,
+    source: textureSourceUrl(texture),
+    frameNames: texture?.frames ? Object.keys(texture.frames).slice(0, 50) : [],
+    raw: texture,
+  };
+}
+
+/** Walk likely render objects on a device and collect texture/frame references. */
+function deviceTextureRefs(device, maxDepth = 4) {
+  const refs = [];
+  const seen = new Set();
+  const visit = (value, path, depth) => {
+    if (!value || (typeof value !== 'object' && typeof value !== 'function') || depth > maxDepth || seen.has(value)) return;
+    seen.add(value);
+
+    const textureKey = value?.texture?.key ?? value?.textureKey ?? value?.key;
+    const frameName = value?.frame?.name ?? value?.frame?.key ?? value?.frameKey;
+    if (textureKey && (value?.texture || value?.frame || /sprite|image|texture|frame/i.test(path))) {
+      refs.push({ path, textureKey, frameName, object: value });
+    }
+
+    const childCollections = [value.list, value.children?.entries, value.children?.list, value.sprites, value.images];
+    for (const collection of childCollections) {
+      if (Array.isArray(collection)) collection.forEach((child, index) => visit(child, `${path}.children[${index}]`, depth + 1));
+    }
+
+    for (const key of ['sprite', 'image', 'body', 'container', 'displayObject', 'gameObject', 'object', 'view', 'renderer']) {
+      if (value[key]) visit(value[key], `${path}.${key}`, depth + 1);
+    }
+  };
+  visit(device, 'device', 0);
+  return refs;
+}
+
+/** Build a concise device→texture report for console debugging. */
+function deviceTextureReport(filter = '', limit = 25) {
+  const lower = String(filter ?? '').toLowerCase();
+  const rows = [];
+  for (const { id, device } of rawDeviceEntries()) {
+    const kind = deviceKind(device);
+    const name = deviceName(device);
+    const searchable = `${id} ${kind} ${name}`.toLowerCase();
+    if (lower && !searchable.includes(lower)) continue;
+    rows.push({
+      id,
+      kind,
+      name,
+      propId: device?.options?.propId ?? null,
+      deviceOptionId: device?.deviceOption?.id ?? null,
+      textures: deviceTextureRefs(device).map((ref) => ({
+        path: ref.path,
+        textureKey: ref.textureKey,
+        frameName: ref.frameName,
+        source: inspectTexture(ref.textureKey)?.source ?? null,
+      })),
+      raw: device,
+    });
+    if (rows.length >= limit) break;
+  }
+  return rows;
+}
+
+/** Expose console helpers for investigating device texture links in DevTools. */
+function installDebugHelpers() {
+  const root = gameWindow();
+  root.GimkitMapDebug = {
+    stores: () => safeGet(root, ['stores']),
+    rawDeviceEntries,
+    devices: findDevices,
+    deviceTextureRefs,
+    deviceTextureReport,
+    textureKeys: phaserTextureKeys,
+    inspectTexture,
+    textureManager: phaserTextureManager,
+  };
+  console.log('[GimkitMap] Debug helpers installed on window.GimkitMapDebug');
+  console.log('[GimkitMap] Try: GimkitMapDebug.deviceTextureReport("snow", 10)');
+  console.log('[GimkitMap] Try: GimkitMapDebug.textureKeys("snow").map(GimkitMapDebug.inspectTexture)');
+}
+
 /** Collect map objects/devices such as trees, stations, barriers, and pickups. */
 function findDevices() {
   const devices = [];
@@ -517,8 +686,8 @@ function findPlayer() {
   try {
     const main = safeGet(gameWindow(), ['stores', 'phaser', 'mainCharacter']);
     const rotation = main?.rotation ?? main?.body?.rotation ?? ((main?.angle ?? 0) * Math.PI / 180);
-    const point = main?.body?.center ?? main?.body?.position ?? main?.body ?? main;
-    const player = phaserPointToWorld(point, rotation);
+    const player = phaserBodyOrigin(main?.body, rotation)
+      ?? phaserPointToWorld(main?.body?.center ?? main?.body?.position ?? main?.body ?? main, rotation);
     if (player) return player;
   } catch {}
 
@@ -533,8 +702,8 @@ function findPlayer() {
       : null;
     const body = managed?.body ?? managed ?? phaser?.mainCharacter?.body;
     const rotation = managed?.rotation ?? body?.rotation ?? phaser?.mainCharacter?.rotation ?? ((managed?.angle ?? phaser?.mainCharacter?.angle ?? 0) * Math.PI / 180);
-    const point = body?.center ?? body?.position ?? body;
-    const player = phaserPointToWorld(point, rotation);
+    const player = phaserBodyOrigin(body, rotation)
+      ?? phaserPointToWorld(body?.center ?? body?.position ?? body, rotation);
     if (player) return player;
   } catch {}
 
@@ -542,8 +711,8 @@ function findPlayer() {
   try {
     const me = safeGet(gameWindow(), ['stores', 'me']);
     if (me?.x != null || me?.position?.x != null || me?.body?.x != null) {
-      const point = me?.body ?? me?.position ?? me;
-      const player = phaserPointToWorld(point, me?.rotation ?? 0);
+      const player = phaserBodyOrigin(me?.body, me?.rotation ?? 0)
+        ?? phaserPointToWorld(me?.body ?? me?.position ?? me, me?.rotation ?? 0);
       if (player) return player;
     }
   } catch {}
@@ -614,7 +783,7 @@ class TileRenderer {
     this._smoothedFocus = null; // Last drawn player/camera focus in map coords
     this._lastFocus  = null;   // Last resolved unsmoothed player focus
     this._lastFrameT = 0;      // Timestamp used for frame-rate independent smoothing
-    this._lastStats  = { tiles: 0, players: 0, devices: 0 };
+    this._lastStats  = { tiles: 0, players: 0, devices: 0, playerPosition: null };
   }
 
   /**
@@ -625,14 +794,14 @@ class TileRenderer {
     const tiles = safeGet(gameWindow(), ['stores', 'world', 'terrain', 'tiles']);
     const tileCount = tiles?.size ?? tiles?.$items?.size ?? tileEntries(tiles).length;
     if (!tiles || tileCount === 0) {
-      this._lastStats = { tiles: 0, players: 0, devices: 0 };
+      this._lastStats = { tiles: 0, players: 0, devices: 0, playerPosition: null };
       this._drawWaiting();
       return;
     }
 
     const renderTiles = normalizeTiles(tiles);
     if (renderTiles.length === 0) {
-      this._lastStats = { tiles: tileCount, players: 0, devices: 0 };
+      this._lastStats = { tiles: tileCount, players: 0, devices: 0, playerPosition: null };
       this._drawWaiting('Tile data found, but coordinates were unreadable…');
       return;
     }
@@ -739,7 +908,12 @@ class TileRenderer {
 
     const devices = findDevices();
     const otherPlayers = findOtherPlayers();
-    this._lastStats = { tiles: tileCount, players: otherPlayers.length, devices: devices.length };
+    this._lastStats = {
+      tiles: tileCount,
+      players: otherPlayers.length,
+      devices: devices.length,
+      playerPosition: focusedPlayer ? { x: focusedPlayer.x, y: focusedPlayer.y } : null,
+    };
 
     if (focusedPlayer != null) {
       const toCanvas = (point) => ({
@@ -799,18 +973,28 @@ class TileRenderer {
     const rotation = source.rotation ?? 0;
     const previous = preferPrevious ? (this._lastFocus ?? this._smoothedFocus) : null;
     const transforms = [];
-    const addCandidate = (scale, offsetX = 0, offsetY = 0, label = 'scale') => {
-      if (!Number.isFinite(scale) || scale <= 0) return;
-      const roundedScale = Math.round(scale * 1000) / 1000;
+    const addCandidate = (scaleX, offsetX = 0, offsetY = 0, label = 'scale', scaleY = scaleX) => {
+      if (!Number.isFinite(scaleX) || !Number.isFinite(scaleY) || Math.abs(scaleX) <= 0 || Math.abs(scaleY) <= 0) return;
+      const roundedScaleX = Math.round(scaleX * 1000) / 1000;
+      const roundedScaleY = Math.round(scaleY * 1000) / 1000;
+      const roundedScale = Math.round(((Math.abs(scaleX) + Math.abs(scaleY)) / 2) * 1000) / 1000;
       const roundedOffsetX = Math.round(offsetX * 1000) / 1000;
       const roundedOffsetY = Math.round(offsetY * 1000) / 1000;
-      const key = `${roundedScale}:${roundedOffsetX}:${roundedOffsetY}`;
+      const key = `${roundedScaleX}:${roundedScaleY}:${roundedOffsetX}:${roundedOffsetY}`;
       if (transforms.some((item) => item.key === key)) return;
-      transforms.push({ key, scale: roundedScale, offsetX: roundedOffsetX, offsetY: roundedOffsetY, label });
+      transforms.push({
+        key,
+        scale: roundedScale,
+        scaleX: roundedScaleX,
+        scaleY: roundedScaleY,
+        offsetX: roundedOffsetX,
+        offsetY: roundedOffsetY,
+        label,
+      });
     };
 
-    addCandidate(transform.scale, transform.offsetX, transform.offsetY, 'inferred');
-    addCandidate(previous?.scale, previous?.offsetX ?? 0, previous?.offsetY ?? 0, 'previous');
+    addCandidate(transform.scaleX ?? transform.scale, transform.offsetX, transform.offsetY, 'inferred', transform.scaleY ?? transform.scale);
+    addCandidate(previous?.scaleX ?? previous?.scale, previous?.offsetX ?? 0, previous?.offsetY ?? 0, 'previous', previous?.scaleY ?? previous?.scale);
     if (!source.worldSpace) addCandidate(1, 0, 0, 'tile');
     for (const scale of [CFG.PHASER_TILE_PX, 100, 64, 50, 32, 16, 1]) addCandidate(scale, 0, 0, 'fallback');
 
@@ -818,12 +1002,13 @@ class TileRenderer {
     const centerY = bounds.minY + bounds.h / 2;
     const mapDistance = (point) => Math.hypot(point.x - centerX, point.y - centerY);
     const previousDistance = (point) => previous ? Math.hypot(point.x - previous.x, point.y - previous.y) : 0;
-    const candidates = transforms.map(({ scale, offsetX, offsetY, label }) => {
-      const point = { x: Number(source.x) / scale + offsetX, y: Number(source.y) / scale + offsetY, rotation, scale, offsetX, offsetY, label };
+    const candidates = transforms.map(({ scale, scaleX, scaleY, offsetX, offsetY, label }) => {
+      const point = { x: Number(source.x) / scaleX + offsetX, y: Number(source.y) / scaleY + offsetY, rotation, scale, scaleX, scaleY, offsetX, offsetY, label };
       point.onMap = inBounds(point);
-      point.score = (previous ? previousDistance(point) * 10 : mapDistance(point))
+      point.score = mapDistance(point)
+        + (previous ? previousDistance(point) * 2 : 0)
         + (point.onMap ? 0 : Math.max(bounds.w, bounds.h) * 2)
-        + (label === 'inferred' ? -2 : 0)
+        + (label === 'inferred' ? -10 : 0)
         + (!source.worldSpace && label === 'tile' ? -1 : 0);
       return point;
     });
@@ -856,6 +1041,8 @@ class TileRenderer {
       y: this._smoothedFocus.y + (target.y - this._smoothedFocus.y) * alpha,
       rotation: target.rotation ?? this._smoothedFocus.rotation ?? 0,
       scale: target.scale ?? this._smoothedFocus.scale,
+      scaleX: target.scaleX ?? target.scale ?? this._smoothedFocus.scaleX ?? this._smoothedFocus.scale,
+      scaleY: target.scaleY ?? target.scale ?? this._smoothedFocus.scaleY ?? this._smoothedFocus.scale,
       offsetX: target.offsetX ?? this._smoothedFocus.offsetX ?? 0,
       offsetY: target.offsetY ?? this._smoothedFocus.offsetY ?? 0,
     };
@@ -1156,7 +1343,10 @@ class MapPanel {
     this._renderer.render(this.zoom);
     const stats = this._renderer.stats();
     const tileStr = stats.tiles ? `${stats.tiles} tiles` : 'No tile data';
-    this._statusL.textContent = `${tileStr} • ${stats.players} players • ${stats.devices} devices`;
+    const playerStr = stats.playerPosition
+      ? `pos ${stats.playerPosition.x.toFixed(1)}, ${stats.playerPosition.y.toFixed(1)}`
+      : 'pos ?';
+    this._statusL.textContent = `${tileStr} • ${stats.players} players • ${stats.devices} devices • ${playerStr}`;
     this._statusR.textContent = `${(this.zoom * 100).toFixed(0)}%`;
   }
 
@@ -1204,6 +1394,7 @@ class MapPanel {
 // ─────────────────────────────────────────────────────────────────────────────
 async function init() {
   console.log('[GimkitMap] Waiting for Gimkit game stores…');
+  installDebugHelpers();
   exposeStores().catch((error) => console.warn('[GimkitMap] Initial stores resolve failed; retrying while waiting', error));
 
   let waited = 0;
