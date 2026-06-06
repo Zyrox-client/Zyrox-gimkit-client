@@ -248,13 +248,22 @@ function tileCoords(tile, key) {
   return keyTileCoords(key) ?? objectTileCoords(tile);
 }
 
-/** Iterate normal Maps, Colyseus MapSchemas, arrays, and plain keyed objects. */
+/** Unwrap MobX ObservableValue wrappers used inside ObservableMap.data_. */
+function unwrapObservableValue(value) {
+  if (value?.value_ && (value.name_ || value.observers_ || value.enhancer || value.equals)) return value.value_;
+  return value;
+}
+
+/** Iterate normal Maps, MobX ObservableMaps, Colyseus MapSchemas, arrays, and plain keyed objects. */
 function tileEntries(tiles) {
   if (!tiles) return [];
-  const source = tiles.$items instanceof Map ? tiles.$items : tiles;
-  if (source instanceof Map || typeof source?.entries === 'function') return Array.from(source.entries());
-  if (Array.isArray(source)) return source.map((tile, index) => [index, tile]);
-  if (typeof source === 'object') return Object.entries(source);
+  const source = tiles.$items instanceof Map
+    ? tiles.$items
+    : (tiles.data_ instanceof Map ? tiles.data_ : tiles);
+  const normalize = ([key, value]) => [key, unwrapObservableValue(value)];
+  if (source instanceof Map || typeof source?.entries === 'function') return Array.from(source.entries(), normalize);
+  if (Array.isArray(source)) return source.map((tile, index) => [index, unwrapObservableValue(tile)]);
+  if (typeof source === 'object') return Object.entries(source).map(normalize);
   return [];
 }
 
@@ -414,10 +423,17 @@ function devicePosition(device) {
   const candidates = [
     device?.body?.center,
     device?.body?.position,
+    device?.physicsBody?.center,
+    device?.physicsBody?.position,
     device?.position,
     device?.pos,
+    device?.transform,
+    device?.state,
     device?.body,
+    device?.physicsBody,
     device?.sprite,
+    device?.displayObject,
+    device?.container,
     device,
   ];
   for (const candidate of candidates) {
@@ -434,10 +450,36 @@ function deviceCollections() {
     safeGet(root, ['stores', 'phaser', 'scene', 'worldManager', 'devices', 'allDevices']),
     safeGet(root, ['stores', 'phaser', 'scene', 'worldManager', 'devices', 'devices']),
     safeGet(root, ['stores', 'world', 'devices']),
+    safeGet(root, ['stores', 'world', 'devices', 'devices']),
+    safeGet(root, ['stores', 'world', 'devices', 'devices', 'data_']),
     safeGet(root, ['stores', 'world', 'objects']),
     safeGet(root, ['serializer', 'state', 'devices', '$items']),
     safeGet(root, ['serializer', 'state', 'objects', '$items']),
   ].filter(Boolean);
+}
+
+
+/** Return a useful device/object type label from world.devices device schemas. */
+function deviceKind(device) {
+  return device?.options?.propId
+    ?? device?.deviceOption?.id
+    ?? device?.type
+    ?? device?.kind
+    ?? device?.key
+    ?? device?.options?.type
+    ?? device?.options?.group
+    ?? 'device';
+}
+
+/** Return a display label for a device/object marker. */
+function deviceName(device) {
+  return device?.name
+    ?? device?.label
+    ?? device?.options?.name
+    ?? device?.options?.label
+    ?? device?.options?.propId
+    ?? device?.deviceOption?.id
+    ?? '';
 }
 
 /** Collect map objects/devices such as trees, stations, barriers, and pickups. */
@@ -456,8 +498,8 @@ function findDevices() {
       devices.push({
         ...pos,
         id: resolvedId,
-        kind: device?.type ?? device?.kind ?? device?.key ?? device?.options?.type ?? device?.options?.group ?? 'device',
-        name: device?.name ?? device?.label ?? device?.options?.name ?? device?.options?.label ?? '',
+        kind: deviceKind(device),
+        name: deviceName(device),
       });
       if (devices.length >= CFG.DEVICE_LIMIT) return devices;
     }
