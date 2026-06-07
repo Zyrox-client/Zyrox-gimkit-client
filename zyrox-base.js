@@ -3313,6 +3313,313 @@
   }, { passive: true });
 
   window.addEventListener("resize", resizeCrosshairCanvas);
+  // ---------------------------------------------------------------------------
+  // KEYSTROKES MODULE
+  // Minecraft-client-style WASD / mouse / space input overlay with CPS counters.
+  // ---------------------------------------------------------------------------
+  const KEYSTROKES_MODULE_NAME = "Keystrokes";
+  const keystrokesState = {
+    enabled: false,
+    container: null,
+    elements: new Map(),
+    pressedKeys: new Set(),
+    pressedMouseButtons: new Set(),
+    lmbClicks: [],
+    rmbClicks: [],
+    config: null,
+    intervalId: null,
+    rafId: null,
+    rmbReleaseTimeoutId: null,
+    appearanceObserver: null,
+    listeners: [],
+  };
+
+  function getKeystrokesConfig() {
+    const defaults = {
+      scale: 100,
+      x: 18,
+      y: 118,
+      opacity: 92,
+      showCps: true,
+      useGlobalAppearance: true,
+    };
+    const storedCfg = typeof moduleCfg === "function" ? moduleCfg(KEYSTROKES_MODULE_NAME) : null;
+    const liveCfg = keystrokesState.config || window.__zyroxKeystrokesConfig || null;
+    return { ...defaults, ...(storedCfg && typeof storedCfg === "object" ? storedCfg : {}), ...(liveCfg && typeof liveCfg === "object" ? liveCfg : {}) };
+  }
+
+  function scheduleKeystrokesRender() {
+    if (!keystrokesState.enabled || keystrokesState.rafId != null) return;
+    keystrokesState.rafId = requestAnimationFrame(() => {
+      keystrokesState.rafId = null;
+      renderKeystrokesOverlay();
+    });
+  }
+
+  const KEYSTROKES_CPS_WINDOW_MS = 1000;
+
+  function getKeystrokesCps(clicks, now = performance.now()) {
+    while (clicks.length && now - clicks[0] > KEYSTROKES_CPS_WINDOW_MS) clicks.shift();
+    return clicks.length.toFixed(1);
+  }
+
+  function setKeystrokePressed(id, pressed) {
+    const element = keystrokesState.elements.get(id);
+    if (!element) return;
+    element.classList.toggle("zyrox-keystroke-pressed", Boolean(pressed));
+  }
+
+  function applyKeystrokesThemeVars(overlay) {
+    const cfg = getKeystrokesConfig();
+    const source = cfg.useGlobalAppearance !== false && typeof root !== "undefined" && root ? getComputedStyle(root) : null;
+    const readVar = (name, fallback) => {
+      const value = source?.getPropertyValue?.(name)?.trim();
+      return value || fallback;
+    };
+    overlay.style.setProperty("--zyrox-key-fill-start", readVar("--zyx-module-active-start", "rgba(33, 8, 11, .88)"));
+    overlay.style.setProperty("--zyrox-key-fill-end", readVar("--zyx-module-active-end", "rgba(8, 10, 14, .82)"));
+    overlay.style.setProperty("--zyrox-key-border", readVar("--zyx-module-active-border", "rgba(255, 59, 59, .38)"));
+    overlay.style.setProperty("--zyrox-key-text", readVar("--zyx-text", "#f7f7f7"));
+    overlay.style.setProperty("--zyrox-key-pressed-start", readVar("--zyx-header-bg-start", "rgba(255, 63, 63, .96)"));
+    overlay.style.setProperty("--zyrox-key-pressed-end", readVar("--zyx-header-bg-end", "rgba(126, 12, 12, .94)"));
+    overlay.style.setProperty("--zyrox-key-pressed-border", readVar("--zyx-outline-color", "rgba(255, 205, 205, .95)"));
+    overlay.style.setProperty("--zyrox-key-glow", readVar("--zyx-slider-color", "#ff3b3b"));
+    overlay.style.setProperty("--zyrox-key-font", readVar("--zyx-font", "Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"));
+  }
+
+  function syncKeystrokesConfigChange(cfg = null) {
+    const nextCfg = cfg && typeof cfg === "object" ? { ...getKeystrokesConfig(), ...cfg } : getKeystrokesConfig();
+    keystrokesState.config = { ...nextCfg };
+    window.__zyroxKeystrokesConfig = { ...nextCfg };
+    renderKeystrokesOverlay();
+  }
+
+  function renderKeystrokesOverlay() {
+    const overlay = keystrokesState.container;
+    if (!keystrokesState.enabled || !overlay) return;
+
+    applyKeystrokesThemeVars(overlay);
+    const cfg = getKeystrokesConfig();
+    const scale = Math.max(0.5, Math.min(2.5, (Number(cfg.scale) || 100) / 100));
+    const x = Number.isFinite(Number(cfg.x)) ? Number(cfg.x) : 18;
+    const y = Number.isFinite(Number(cfg.y)) ? Number(cfg.y) : 118;
+    const opacity = Math.max(0.2, Math.min(1, (Number(cfg.opacity) || 92) / 100));
+    const showCps = cfg.showCps !== false;
+
+    overlay.style.left = `${Math.max(0, Math.round(x))}px`;
+    overlay.style.top = `${Math.max(0, Math.round(y))}px`;
+    overlay.style.transform = `scale(${scale})`;
+    overlay.style.opacity = String(opacity);
+
+    const now = performance.now();
+    const lmbCps = getKeystrokesCps(keystrokesState.lmbClicks, now);
+    const rmbCps = getKeystrokesCps(keystrokesState.rmbClicks, now);
+    const lmbText = keystrokesState.elements.get("LMB-text");
+    const rmbText = keystrokesState.elements.get("RMB-text");
+    if (lmbText) lmbText.textContent = showCps ? `LMB ${lmbCps} CPS` : "LMB";
+    if (rmbText) rmbText.textContent = showCps ? `RMB ${rmbCps} CPS` : "RMB";
+
+    setKeystrokePressed("W", keystrokesState.pressedKeys.has("KeyW"));
+    setKeystrokePressed("A", keystrokesState.pressedKeys.has("KeyA"));
+    setKeystrokePressed("S", keystrokesState.pressedKeys.has("KeyS"));
+    setKeystrokePressed("D", keystrokesState.pressedKeys.has("KeyD"));
+    setKeystrokePressed("Space", keystrokesState.pressedKeys.has("Space"));
+    setKeystrokePressed("LMB", keystrokesState.pressedMouseButtons.has(0));
+    setKeystrokePressed("RMB", keystrokesState.pressedMouseButtons.has(2));
+  }
+
+  function createKeystrokesKey(id, label, extraClass = "") {
+    const key = document.createElement("div");
+    key.className = `zyrox-keystroke-key ${extraClass}`.trim();
+    key.dataset.keystrokeId = id;
+    key.innerHTML = `<span class="zyrox-keystroke-label">${label}</span>`;
+    keystrokesState.elements.set(id, key);
+    return key;
+  }
+
+  function ensureKeystrokesOverlay() {
+    if (keystrokesState.container?.isConnected) return keystrokesState.container;
+
+    const root = document.createElement("div");
+    root.className = "zyrox-keystrokes-overlay";
+    root.style.cssText = [
+      "position:fixed",
+      "left:18px",
+      "top:118px",
+      "z-index:2147483646",
+      "pointer-events:none",
+      "user-select:none",
+      "transform-origin:top left",
+      "font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
+      "color:#fff",
+      "filter:drop-shadow(0 14px 26px rgba(0,0,0,.42))",
+    ].join(";");
+
+    const style = document.createElement("style");
+    style.textContent = `
+      .zyrox-keystrokes-overlay { --zyrox-key-fill-start: rgba(33, 8, 11, .88); --zyrox-key-fill-end: rgba(8, 10, 14, .82); --zyrox-key-border: rgba(255, 59, 59, .38); --zyrox-key-text: #f7f7f7; --zyrox-key-pressed-start: rgba(255, 63, 63, .96); --zyrox-key-pressed-end: rgba(126, 12, 12, .94); --zyrox-key-pressed-border: rgba(255, 205, 205, .95); --zyrox-key-glow: #ff3b3b; --zyrox-key-font: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+      .zyrox-keystrokes-grid { display:grid; grid-template-columns:44px 44px 44px; grid-auto-rows:44px; gap:6px; font-family:var(--zyrox-key-font); }
+      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:10px; border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, var(--zyrox-key-fill-start), var(--zyrox-key-fill-end)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:var(--zyrox-key-text); font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, transform .08s ease, box-shadow .08s ease; }
+      .zyrox-keystroke-pressed { background:linear-gradient(180deg, var(--zyrox-key-pressed-start), var(--zyrox-key-pressed-end)); border-color:var(--zyrox-key-pressed-border); color:#fff; transform:translateY(1px); box-shadow:0 0 18px color-mix(in srgb, var(--zyrox-key-glow) 56%, transparent), inset 0 0 18px rgba(255,255,255,.12); }
+      .zyrox-keystroke-spacer { visibility:hidden; }
+      .zyrox-keystroke-mouse-row { grid-column:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+      .zyrox-keystroke-mouse { min-width:0; width:100%; font-size:11px; line-height:1.1; text-align:center; }
+      .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; }
+      .zyrox-keystroke-label { pointer-events:none; }
+    `;
+    root.appendChild(style);
+
+    const grid = document.createElement("div");
+    grid.className = "zyrox-keystrokes-grid";
+
+    grid.appendChild(createKeystrokesKey("spacer-top-left", "", "zyrox-keystroke-spacer"));
+    grid.appendChild(createKeystrokesKey("W", "W"));
+    grid.appendChild(createKeystrokesKey("spacer-top-right", "", "zyrox-keystroke-spacer"));
+    grid.appendChild(createKeystrokesKey("A", "A"));
+    grid.appendChild(createKeystrokesKey("S", "S"));
+    grid.appendChild(createKeystrokesKey("D", "D"));
+
+    const lmb = createKeystrokesKey("LMB", "LMB 0.0 CPS", "zyrox-keystroke-mouse");
+    const rmb = createKeystrokesKey("RMB", "RMB 0.0 CPS", "zyrox-keystroke-mouse");
+    keystrokesState.elements.set("LMB-text", lmb.querySelector(".zyrox-keystroke-label"));
+    keystrokesState.elements.set("RMB-text", rmb.querySelector(".zyrox-keystroke-label"));
+    const mouseRow = document.createElement("div");
+    mouseRow.className = "zyrox-keystroke-mouse-row";
+    mouseRow.appendChild(lmb);
+    mouseRow.appendChild(rmb);
+    grid.appendChild(mouseRow);
+
+    const space = createKeystrokesKey("Space", "SPACE", "zyrox-keystroke-space");
+    grid.appendChild(space);
+
+    root.appendChild(grid);
+    document.body.appendChild(root);
+    keystrokesState.container = root;
+    return root;
+  }
+
+  function addKeystrokesListener(target, type, handler, options) {
+    target.addEventListener(type, handler, options);
+    keystrokesState.listeners.push({ target, type, handler, options });
+  }
+
+  function clearKeystrokesInputState() {
+    keystrokesState.pressedKeys.clear();
+    keystrokesState.pressedMouseButtons.clear();
+    scheduleKeystrokesRender();
+  }
+
+  function startKeystrokesAppearanceObserver() {
+    keystrokesState.appearanceObserver?.disconnect?.();
+    if (typeof MutationObserver === "undefined" || typeof root === "undefined" || !root) return;
+    keystrokesState.appearanceObserver = new MutationObserver(() => scheduleKeystrokesRender());
+    keystrokesState.appearanceObserver.observe(root, { attributes: true, attributeFilter: ["style", "class"] });
+  }
+
+  function stopKeystrokesAppearanceObserver() {
+    keystrokesState.appearanceObserver?.disconnect?.();
+    keystrokesState.appearanceObserver = null;
+  }
+
+  function startKeystrokes() {
+    if (keystrokesState.enabled) return;
+    keystrokesState.enabled = true;
+    keystrokesState.pressedKeys.clear();
+    keystrokesState.pressedMouseButtons.clear();
+    keystrokesState.lmbClicks = [];
+    keystrokesState.rmbClicks = [];
+    keystrokesState.config = getKeystrokesConfig();
+    window.__zyroxKeystrokesConfig = { ...keystrokesState.config };
+    ensureKeystrokesOverlay();
+    startKeystrokesAppearanceObserver();
+
+    const handleKeyDown = (event) => {
+      if (!["KeyW", "KeyA", "KeyS", "KeyD", "Space"].includes(event.code)) return;
+      keystrokesState.pressedKeys.add(event.code);
+      scheduleKeystrokesRender();
+    };
+    const handleKeyUp = (event) => {
+      if (!["KeyW", "KeyA", "KeyS", "KeyD", "Space"].includes(event.code)) return;
+      keystrokesState.pressedKeys.delete(event.code);
+      scheduleKeystrokesRender();
+    };
+    const handleMouseDown = (event) => {
+      if (event.button !== 0 && event.button !== 2) return;
+      const now = performance.now();
+      if (event.button === 2 && keystrokesState.rmbReleaseTimeoutId != null) {
+        clearTimeout(keystrokesState.rmbReleaseTimeoutId);
+        keystrokesState.rmbReleaseTimeoutId = null;
+      }
+      keystrokesState.pressedMouseButtons.add(event.button);
+      if (event.button === 0) keystrokesState.lmbClicks.push(now);
+      if (event.button === 2) keystrokesState.rmbClicks.push(now);
+      scheduleKeystrokesRender();
+    };
+    const handleMouseUp = (event) => {
+      if (event.button !== 0 && event.button !== 2) return;
+      keystrokesState.pressedMouseButtons.delete(event.button);
+      scheduleKeystrokesRender();
+    };
+    const handleContextMenu = () => {
+      if (keystrokesState.rmbReleaseTimeoutId != null) clearTimeout(keystrokesState.rmbReleaseTimeoutId);
+      keystrokesState.pressedMouseButtons.add(2);
+      scheduleKeystrokesRender();
+      keystrokesState.rmbReleaseTimeoutId = setTimeout(() => {
+        keystrokesState.rmbReleaseTimeoutId = null;
+        keystrokesState.pressedMouseButtons.delete(2);
+        scheduleKeystrokesRender();
+      }, 180);
+    };
+    const handleMouseMove = (event) => {
+      const buttons = Number(event.buttons) || 0;
+      if ((buttons & 1) === 0) keystrokesState.pressedMouseButtons.delete(0);
+      if ((buttons & 2) === 0 && keystrokesState.rmbReleaseTimeoutId == null) keystrokesState.pressedMouseButtons.delete(2);
+      scheduleKeystrokesRender();
+    };
+
+    addKeystrokesListener(window, "keydown", handleKeyDown, { passive: true, capture: true });
+    addKeystrokesListener(window, "keyup", handleKeyUp, { passive: true, capture: true });
+    addKeystrokesListener(window, "mousedown", handleMouseDown, { passive: true, capture: true });
+    addKeystrokesListener(window, "mouseup", handleMouseUp, { passive: true, capture: true });
+    addKeystrokesListener(window, "contextmenu", handleContextMenu, { passive: true, capture: true });
+    addKeystrokesListener(window, "mousemove", handleMouseMove, { passive: true, capture: true });
+    addKeystrokesListener(window, "blur", clearKeystrokesInputState, { passive: true });
+    addKeystrokesListener(document, "visibilitychange", clearKeystrokesInputState, { passive: true });
+
+    keystrokesState.intervalId = setInterval(scheduleKeystrokesRender, 50);
+    renderKeystrokesOverlay();
+  }
+
+  function stopKeystrokes() {
+    if (!keystrokesState.enabled && !keystrokesState.container) return;
+    keystrokesState.enabled = false;
+    if (keystrokesState.intervalId != null) {
+      clearInterval(keystrokesState.intervalId);
+      keystrokesState.intervalId = null;
+    }
+    if (keystrokesState.rafId != null) {
+      cancelAnimationFrame(keystrokesState.rafId);
+      keystrokesState.rafId = null;
+    }
+    if (keystrokesState.rmbReleaseTimeoutId != null) {
+      clearTimeout(keystrokesState.rmbReleaseTimeoutId);
+      keystrokesState.rmbReleaseTimeoutId = null;
+    }
+    stopKeystrokesAppearanceObserver();
+    for (const { target, type, handler, options } of keystrokesState.listeners) {
+      target.removeEventListener(type, handler, options);
+    }
+    keystrokesState.listeners = [];
+    keystrokesState.pressedKeys.clear();
+    keystrokesState.pressedMouseButtons.clear();
+    keystrokesState.lmbClicks = [];
+    keystrokesState.rmbClicks = [];
+    keystrokesState.config = null;
+    keystrokesState.elements.clear();
+    keystrokesState.container?.remove();
+    keystrokesState.container = null;
+  }
+
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
     setTimeout(() => {
@@ -7751,6 +8058,10 @@
       onEnable: startQuestionStyles,
       onDisable: stopQuestionStyles,
     },
+    "Keystrokes": {
+      onEnable: startKeystrokes,
+      onDisable: stopKeystrokes,
+    },
   };
   const MODULE_DESCRIPTIONS = {
     "Auto Answer": "Automatically submits the best answer after a delay.",
@@ -7771,6 +8082,7 @@
     [HIDE_POPUPS_MODULE_NAME]: "Hides Floor is Lava building purchase toasts and energy/resource popups.",
     [ANTI_AFK_MODULE_NAME]: "Sends lightweight synthetic activity pulses to reduce AFK kicks.",
     [STYLES_MODULE_NAME]: "Customizes question and answer colors on Gimkit question screens.",
+    "Keystrokes": "Shows WASD, mouse buttons, CPS, and space bar input in a Minecraft-style overlay.",
   };
 
   // --- End of Core Utilities ---
@@ -7878,6 +8190,18 @@
               name: ANIMATION_SKIP_MODULE_NAME,
               description: MODULE_DESCRIPTIONS[ANIMATION_SKIP_MODULE_NAME],
               settings: [],
+            },
+            {
+              name: KEYSTROKES_MODULE_NAME,
+              description: MODULE_DESCRIPTIONS[KEYSTROKES_MODULE_NAME],
+              settings: [
+                { id: "scale", label: "Overlay Scale", type: "slider", min: 50, max: 200, step: 5, default: 100, unit: "%" },
+                { id: "x", label: "X Position", type: "slider", min: 0, max: 1200, step: 1, default: 18, unit: "px" },
+                { id: "y", label: "Y Position", type: "slider", min: 0, max: 800, step: 1, default: 118, unit: "px" },
+                { id: "opacity", label: "Opacity", type: "slider", min: 20, max: 100, step: 1, default: 92, unit: "%" },
+                { id: "showCps", label: "Show CPS", type: "checkbox", default: true },
+                { id: "useGlobalAppearance", label: "Use global appearance", type: "checkbox", default: true },
+              ],
             },
             {
               name: HIDE_POPUPS_MODULE_NAME,
@@ -9450,6 +9774,9 @@
       window.__zyroxAutoAimConfig = { ...getAutoAimConfig(), ...cfg };
     } else if (name === "Auto Answer") {
       window.__zyroxAutoAnswerConfig = { ...cfg };
+    } else if (name === KEYSTROKES_MODULE_NAME) {
+      keystrokesState.config = { ...cfg };
+      window.__zyroxKeystrokesConfig = { ...cfg };
     }
     return cfg;
   }
@@ -10601,6 +10928,7 @@
                 event.target.value = String(nextConcurrency);
                 if (valueLabel) valueLabel.textContent = `${nextConcurrency}${valueUnit}`;
               }
+              if (moduleName === KEYSTROKES_MODULE_NAME) syncKeystrokesConfigChange(cfg);
               saveSettings();
             });
             settingInput.addEventListener("change", (event) => {
@@ -10626,6 +10954,7 @@
                 event.target.value = String(nextConcurrency);
                 if (valueLabel) valueLabel.textContent = `${nextConcurrency}${valueUnit}`;
               }
+              if (moduleName === KEYSTROKES_MODULE_NAME) syncKeystrokesConfigChange(cfg);
               saveSettings();
             });
           }
@@ -10680,6 +11009,7 @@
                 window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
                 if (quickFireState.enabled) startQuickFire();
               }
+              if (moduleName === KEYSTROKES_MODULE_NAME) syncKeystrokesConfigChange(cfg);
               saveSettings();
             });
           }
@@ -11254,6 +11584,7 @@
     // FIX: derive button accent background from outlineColor so buttons always match the theme
     setThemeVar("--zyx-btn-bg", toRgba(outlineColor, 0.12));
     setThemeVar("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
+    if (keystrokesState.enabled) scheduleKeystrokesRender();
 
     if (state.displayMode === "loose") {
       const shellRect = shell.getBoundingClientRect();
