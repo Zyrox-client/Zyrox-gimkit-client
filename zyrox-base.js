@@ -4950,6 +4950,7 @@
     default: { accent: "#ff4a4a", textColor: "#ffffff", durationMs: 2600, panelBg: "rgba(8, 10, 14, 0.92)", headerStart: "rgba(255, 74, 74, 0.30)", headerEnd: "rgba(45, 12, 12, 0.95)" },
     green: { accent: "#2dff75", textColor: "#e8fff1", durationMs: 2400, panelBg: "rgba(7, 20, 12, 0.92)", headerStart: "rgba(45, 255, 117, 0.30)", headerEnd: "rgba(15, 47, 27, 0.95)" },
     ice: { accent: "#6cd8ff", textColor: "#eaf7ff", durationMs: 2400, panelBg: "rgba(8, 17, 24, 0.92)", headerStart: "rgba(108, 216, 255, 0.30)", headerEnd: "rgba(19, 48, 66, 0.95)" },
+    midnight: { accent: "#9b5cff", textColor: "#f2eaff", durationMs: 2500, panelBg: "rgba(13, 8, 28, 0.94)", headerStart: "rgba(155, 92, 255, 0.34)", headerEnd: "rgba(34, 13, 64, 0.96)" },
     grayscale: { accent: "#d4d4d4", textColor: "#f1f1f1", durationMs: 2600, panelBg: "rgba(18, 18, 18, 0.92)", headerStart: "rgba(143, 143, 143, 0.30)", headerEnd: "rgba(29, 29, 29, 0.95)" },
   };
 
@@ -8526,6 +8527,7 @@
                     { value: "default", label: "Default (Red)" },
                     { value: "green", label: "Green" },
                     { value: "ice", label: "Ice" },
+                    { value: "midnight", label: "Midnight" },
                     { value: "grayscale", label: "Grayscale" },
                   ],
                 },
@@ -9505,6 +9507,7 @@
             <button type="button" class="zyrox-preset-btn" data-preset="default"><span class="preset-swatch" style="background:#ff3d3d"></span>Default</button>
             <button type="button" class="zyrox-preset-btn" data-preset="green"><span class="preset-swatch" style="background:#2dff75"></span>Green</button>
             <button type="button" class="zyrox-preset-btn" data-preset="ice"><span class="preset-swatch" style="background:#6cd8ff"></span>Ice</button>
+            <button type="button" class="zyrox-preset-btn" data-preset="midnight"><span class="preset-swatch" style="background:#9b5cff"></span>Midnight</button>
             <button type="button" class="zyrox-preset-btn" data-preset="grayscale"><span class="preset-swatch" style="background:#bfbfbf"></span>Greyscale</button>
           </div>
           <div class="zyrox-subheading">Display Mode</div>
@@ -11567,6 +11570,19 @@
           settingsText: "#d7edff", settingsSubtext: "#9db4c6", settingsSidebar: "#10202c", settingsBody: "#0e141a",
           settingsCardBorder: "#90cae8", settingsCardBg: "#173247",
           settingsHeaderStart: "#6cd8ff", settingsHeaderEnd: "#133042", espValueTextColor: "#ffffff",
+          font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
+        };
+      }
+      if (state.globalPreset === "midnight") {
+        return {
+          accent: "#9b5cff", shellStart: "#6f2dff", shellEnd: "#080314", topbar: "#7d3cff", border: "#a777ff",
+          outline: "#9b5cff", text: "#e7ddff", muted: "#aa92d4", soft: "#cdb6ff", search: "#f2eaff", icon: "#decfff",
+          panelText: "#efe6ff", panelBorder: "#a777ff", panelBg: "#0f0820", slider: "#b084ff", checkmark: "#b084ff",
+          selectBg: "#17102a", selectText: "#f2eaff",
+          headerStart: "#9b5cff", headerEnd: "#220d40", headerText: "#ffffff", moduleDisabledBg: "#000000",
+          settingsText: "#f2eaff", settingsSubtext: "#bca8df", settingsSidebar: "#17102b", settingsBody: "#10091d",
+          settingsCardBorder: "#9f7ad9", settingsCardBg: "#24133f",
+          settingsHeaderStart: "#9b5cff", settingsHeaderEnd: "#220d40", espValueTextColor: "#ffffff",
           font: "Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif",
         };
       }
