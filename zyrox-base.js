@@ -3329,6 +3329,8 @@
     config: null,
     intervalId: null,
     rafId: null,
+    rmbReleaseTimeoutId: null,
+    appearanceObserver: null,
     listeners: [],
   };
 
@@ -3354,14 +3356,11 @@
     });
   }
 
-  const KEYSTROKES_CPS_WINDOW_MS = 500;
-  const KEYSTROKES_CPS_MIN_SAMPLE_MS = 100;
+  const KEYSTROKES_CPS_WINDOW_MS = 1000;
 
   function getKeystrokesCps(clicks, now = performance.now()) {
     while (clicks.length && now - clicks[0] > KEYSTROKES_CPS_WINDOW_MS) clicks.shift();
-    if (!clicks.length) return "0.0";
-    const sampleMs = Math.max(KEYSTROKES_CPS_MIN_SAMPLE_MS, Math.min(KEYSTROKES_CPS_WINDOW_MS, now - clicks[0]));
-    return ((clicks.length * 1000) / sampleMs).toFixed(1);
+    return clicks.length.toFixed(1);
   }
 
   function setKeystrokePressed(id, pressed) {
@@ -3510,6 +3509,18 @@
     scheduleKeystrokesRender();
   }
 
+  function startKeystrokesAppearanceObserver() {
+    keystrokesState.appearanceObserver?.disconnect?.();
+    if (typeof MutationObserver === "undefined" || typeof root === "undefined" || !root) return;
+    keystrokesState.appearanceObserver = new MutationObserver(() => scheduleKeystrokesRender());
+    keystrokesState.appearanceObserver.observe(root, { attributes: true, attributeFilter: ["style", "class"] });
+  }
+
+  function stopKeystrokesAppearanceObserver() {
+    keystrokesState.appearanceObserver?.disconnect?.();
+    keystrokesState.appearanceObserver = null;
+  }
+
   function startKeystrokes() {
     if (keystrokesState.enabled) return;
     keystrokesState.enabled = true;
@@ -3520,6 +3531,7 @@
     keystrokesState.config = getKeystrokesConfig();
     window.__zyroxKeystrokesConfig = { ...keystrokesState.config };
     ensureKeystrokesOverlay();
+    startKeystrokesAppearanceObserver();
 
     const handleKeyDown = (event) => {
       if (!["KeyW", "KeyA", "KeyS", "KeyD", "Space"].includes(event.code)) return;
@@ -3534,6 +3546,10 @@
     const handleMouseDown = (event) => {
       if (event.button !== 0 && event.button !== 2) return;
       const now = performance.now();
+      if (event.button === 2 && keystrokesState.rmbReleaseTimeoutId != null) {
+        clearTimeout(keystrokesState.rmbReleaseTimeoutId);
+        keystrokesState.rmbReleaseTimeoutId = null;
+      }
       keystrokesState.pressedMouseButtons.add(event.button);
       if (event.button === 0) keystrokesState.lmbClicks.push(now);
       if (event.button === 2) keystrokesState.rmbClicks.push(now);
@@ -3545,13 +3561,19 @@
       scheduleKeystrokesRender();
     };
     const handleContextMenu = () => {
-      keystrokesState.pressedMouseButtons.delete(2);
+      if (keystrokesState.rmbReleaseTimeoutId != null) clearTimeout(keystrokesState.rmbReleaseTimeoutId);
+      keystrokesState.pressedMouseButtons.add(2);
       scheduleKeystrokesRender();
+      keystrokesState.rmbReleaseTimeoutId = setTimeout(() => {
+        keystrokesState.rmbReleaseTimeoutId = null;
+        keystrokesState.pressedMouseButtons.delete(2);
+        scheduleKeystrokesRender();
+      }, 180);
     };
     const handleMouseMove = (event) => {
       const buttons = Number(event.buttons) || 0;
       if ((buttons & 1) === 0) keystrokesState.pressedMouseButtons.delete(0);
-      if ((buttons & 2) === 0) keystrokesState.pressedMouseButtons.delete(2);
+      if ((buttons & 2) === 0 && keystrokesState.rmbReleaseTimeoutId == null) keystrokesState.pressedMouseButtons.delete(2);
       scheduleKeystrokesRender();
     };
 
@@ -3579,6 +3601,11 @@
       cancelAnimationFrame(keystrokesState.rafId);
       keystrokesState.rafId = null;
     }
+    if (keystrokesState.rmbReleaseTimeoutId != null) {
+      clearTimeout(keystrokesState.rmbReleaseTimeoutId);
+      keystrokesState.rmbReleaseTimeoutId = null;
+    }
+    stopKeystrokesAppearanceObserver();
     for (const { target, type, handler, options } of keystrokesState.listeners) {
       target.removeEventListener(type, handler, options);
     }
