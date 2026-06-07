@@ -3353,7 +3353,7 @@
 
   function getKeystrokesCps(clicks, now = performance.now()) {
     while (clicks.length && now - clicks[0] > 1000) clicks.shift();
-    return clicks.length;
+    return Number(clicks.length).toFixed(1);
   }
 
   function setKeystrokePressed(id, pressed) {
@@ -3362,10 +3362,31 @@
     element.classList.toggle("zyrox-keystroke-pressed", Boolean(pressed));
   }
 
-  function renderKeystrokesOverlay() {
-    const root = keystrokesState.container;
-    if (!keystrokesState.enabled || !root) return;
+  function applyKeystrokesThemeVars(overlay) {
+    const source = typeof root !== "undefined" && root ? getComputedStyle(root) : null;
+    const readVar = (name, fallback) => {
+      const value = source?.getPropertyValue?.(name)?.trim();
+      return value || fallback;
+    };
+    overlay.style.setProperty("--zyrox-key-bg", readVar("--zyx-panel-count-bg", "rgba(8, 10, 14, .82)"));
+    overlay.style.setProperty("--zyrox-key-border", readVar("--zyx-panel-count-border", "rgba(255, 59, 59, .38)"));
+    overlay.style.setProperty("--zyrox-key-text", readVar("--zyx-panel-count-text", "#f7f7f7"));
+    overlay.style.setProperty("--zyrox-key-accent", readVar("--zyx-slider-color", "#ff3b3b"));
+    overlay.style.setProperty("--zyrox-key-active-border", readVar("--zyx-module-active-border", "rgba(255, 205, 205, .95)"));
+    overlay.style.setProperty("--zyrox-key-font", readVar("--zyx-font", "Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"));
+  }
 
+  function syncKeystrokesConfigChange(cfg = null) {
+    const nextCfg = cfg && typeof cfg === "object" ? cfg : getKeystrokesConfig();
+    window.__zyroxKeystrokesConfig = { ...nextCfg };
+    renderKeystrokesOverlay();
+  }
+
+  function renderKeystrokesOverlay() {
+    const overlay = keystrokesState.container;
+    if (!keystrokesState.enabled || !overlay) return;
+
+    applyKeystrokesThemeVars(overlay);
     const cfg = getKeystrokesConfig();
     const scale = Math.max(0.5, Math.min(2.5, (Number(cfg.scale) || 100) / 100));
     const x = Number.isFinite(Number(cfg.x)) ? Number(cfg.x) : 18;
@@ -3373,10 +3394,10 @@
     const opacity = Math.max(0.2, Math.min(1, (Number(cfg.opacity) || 92) / 100));
     const showCps = cfg.showCps !== false;
 
-    root.style.left = `${Math.max(0, Math.round(x))}px`;
-    root.style.top = `${Math.max(0, Math.round(y))}px`;
-    root.style.transform = `scale(${scale})`;
-    root.style.opacity = String(opacity);
+    overlay.style.left = `${Math.max(0, Math.round(x))}px`;
+    overlay.style.top = `${Math.max(0, Math.round(y))}px`;
+    overlay.style.transform = `scale(${scale})`;
+    overlay.style.opacity = String(opacity);
 
     const now = performance.now();
     const lmbCps = getKeystrokesCps(keystrokesState.lmbClicks, now);
@@ -3424,12 +3445,13 @@
 
     const style = document.createElement("style");
     style.textContent = `
-      .zyrox-keystrokes-overlay { --zyrox-key-bg: rgba(8, 10, 14, .82); --zyrox-key-border: rgba(255, 59, 59, .38); --zyrox-key-glow: rgba(255, 59, 59, .36); }
-      .zyrox-keystrokes-grid { display:grid; grid-template-columns:44px 44px 44px; grid-auto-rows:44px; gap:6px; }
-      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:10px; border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, rgba(33, 8, 11, .88), var(--zyrox-key-bg)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:#f7f7f7; font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, transform .08s ease, box-shadow .08s ease; }
-      .zyrox-keystroke-pressed { background:linear-gradient(180deg, rgba(255, 63, 63, .96), rgba(126, 12, 12, .94)); border-color:rgba(255, 205, 205, .95); color:#fff; transform:translateY(1px); box-shadow:0 0 18px var(--zyrox-key-glow), inset 0 0 18px rgba(255,255,255,.12); }
+      .zyrox-keystrokes-overlay { --zyrox-key-bg: rgba(8, 10, 14, .82); --zyrox-key-border: rgba(255, 59, 59, .38); --zyrox-key-text: #f7f7f7; --zyrox-key-accent: #ff3b3b; --zyrox-key-active-border: rgba(255, 205, 205, .95); --zyrox-key-font: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+      .zyrox-keystrokes-grid { display:grid; grid-template-columns:44px 44px 44px; grid-auto-rows:44px; gap:6px; font-family:var(--zyrox-key-font); }
+      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:10px; border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, color-mix(in srgb, var(--zyrox-key-accent) 22%, transparent), var(--zyrox-key-bg)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:var(--zyrox-key-text); font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, transform .08s ease, box-shadow .08s ease; }
+      .zyrox-keystroke-pressed { background:linear-gradient(180deg, color-mix(in srgb, var(--zyrox-key-accent) 86%, white 14%), color-mix(in srgb, var(--zyrox-key-accent) 62%, black 38%)); border-color:var(--zyrox-key-active-border); color:#fff; transform:translateY(1px); box-shadow:0 0 18px color-mix(in srgb, var(--zyrox-key-accent) 56%, transparent), inset 0 0 18px rgba(255,255,255,.12); }
       .zyrox-keystroke-spacer { visibility:hidden; }
-      .zyrox-keystroke-mouse { min-width:67px; font-size:11px; line-height:1.1; text-align:center; }
+      .zyrox-keystroke-mouse-row { grid-column:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+      .zyrox-keystroke-mouse { min-width:0; width:100%; font-size:11px; line-height:1.1; text-align:center; }
       .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; }
       .zyrox-keystroke-label { pointer-events:none; }
     `;
@@ -3445,12 +3467,15 @@
     grid.appendChild(createKeystrokesKey("S", "S"));
     grid.appendChild(createKeystrokesKey("D", "D"));
 
-    const lmb = createKeystrokesKey("LMB", "LMB 0 CPS", "zyrox-keystroke-mouse");
-    const rmb = createKeystrokesKey("RMB", "RMB 0 CPS", "zyrox-keystroke-mouse");
+    const lmb = createKeystrokesKey("LMB", "LMB 0.0 CPS", "zyrox-keystroke-mouse");
+    const rmb = createKeystrokesKey("RMB", "RMB 0.0 CPS", "zyrox-keystroke-mouse");
     keystrokesState.elements.set("LMB-text", lmb.querySelector(".zyrox-keystroke-label"));
     keystrokesState.elements.set("RMB-text", rmb.querySelector(".zyrox-keystroke-label"));
-    grid.appendChild(lmb);
-    grid.appendChild(rmb);
+    const mouseRow = document.createElement("div");
+    mouseRow.className = "zyrox-keystroke-mouse-row";
+    mouseRow.appendChild(rmb);
+    mouseRow.appendChild(lmb);
+    grid.appendChild(mouseRow);
 
     const space = createKeystrokesKey("Space", "SPACE", "zyrox-keystroke-space");
     grid.appendChild(space);
@@ -10846,10 +10871,7 @@
                 event.target.value = String(nextConcurrency);
                 if (valueLabel) valueLabel.textContent = `${nextConcurrency}${valueUnit}`;
               }
-              if (moduleName === KEYSTROKES_MODULE_NAME) {
-                window.__zyroxKeystrokesConfig = { ...cfg };
-                renderKeystrokesOverlay();
-              }
+              if (moduleName === KEYSTROKES_MODULE_NAME) syncKeystrokesConfigChange(cfg);
               saveSettings();
             });
             settingInput.addEventListener("change", (event) => {
@@ -10875,10 +10897,7 @@
                 event.target.value = String(nextConcurrency);
                 if (valueLabel) valueLabel.textContent = `${nextConcurrency}${valueUnit}`;
               }
-              if (moduleName === KEYSTROKES_MODULE_NAME) {
-                window.__zyroxKeystrokesConfig = { ...cfg };
-                renderKeystrokesOverlay();
-              }
+              if (moduleName === KEYSTROKES_MODULE_NAME) syncKeystrokesConfigChange(cfg);
               saveSettings();
             });
           }
@@ -10933,10 +10952,7 @@
                 window.__zyroxQuickFireConfig = { ...getQuickFireConfig(), ...cfg };
                 if (quickFireState.enabled) startQuickFire();
               }
-              if (moduleName === KEYSTROKES_MODULE_NAME) {
-                window.__zyroxKeystrokesConfig = { ...cfg };
-                renderKeystrokesOverlay();
-              }
+              if (moduleName === KEYSTROKES_MODULE_NAME) syncKeystrokesConfigChange(cfg);
               saveSettings();
             });
           }
