@@ -3359,8 +3359,19 @@
   const KEYSTROKES_CPS_WINDOW_MS = 1000;
 
   function getKeystrokesCps(clicks, now = performance.now()) {
-    while (clicks.length && now - clicks[0] > KEYSTROKES_CPS_WINDOW_MS) clicks.shift();
-    return clicks.length.toFixed(1);
+    while (clicks.length && now - clicks[0] >= KEYSTROKES_CPS_WINDOW_MS) clicks.shift();
+    if (!clicks.length) return "0.0";
+
+    // Use high-resolution click timestamps in a rolling one-second window.
+    // Each click fades out over the window so the readout shows true decimals
+    // and returns to 0.0 immediately when the window is empty instead of
+    // hanging on an integer count.
+    const weightedClicks = clicks.reduce((total, timestamp) => {
+      const age = Math.max(0, now - timestamp);
+      return total + Math.max(0, 1 - (age / KEYSTROKES_CPS_WINDOW_MS));
+    }, 0);
+    const cps = (weightedClicks * 2 * 1000) / KEYSTROKES_CPS_WINDOW_MS;
+    return (cps < 0.05 ? 0 : cps).toFixed(1);
   }
 
   function setKeystrokePressed(id, pressed) {
@@ -3371,8 +3382,14 @@
 
   function applyKeystrokesThemeVars(overlay) {
     const cfg = getKeystrokesConfig();
-    const source = cfg.useGlobalAppearance !== false && typeof root !== "undefined" && root ? getComputedStyle(root) : null;
+    const useGlobal = cfg.useGlobalAppearance !== false;
+    const source = useGlobal && typeof root !== "undefined" && root ? getComputedStyle(root) : null;
+    const cachedAppearance = useGlobal && window.__zyroxAppearanceVars && typeof window.__zyroxAppearanceVars === "object"
+      ? window.__zyroxAppearanceVars
+      : null;
     const readVar = (name, fallback) => {
+      const cached = cachedAppearance?.[name];
+      if (cached != null && String(cached).trim()) return String(cached).trim();
       const value = source?.getPropertyValue?.(name)?.trim();
       return value || fallback;
     };
@@ -3385,6 +3402,8 @@
     overlay.style.setProperty("--zyrox-key-pressed-border", readVar("--zyx-outline-color", "rgba(255, 205, 205, .95)"));
     overlay.style.setProperty("--zyrox-key-glow", readVar("--zyx-slider-color", "#ff3b3b"));
     overlay.style.setProperty("--zyrox-key-font", readVar("--zyx-font", "Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"));
+    overlay.style.setProperty("--zyrox-key-radius", readVar("--zyx-radius-md", "10px"));
+    overlay.style.setProperty("--zyrox-key-space-radius", readVar("--zyx-radius-lg", "10px"));
   }
 
   function syncKeystrokesConfigChange(cfg = null) {
@@ -3457,14 +3476,14 @@
 
     const style = document.createElement("style");
     style.textContent = `
-      .zyrox-keystrokes-overlay { --zyrox-key-fill-start: rgba(33, 8, 11, .88); --zyrox-key-fill-end: rgba(8, 10, 14, .82); --zyrox-key-border: rgba(255, 59, 59, .38); --zyrox-key-text: #f7f7f7; --zyrox-key-pressed-start: rgba(255, 63, 63, .96); --zyrox-key-pressed-end: rgba(126, 12, 12, .94); --zyrox-key-pressed-border: rgba(255, 205, 205, .95); --zyrox-key-glow: #ff3b3b; --zyrox-key-font: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+      .zyrox-keystrokes-overlay { --zyrox-key-fill-start: rgba(33, 8, 11, .88); --zyrox-key-fill-end: rgba(8, 10, 14, .82); --zyrox-key-border: rgba(255, 59, 59, .38); --zyrox-key-text: #f7f7f7; --zyrox-key-pressed-start: rgba(255, 63, 63, .96); --zyrox-key-pressed-end: rgba(126, 12, 12, .94); --zyrox-key-pressed-border: rgba(255, 205, 205, .95); --zyrox-key-glow: #ff3b3b; --zyrox-key-font: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; --zyrox-key-radius: 10px; --zyrox-key-space-radius: 10px; }
       .zyrox-keystrokes-grid { display:grid; grid-template-columns:44px 44px 44px; grid-auto-rows:44px; gap:6px; font-family:var(--zyrox-key-font); }
-      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:10px; border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, var(--zyrox-key-fill-start), var(--zyrox-key-fill-end)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:var(--zyrox-key-text); font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, transform .08s ease, box-shadow .08s ease; }
+      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:var(--zyrox-key-radius); border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, var(--zyrox-key-fill-start), var(--zyrox-key-fill-end)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:var(--zyrox-key-text); font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, transform .08s ease, box-shadow .08s ease, border-radius .08s ease; }
       .zyrox-keystroke-pressed { background:linear-gradient(180deg, var(--zyrox-key-pressed-start), var(--zyrox-key-pressed-end)); border-color:var(--zyrox-key-pressed-border); color:#fff; transform:translateY(1px); box-shadow:0 0 18px color-mix(in srgb, var(--zyrox-key-glow) 56%, transparent), inset 0 0 18px rgba(255,255,255,.12); }
       .zyrox-keystroke-spacer { visibility:hidden; }
       .zyrox-keystroke-mouse-row { grid-column:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
       .zyrox-keystroke-mouse { min-width:0; width:100%; font-size:11px; line-height:1.1; text-align:center; }
-      .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; }
+      .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; border-radius:var(--zyrox-key-space-radius); }
       .zyrox-keystroke-label { pointer-events:none; }
     `;
     root.appendChild(style);
@@ -11584,7 +11603,26 @@
     // FIX: derive button accent background from outlineColor so buttons always match the theme
     setThemeVar("--zyx-btn-bg", toRgba(outlineColor, 0.12));
     setThemeVar("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
-    if (keystrokesState.enabled) scheduleKeystrokesRender();
+    window.__zyroxAppearanceVars = {};
+    for (const name of [
+      "--zyx-module-active-start",
+      "--zyx-module-active-end",
+      "--zyx-module-active-border",
+      "--zyx-text",
+      "--zyx-header-bg-start",
+      "--zyx-header-bg-end",
+      "--zyx-outline-color",
+      "--zyx-slider-color",
+      "--zyx-font",
+      "--zyx-radius-md",
+      "--zyx-radius-lg",
+    ]) {
+      window.__zyroxAppearanceVars[name] = root.style.getPropertyValue(name);
+    }
+    if (keystrokesState.enabled) {
+      renderKeystrokesOverlay();
+      setTimeout(scheduleKeystrokesRender, 0);
+    }
 
     if (state.displayMode === "loose") {
       const shellRect = shell.getBoundingClientRect();
