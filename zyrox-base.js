@@ -3331,6 +3331,7 @@
     rafId: null,
     rmbReleaseTimeoutId: null,
     appearanceObserver: null,
+    dragState: null,
     listeners: [],
   };
 
@@ -3359,8 +3360,19 @@
   const KEYSTROKES_CPS_WINDOW_MS = 1000;
 
   function getKeystrokesCps(clicks, now = performance.now()) {
-    while (clicks.length && now - clicks[0] > KEYSTROKES_CPS_WINDOW_MS) clicks.shift();
-    return clicks.length.toFixed(1);
+    while (clicks.length && now - clicks[0] >= KEYSTROKES_CPS_WINDOW_MS) clicks.shift();
+    if (!clicks.length) return "0.0";
+
+    // Use high-resolution click timestamps in a rolling one-second window.
+    // Each click fades out over the window so the readout shows true decimals
+    // and returns to 0.0 immediately when the window is empty instead of
+    // hanging on an integer count.
+    const weightedClicks = clicks.reduce((total, timestamp) => {
+      const age = Math.max(0, now - timestamp);
+      return total + Math.max(0, 1 - (age / KEYSTROKES_CPS_WINDOW_MS));
+    }, 0);
+    const cps = (weightedClicks * 2 * 1000) / KEYSTROKES_CPS_WINDOW_MS;
+    return (cps < 0.05 ? 0 : cps).toFixed(1);
   }
 
   function setKeystrokePressed(id, pressed) {
@@ -3371,20 +3383,25 @@
 
   function applyKeystrokesThemeVars(overlay) {
     const cfg = getKeystrokesConfig();
-    const source = cfg.useGlobalAppearance !== false && typeof root !== "undefined" && root ? getComputedStyle(root) : null;
+    const useGlobal = cfg.useGlobalAppearance !== false;
+    const source = useGlobal && typeof root !== "undefined" && root ? getComputedStyle(root) : null;
+    const cachedAppearance = useGlobal && window.__zyroxAppearanceVars && typeof window.__zyroxAppearanceVars === "object"
+      ? window.__zyroxAppearanceVars
+      : null;
     const readVar = (name, fallback) => {
+      const cached = cachedAppearance?.[name];
+      if (cached != null && String(cached).trim()) return String(cached).trim();
       const value = source?.getPropertyValue?.(name)?.trim();
       return value || fallback;
     };
-    overlay.style.setProperty("--zyrox-key-fill-start", readVar("--zyx-module-active-start", "rgba(33, 8, 11, .88)"));
-    overlay.style.setProperty("--zyrox-key-fill-end", readVar("--zyx-module-active-end", "rgba(8, 10, 14, .82)"));
-    overlay.style.setProperty("--zyrox-key-border", readVar("--zyx-module-active-border", "rgba(255, 59, 59, .38)"));
+    overlay.style.setProperty("--zyrox-key-fill-start", readVar("--zyx-module-disabled-bg", "rgba(0, 0, 0, .72)"));
+    overlay.style.setProperty("--zyrox-key-fill-end", readVar("--zyx-module-disabled-bg", "rgba(0, 0, 0, .72)"));
+    overlay.style.setProperty("--zyrox-key-border", readVar("--zyx-module-hover-border", "rgba(255, 255, 255, .14)"));
     overlay.style.setProperty("--zyrox-key-text", readVar("--zyx-text", "#f7f7f7"));
-    overlay.style.setProperty("--zyrox-key-pressed-start", readVar("--zyx-header-bg-start", "rgba(255, 63, 63, .96)"));
-    overlay.style.setProperty("--zyrox-key-pressed-end", readVar("--zyx-header-bg-end", "rgba(126, 12, 12, .94)"));
-    overlay.style.setProperty("--zyrox-key-pressed-border", readVar("--zyx-outline-color", "rgba(255, 205, 205, .95)"));
-    overlay.style.setProperty("--zyrox-key-glow", readVar("--zyx-slider-color", "#ff3b3b"));
+    overlay.style.setProperty("--zyrox-key-pressed-bg", readVar("--zyx-module-hover-bg", "rgba(255, 255, 255, .14)"));
     overlay.style.setProperty("--zyrox-key-font", readVar("--zyx-font", "Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"));
+    overlay.style.setProperty("--zyrox-key-radius", readVar("--zyx-radius-md", "10px"));
+    overlay.style.setProperty("--zyrox-key-space-radius", readVar("--zyx-radius-lg", "10px"));
   }
 
   function syncKeystrokesConfigChange(cfg = null) {
@@ -3447,8 +3464,10 @@
       "left:18px",
       "top:118px",
       "z-index:2147483646",
-      "pointer-events:none",
+      "pointer-events:auto",
       "user-select:none",
+      "cursor:move",
+      "touch-action:none",
       "transform-origin:top left",
       "font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif",
       "color:#fff",
@@ -3457,14 +3476,14 @@
 
     const style = document.createElement("style");
     style.textContent = `
-      .zyrox-keystrokes-overlay { --zyrox-key-fill-start: rgba(33, 8, 11, .88); --zyrox-key-fill-end: rgba(8, 10, 14, .82); --zyrox-key-border: rgba(255, 59, 59, .38); --zyrox-key-text: #f7f7f7; --zyrox-key-pressed-start: rgba(255, 63, 63, .96); --zyrox-key-pressed-end: rgba(126, 12, 12, .94); --zyrox-key-pressed-border: rgba(255, 205, 205, .95); --zyrox-key-glow: #ff3b3b; --zyrox-key-font: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; }
+      .zyrox-keystrokes-overlay { --zyrox-key-fill-start: rgba(0, 0, 0, .72); --zyrox-key-fill-end: rgba(0, 0, 0, .72); --zyrox-key-border: rgba(255, 255, 255, .14); --zyrox-key-text: #f7f7f7; --zyrox-key-pressed-bg: rgba(255, 255, 255, .14); --zyrox-key-font: Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif; --zyrox-key-radius: 10px; --zyrox-key-space-radius: 10px; }
       .zyrox-keystrokes-grid { display:grid; grid-template-columns:44px 44px 44px; grid-auto-rows:44px; gap:6px; font-family:var(--zyrox-key-font); }
-      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:10px; border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, var(--zyrox-key-fill-start), var(--zyrox-key-fill-end)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:var(--zyrox-key-text); font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, transform .08s ease, box-shadow .08s ease; }
-      .zyrox-keystroke-pressed { background:linear-gradient(180deg, var(--zyrox-key-pressed-start), var(--zyrox-key-pressed-end)); border-color:var(--zyrox-key-pressed-border); color:#fff; transform:translateY(1px); box-shadow:0 0 18px color-mix(in srgb, var(--zyrox-key-glow) 56%, transparent), inset 0 0 18px rgba(255,255,255,.12); }
+      .zyrox-keystroke-key { box-sizing:border-box; display:flex; align-items:center; justify-content:center; min-width:44px; min-height:44px; border-radius:var(--zyrox-key-radius); border:1px solid var(--zyrox-key-border); background:linear-gradient(180deg, var(--zyrox-key-fill-start), var(--zyrox-key-fill-end)); box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.18); color:var(--zyrox-key-text); font-weight:900; font-size:15px; letter-spacing:.04em; text-shadow:0 1px 2px rgba(0,0,0,.55); transition:background .08s ease, border-color .08s ease, color .08s ease, box-shadow .08s ease, border-radius .08s ease; }
+      .zyrox-keystroke-pressed { background:var(--zyrox-key-pressed-bg); border-color:var(--zyrox-key-border); color:#fff; box-shadow:inset 0 1px 0 rgba(255,255,255,.10), 0 0 0 1px rgba(0,0,0,.18); }
       .zyrox-keystroke-spacer { visibility:hidden; }
       .zyrox-keystroke-mouse-row { grid-column:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
       .zyrox-keystroke-mouse { min-width:0; width:100%; font-size:11px; line-height:1.1; text-align:center; }
-      .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; }
+      .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; border-radius:var(--zyrox-key-space-radius); }
       .zyrox-keystroke-label { pointer-events:none; }
     `;
     root.appendChild(style);
@@ -3498,6 +3517,38 @@
     return root;
   }
 
+  function isKeystrokesOverlayEvent(event) {
+    return Boolean(event?.target?.closest?.(".zyrox-keystrokes-overlay"));
+  }
+
+  function clampKeystrokesPosition(x, y) {
+    const overlay = keystrokesState.container;
+    const rect = overlay?.getBoundingClientRect?.();
+    const maxX = Math.max(0, window.innerWidth - (rect?.width || 0));
+    const maxY = Math.max(0, window.innerHeight - (rect?.height || 0));
+    return {
+      x: Math.min(maxX, Math.max(0, Number(x) || 0)),
+      y: Math.min(maxY, Math.max(0, Number(y) || 0)),
+    };
+  }
+
+  function setKeystrokesPosition(x, y, { persist = false } = {}) {
+    const overlay = keystrokesState.container;
+    if (!overlay) return;
+    const clamped = clampKeystrokesPosition(x, y);
+    overlay.style.left = `${Math.round(clamped.x)}px`;
+    overlay.style.top = `${Math.round(clamped.y)}px`;
+    const nextCfg = { ...getKeystrokesConfig(), x: Math.round(clamped.x), y: Math.round(clamped.y) };
+    keystrokesState.config = nextCfg;
+    window.__zyroxKeystrokesConfig = { ...nextCfg };
+    if (typeof moduleCfg === "function") {
+      const cfg = moduleCfg(KEYSTROKES_MODULE_NAME);
+      cfg.x = nextCfg.x;
+      cfg.y = nextCfg.y;
+    }
+    if (persist && typeof saveSettings === "function") saveSettings();
+  }
+
   function addKeystrokesListener(target, type, handler, options) {
     target.addEventListener(type, handler, options);
     keystrokesState.listeners.push({ target, type, handler, options });
@@ -3526,12 +3577,41 @@
     keystrokesState.enabled = true;
     keystrokesState.pressedKeys.clear();
     keystrokesState.pressedMouseButtons.clear();
+    keystrokesState.dragState = null;
     keystrokesState.lmbClicks = [];
     keystrokesState.rmbClicks = [];
     keystrokesState.config = getKeystrokesConfig();
     window.__zyroxKeystrokesConfig = { ...keystrokesState.config };
-    ensureKeystrokesOverlay();
+    const overlay = ensureKeystrokesOverlay();
     startKeystrokesAppearanceObserver();
+
+    const handleOverlayMouseDown = (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = overlay.getBoundingClientRect();
+      keystrokesState.dragState = {
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+      };
+      overlay.style.cursor = "grabbing";
+      clearKeystrokesInputState();
+      const handleDragMove = (moveEvent) => {
+        if (!keystrokesState.dragState) return;
+        moveEvent.preventDefault();
+        setKeystrokesPosition(moveEvent.clientX - keystrokesState.dragState.offsetX, moveEvent.clientY - keystrokesState.dragState.offsetY);
+      };
+      const handleDragEnd = () => {
+        if (!keystrokesState.dragState) return;
+        keystrokesState.dragState = null;
+        overlay.style.cursor = "move";
+        setKeystrokesPosition(parseFloat(overlay.style.left) || 0, parseFloat(overlay.style.top) || 0, { persist: true });
+        document.removeEventListener("mousemove", handleDragMove);
+        document.removeEventListener("mouseup", handleDragEnd);
+      };
+      document.addEventListener("mousemove", handleDragMove);
+      document.addEventListener("mouseup", handleDragEnd);
+    };
 
     const handleKeyDown = (event) => {
       if (!["KeyW", "KeyA", "KeyS", "KeyD", "Space"].includes(event.code)) return;
@@ -3544,6 +3624,7 @@
       scheduleKeystrokesRender();
     };
     const handleMouseDown = (event) => {
+      if (isKeystrokesOverlayEvent(event) || keystrokesState.dragState) return;
       if (event.button !== 0 && event.button !== 2) return;
       const now = performance.now();
       if (event.button === 2 && keystrokesState.rmbReleaseTimeoutId != null) {
@@ -3556,11 +3637,13 @@
       scheduleKeystrokesRender();
     };
     const handleMouseUp = (event) => {
+      if (isKeystrokesOverlayEvent(event) || keystrokesState.dragState) return;
       if (event.button !== 0 && event.button !== 2) return;
       keystrokesState.pressedMouseButtons.delete(event.button);
       scheduleKeystrokesRender();
     };
-    const handleContextMenu = () => {
+    const handleContextMenu = (event) => {
+      if (isKeystrokesOverlayEvent(event) || keystrokesState.dragState) return;
       if (keystrokesState.rmbReleaseTimeoutId != null) clearTimeout(keystrokesState.rmbReleaseTimeoutId);
       keystrokesState.pressedMouseButtons.add(2);
       scheduleKeystrokesRender();
@@ -3571,12 +3654,14 @@
       }, 180);
     };
     const handleMouseMove = (event) => {
+      if (isKeystrokesOverlayEvent(event) || keystrokesState.dragState) return;
       const buttons = Number(event.buttons) || 0;
       if ((buttons & 1) === 0) keystrokesState.pressedMouseButtons.delete(0);
       if ((buttons & 2) === 0 && keystrokesState.rmbReleaseTimeoutId == null) keystrokesState.pressedMouseButtons.delete(2);
       scheduleKeystrokesRender();
     };
 
+    addKeystrokesListener(overlay, "mousedown", handleOverlayMouseDown, { capture: true });
     addKeystrokesListener(window, "keydown", handleKeyDown, { passive: true, capture: true });
     addKeystrokesListener(window, "keyup", handleKeyUp, { passive: true, capture: true });
     addKeystrokesListener(window, "mousedown", handleMouseDown, { passive: true, capture: true });
@@ -3612,6 +3697,7 @@
     keystrokesState.listeners = [];
     keystrokesState.pressedKeys.clear();
     keystrokesState.pressedMouseButtons.clear();
+    keystrokesState.dragState = null;
     keystrokesState.lmbClicks = [];
     keystrokesState.rmbClicks = [];
     keystrokesState.config = null;
@@ -8196,8 +8282,6 @@
               description: MODULE_DESCRIPTIONS[KEYSTROKES_MODULE_NAME],
               settings: [
                 { id: "scale", label: "Overlay Scale", type: "slider", min: 50, max: 200, step: 5, default: 100, unit: "%" },
-                { id: "x", label: "X Position", type: "slider", min: 0, max: 1200, step: 1, default: 18, unit: "px" },
-                { id: "y", label: "Y Position", type: "slider", min: 0, max: 800, step: 1, default: 118, unit: "px" },
                 { id: "opacity", label: "Opacity", type: "slider", min: 20, max: 100, step: 1, default: 92, unit: "%" },
                 { id: "showCps", label: "Show CPS", type: "checkbox", default: true },
                 { id: "useGlobalAppearance", label: "Use global appearance", type: "checkbox", default: true },
@@ -8603,6 +8687,7 @@
       --zyx-accent-soft: #ffbdbd;
       --zyx-search-text: #ffe6e6;
       --zyx-checkmark-color: #ff6b6b;
+      --zyx-module-disabled-bg: rgba(0, 0, 0, 0.72);
       --zyx-module-hover-bg: rgba(30, 30, 36, 0.9);
       --zyx-module-hover-border: rgba(255, 255, 255, 0.14);
       --zyx-module-active-start: rgba(255, 61, 61, 0.32);
@@ -8923,7 +9008,7 @@
       color: var(--zyx-text);
       border: 1px solid transparent;
       border-radius: var(--zyx-radius-md);
-      background: rgba(255, 255, 255, 0.03);
+      background: var(--zyx-module-disabled-bg);
       transition: transform .11s ease, background .11s ease, border-color .11s ease, color .11s ease;
       cursor: pointer;
       white-space: nowrap;
@@ -9539,6 +9624,10 @@
                 <label>Module Bar Text</label>
                 <input type="color" class="set-header-text" value="#ffffff" />
               </div>
+              <div class="zyrox-setting-card">
+                <label>Module Disabled Background</label>
+                <input type="color" class="set-module-disabled-bg" value="#000000" />
+              </div>
           <div class="zyrox-subheading">Settings Menu</div>
               <div class="zyrox-setting-card">
                 <label>Settings Header Gradient</label>
@@ -9672,6 +9761,7 @@
   const headerStartInput = settingsMenu.querySelector(".set-header-start");
   const headerEndInput = settingsMenu.querySelector(".set-header-end");
   const headerTextInput = settingsMenu.querySelector(".set-header-text");
+  const moduleDisabledBgInput = settingsMenu.querySelector(".set-module-disabled-bg");
   const settingsHeaderStartInput = settingsMenu.querySelector(".set-settings-header-start");
   const settingsHeaderEndInput = settingsMenu.querySelector(".set-settings-header-end");
   const settingsSidebarInput = settingsMenu.querySelector(".set-settings-sidebar");
@@ -11174,6 +11264,7 @@
       headerStart: headerStartInput.value,
       headerEnd: headerEndInput.value,
       headerText: headerTextInput.value,
+      moduleDisabledBg: moduleDisabledBgInput.value,
       settingsHeaderStart: settingsHeaderStartInput.value,
       settingsHeaderEnd: settingsHeaderEndInput.value,
       settingsSidebar: settingsSidebarInput.value,
@@ -11383,7 +11474,7 @@
           outline: "#37d878", text: "#d7ffe6", muted: "#88b79b", soft: "#a8ffd0", search: "#e6fff0", icon: "#d7ffe9",
           panelText: "#d9ffe8", panelBorder: "#5fff99", panelBg: "#04110a", slider: "#2dff75", checkmark: "#2dff75",
           selectBg: "#111e16", selectText: "#d7ffe6",
-          headerStart: "#2dff75", headerEnd: "#0f2f1b", headerText: "#f0fff4",
+          headerStart: "#2dff75", headerEnd: "#0f2f1b", headerText: "#f0fff4", moduleDisabledBg: "#000000",
           settingsText: "#d7ffe6", settingsSubtext: "#a7cfb7", settingsSidebar: "#102016", settingsBody: "#0d1510",
           settingsCardBorder: "#79d6a0", settingsCardBg: "#12301f",
           settingsHeaderStart: "#2dff75", settingsHeaderEnd: "#0f2f1b", espValueTextColor: "#ffffff",
@@ -11396,7 +11487,7 @@
           outline: "#6fbce8", text: "#d7edff", muted: "#8ea7bd", soft: "#b8e5ff", search: "#e7f5ff", icon: "#dff3ff",
           panelText: "#e1f4ff", panelBorder: "#8fd7ff", panelBg: "#071019", slider: "#7bdfff", checkmark: "#7bdfff",
           selectBg: "#0c1c26", selectText: "#d7edff",
-          headerStart: "#6cd8ff", headerEnd: "#133042", headerText: "#f4fbff",
+          headerStart: "#6cd8ff", headerEnd: "#133042", headerText: "#f4fbff", moduleDisabledBg: "#000000",
           settingsText: "#d7edff", settingsSubtext: "#9db4c6", settingsSidebar: "#10202c", settingsBody: "#0e141a",
           settingsCardBorder: "#90cae8", settingsCardBg: "#173247",
           settingsHeaderStart: "#6cd8ff", settingsHeaderEnd: "#133042", espValueTextColor: "#ffffff",
@@ -11409,7 +11500,7 @@
           outline: "#9a9a9a", text: "#dddddd", muted: "#9a9a9a", soft: "#c9c9c9", search: "#f1f1f1", icon: "#f5f5f5",
           panelText: "#efefef", panelBorder: "#a0a0a0", panelBg: "#0f0f0f", slider: "#c4c4c4", checkmark: "#d0d0d0",
           selectBg: "#1b1b1b", selectText: "#efefef",
-          headerStart: "#8f8f8f", headerEnd: "#1d1d1d", headerText: "#ffffff",
+          headerStart: "#8f8f8f", headerEnd: "#1d1d1d", headerText: "#ffffff", moduleDisabledBg: "#000000",
           settingsText: "#efefef", settingsSubtext: "#b2b2b2", settingsSidebar: "#202020", settingsBody: "#181818",
           settingsCardBorder: "#b7b7b7", settingsCardBg: "#313131",
           settingsHeaderStart: "#8f8f8f", settingsHeaderEnd: "#1d1d1d", espValueTextColor: "#ffffff",
@@ -11422,7 +11513,7 @@
         outline: "#ff5b5b", text: "#d6d6df", muted: "#9b9bab", soft: "#ffbdbd", search: "#ffe6e6", icon: "#ffdada",
         panelText: "#ffd9d9", panelBorder: "#ff6464", panelBg: "#1a1a1e", slider: "#ff6b6b", checkmark: "#ff6b6b",
         selectBg: "#17171f", selectText: "#ffe5e5",
-        headerStart: "#ff4a4a", headerEnd: "#3c1212", headerText: "#ffffff",
+        headerStart: "#ff4a4a", headerEnd: "#3c1212", headerText: "#ffffff", moduleDisabledBg: "#000000",
         settingsText: "#ffe5e5", settingsSubtext: "#c2c2ce", settingsSidebar: "#181820", settingsBody: "#121216",
         settingsCardBorder: "#ffffff", settingsCardBg: "#ffffff",
         settingsHeaderStart: "#ff3d3d", settingsHeaderEnd: "#2d0c0c", espValueTextColor: "#ffffff",
@@ -11454,6 +11545,7 @@
     headerStartInput.value = preset.headerStart;
     headerEndInput.value = preset.headerEnd;
     headerTextInput.value = preset.headerText;
+    moduleDisabledBgInput.value = preset.moduleDisabledBg || "#000000";
     settingsHeaderStartInput.value = preset.settingsHeaderStart;
     settingsHeaderEndInput.value = preset.settingsHeaderEnd;
     settingsSidebarInput.value = preset.settingsSidebar;
@@ -11517,6 +11609,7 @@
     const headerStart = normalizeHex(headerStartInput.value, "#ff4a4a");
     const headerEnd = normalizeHex(headerEndInput.value, "#3c1212");
     const headerText = normalizeHex(headerTextInput.value, "#ffffff");
+    const moduleDisabledBg = normalizeHex(moduleDisabledBgInput.value, "#000000");
     const settingsHeaderStart = normalizeHex(settingsHeaderStartInput.value, "#ff3d3d");
     const settingsHeaderEnd = normalizeHex(settingsHeaderEndInput.value, "#2d0c0c");
     const settingsSidebar = normalizeHex(settingsSidebarInput.value, "#181820");
@@ -11542,7 +11635,8 @@
     setThemeVar("--zyx-search-text", searchText);
     setThemeVar("--zyx-topbar-bg-start", toRgba(topbarColor, 0.22));
     setThemeVar("--zyx-topbar-bg-end", toRgba(darken(topbarColor, 0.22), 0.9));
-    setThemeVar("--zyx-module-hover-bg", toRgba(topbarColor, 0.16));
+    setThemeVar("--zyx-module-disabled-bg", toRgba(moduleDisabledBg, 0.72));
+    setThemeVar("--zyx-module-hover-bg", toRgba(topbarColor, 0.28));
     setThemeVar("--zyx-module-hover-border", toRgba(topbarColor, 0.4));
     setThemeVar("--zyx-module-active-start", toRgba(headerStart, 0.35));
     setThemeVar("--zyx-module-active-end", toRgba(headerEnd, 0.82));
@@ -11584,7 +11678,29 @@
     // FIX: derive button accent background from outlineColor so buttons always match the theme
     setThemeVar("--zyx-btn-bg", toRgba(outlineColor, 0.12));
     setThemeVar("--zyx-btn-hover-bg", toRgba(outlineColor, 0.2));
-    if (keystrokesState.enabled) scheduleKeystrokesRender();
+    window.__zyroxAppearanceVars = {};
+    for (const name of [
+      "--zyx-module-disabled-bg",
+      "--zyx-module-hover-bg",
+      "--zyx-module-hover-border",
+      "--zyx-module-active-start",
+      "--zyx-module-active-end",
+      "--zyx-module-active-border",
+      "--zyx-text",
+      "--zyx-header-bg-start",
+      "--zyx-header-bg-end",
+      "--zyx-outline-color",
+      "--zyx-slider-color",
+      "--zyx-font",
+      "--zyx-radius-md",
+      "--zyx-radius-lg",
+    ]) {
+      window.__zyroxAppearanceVars[name] = root.style.getPropertyValue(name);
+    }
+    if (keystrokesState.enabled) {
+      renderKeystrokesOverlay();
+      setTimeout(scheduleKeystrokesRender, 0);
+    }
 
     if (state.displayMode === "loose") {
       const shellRect = shell.getBoundingClientRect();
@@ -11796,6 +11912,7 @@
   headerStartInput.addEventListener("input", applyAppearance);
   headerEndInput.addEventListener("input", applyAppearance);
   headerTextInput.addEventListener("input", applyAppearance);
+  moduleDisabledBgInput.addEventListener("input", applyAppearance);
   settingsHeaderStartInput.addEventListener("input", applyAppearance);
   settingsHeaderEndInput.addEventListener("input", applyAppearance);
   settingsSidebarInput.addEventListener("input", applyAppearance);
@@ -11855,6 +11972,7 @@
     headerStartInput.value = "#ff4a4a";
     headerEndInput.value = "#3c1212";
     headerTextInput.value = "#ffffff";
+    moduleDisabledBgInput.value = "#000000";
     settingsHeaderStartInput.value = "#ff3d3d";
     settingsHeaderEndInput.value = "#2d0c0c";
     settingsSidebarInput.value = "#181820";
@@ -11889,6 +12007,7 @@
     removeThemeVar("--zyx-search-text");
     removeThemeVar("--zyx-topbar-bg-start");
     removeThemeVar("--zyx-topbar-bg-end");
+    removeThemeVar("--zyx-module-disabled-bg");
     removeThemeVar("--zyx-module-hover-bg");
     removeThemeVar("--zyx-module-hover-border");
     removeThemeVar("--zyx-module-active-start");
@@ -12111,6 +12230,7 @@
         assign(headerStartInput, "headerStart");
         assign(headerEndInput, "headerEnd");
         assign(headerTextInput, "headerText");
+        assign(moduleDisabledBgInput, "moduleDisabledBg");
         assign(settingsHeaderStartInput, "settingsHeaderStart");
         assign(settingsHeaderEndInput, "settingsHeaderEnd");
         assign(settingsSidebarInput, "settingsSidebar");
