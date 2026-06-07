@@ -3318,6 +3318,13 @@
   // Minecraft-client-style WASD / mouse / space input overlay with CPS counters.
   // ---------------------------------------------------------------------------
   const KEYSTROKES_MODULE_NAME = "Keystrokes";
+  const KEYSTROKES_COLOR_SETTINGS = [
+    { id: "keyFillStart", label: "Key Background Start", default: "#000000" },
+    { id: "keyFillEnd", label: "Key Background End", default: "#000000" },
+    { id: "keyBorder", label: "Key Border", default: "#242424" },
+    { id: "keyText", label: "Key Text", default: "#f7f7f7" },
+    { id: "keyPressedBg", label: "Pressed Key Background", default: "#383838" },
+  ];
   const keystrokesState = {
     enabled: false,
     container: null,
@@ -3343,6 +3350,11 @@
       opacity: 92,
       showCps: true,
       useGlobalAppearance: true,
+      keyFillStart: "#000000",
+      keyFillEnd: "#000000",
+      keyBorder: "#242424",
+      keyText: "#f7f7f7",
+      keyPressedBg: "#383838",
     };
     const storedCfg = typeof moduleCfg === "function" ? moduleCfg(KEYSTROKES_MODULE_NAME) : null;
     const liveCfg = keystrokesState.config || window.__zyroxKeystrokesConfig || null;
@@ -3394,11 +3406,17 @@
       const value = source?.getPropertyValue?.(name)?.trim();
       return value || fallback;
     };
-    overlay.style.setProperty("--zyrox-key-fill-start", readVar("--zyx-module-disabled-bg", "rgba(0, 0, 0, .72)"));
-    overlay.style.setProperty("--zyrox-key-fill-end", readVar("--zyx-module-disabled-bg", "rgba(0, 0, 0, .72)"));
-    overlay.style.setProperty("--zyrox-key-border", readVar("--zyx-module-hover-border", "rgba(255, 255, 255, .14)"));
-    overlay.style.setProperty("--zyrox-key-text", readVar("--zyx-text", "#f7f7f7"));
-    overlay.style.setProperty("--zyrox-key-pressed-bg", readVar("--zyx-module-hover-bg", "rgba(255, 255, 255, .14)"));
+    const readManualColor = (id) => {
+      const setting = KEYSTROKES_COLOR_SETTINGS.find((entry) => entry.id === id);
+      const value = cfg[id];
+      return value != null && String(value).trim() ? String(value).trim() : setting?.default || "#ffffff";
+    };
+
+    overlay.style.setProperty("--zyrox-key-fill-start", useGlobal ? readVar("--zyx-module-disabled-bg", "rgba(0, 0, 0, .72)") : readManualColor("keyFillStart"));
+    overlay.style.setProperty("--zyrox-key-fill-end", useGlobal ? readVar("--zyx-module-disabled-bg", "rgba(0, 0, 0, .72)") : readManualColor("keyFillEnd"));
+    overlay.style.setProperty("--zyrox-key-border", useGlobal ? readVar("--zyx-module-hover-border", "rgba(255, 255, 255, .14)") : readManualColor("keyBorder"));
+    overlay.style.setProperty("--zyrox-key-text", useGlobal ? readVar("--zyx-text", "#f7f7f7") : readManualColor("keyText"));
+    overlay.style.setProperty("--zyrox-key-pressed-bg", useGlobal ? readVar("--zyx-module-hover-bg", "rgba(255, 255, 255, .14)") : readManualColor("keyPressedBg"));
     overlay.style.setProperty("--zyrox-key-font", readVar("--zyx-font", "Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif"));
     overlay.style.setProperty("--zyrox-key-radius", readVar("--zyx-radius-md", "10px"));
     overlay.style.setProperty("--zyrox-key-space-radius", readVar("--zyx-radius-lg", "10px"));
@@ -3433,8 +3451,8 @@
     const rmbCps = getKeystrokesCps(keystrokesState.rmbClicks, now);
     const lmbText = keystrokesState.elements.get("LMB-text");
     const rmbText = keystrokesState.elements.get("RMB-text");
-    if (lmbText) lmbText.textContent = showCps ? `LMB ${lmbCps} CPS` : "LMB";
-    if (rmbText) rmbText.textContent = showCps ? `RMB ${rmbCps} CPS` : "RMB";
+    if (lmbText) lmbText.innerHTML = showCps ? `<span class="zyrox-keystroke-mouse-name">LMB</span><span class="zyrox-keystroke-cps">${lmbCps} CPS</span>` : "LMB";
+    if (rmbText) rmbText.innerHTML = showCps ? `<span class="zyrox-keystroke-mouse-name">RMB</span><span class="zyrox-keystroke-cps">${rmbCps} CPS</span>` : "RMB";
 
     setKeystrokePressed("W", keystrokesState.pressedKeys.has("KeyW"));
     setKeystrokePressed("A", keystrokesState.pressedKeys.has("KeyA"));
@@ -3483,6 +3501,9 @@
       .zyrox-keystroke-spacer { visibility:hidden; }
       .zyrox-keystroke-mouse-row { grid-column:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:6px; }
       .zyrox-keystroke-mouse { min-width:0; width:100%; font-size:11px; line-height:1.1; text-align:center; }
+      .zyrox-keystroke-mouse .zyrox-keystroke-label { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; width:100%; }
+      .zyrox-keystroke-mouse-name { display:block; font-size:12px; line-height:1; }
+      .zyrox-keystroke-cps { display:block; font-size:11px; line-height:1; white-space:nowrap; }
       .zyrox-keystroke-space { grid-column:1 / span 3; min-height:28px; height:28px; font-size:12px; border-radius:var(--zyrox-key-space-radius); }
       .zyrox-keystroke-label { pointer-events:none; }
     `;
@@ -3498,8 +3519,8 @@
     grid.appendChild(createKeystrokesKey("S", "S"));
     grid.appendChild(createKeystrokesKey("D", "D"));
 
-    const lmb = createKeystrokesKey("LMB", "LMB 0.0 CPS", "zyrox-keystroke-mouse");
-    const rmb = createKeystrokesKey("RMB", "RMB 0.0 CPS", "zyrox-keystroke-mouse");
+    const lmb = createKeystrokesKey("LMB", `<span class="zyrox-keystroke-mouse-name">LMB</span><span class="zyrox-keystroke-cps">0.0 CPS</span>`, "zyrox-keystroke-mouse");
+    const rmb = createKeystrokesKey("RMB", `<span class="zyrox-keystroke-mouse-name">RMB</span><span class="zyrox-keystroke-cps">0.0 CPS</span>`, "zyrox-keystroke-mouse");
     keystrokesState.elements.set("LMB-text", lmb.querySelector(".zyrox-keystroke-label"));
     keystrokesState.elements.set("RMB-text", rmb.querySelector(".zyrox-keystroke-label"));
     const mouseRow = document.createElement("div");
@@ -11193,6 +11214,51 @@
 
         if (settingCard.innerHTML.trim()) configBody.appendChild(settingCard);
       }
+
+      if (moduleName === KEYSTROKES_MODULE_NAME) {
+        const details = document.createElement("details");
+        details.className = "zyrox-setting-card keystrokes-advanced-settings";
+        details.style.display = "block";
+        details.style.padding = "0";
+        details.style.overflow = "hidden";
+        details.innerHTML = `
+          <summary style="cursor:pointer;list-style:none;padding:10px;font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span style="font-size:12px;">Advanced color settings</span>
+            <span class="keystrokes-advanced-icon" aria-hidden="true" style="font-size:14px;opacity:.8;transition:transform .15s ease;">▸</span>
+          </summary>
+          <div class="keystrokes-advanced-body" style="display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;"></div>
+        `;
+        const advancedBody = details.querySelector(".keystrokes-advanced-body");
+        const advancedIcon = details.querySelector(".keystrokes-advanced-icon");
+        details.addEventListener("toggle", () => {
+          if (advancedIcon) advancedIcon.textContent = details.open ? "▾" : "▸";
+        });
+
+        for (const setting of KEYSTROKES_COLOR_SETTINGS) {
+          if (cfg[setting.id] === undefined) cfg[setting.id] = setting.default;
+          const row = document.createElement("div");
+          row.className = "zyrox-setting-card";
+          row.style.margin = "0";
+          row.innerHTML = `<label>${setting.label}</label><input type="color" class="keystrokes-color-control" data-setting-id="${setting.id}" value="${cfg[setting.id] || setting.default}" />`;
+          advancedBody?.appendChild(row);
+        }
+
+        const updateKeystrokesColorSetting = (event) => {
+          const control = event.target?.closest?.("[data-setting-id]");
+          if (!(control instanceof HTMLInputElement)) return;
+          const setting = KEYSTROKES_COLOR_SETTINGS.find((entry) => entry.id === control.dataset.settingId);
+          if (!setting) return;
+          cfg[setting.id] = String(control.value || setting.default);
+          cfg.useGlobalAppearance = false;
+          const globalInput = configBody.querySelector('[data-setting-id="useGlobalAppearance"]');
+          if (globalInput instanceof HTMLInputElement) globalInput.checked = false;
+          syncKeystrokesConfigChange(cfg);
+          saveSettings();
+        };
+        advancedBody?.addEventListener("input", updateKeystrokesColorSetting);
+        advancedBody?.addEventListener("change", updateKeystrokesColorSetting);
+        configBody.appendChild(details);
+      }
     }
 
     configTitleEl.textContent = moduleName;
@@ -11232,6 +11298,16 @@
         if (pos) {
           const cfg = moduleCfg(ABILITY_HUD_MODULE_NAME);
           if (cfg && typeof cfg === "object") { cfg.hudPosition = { x: Math.round(pos.x), y: Math.round(pos.y) }; console.log("[HUD Position] Stored before settings save", { moduleName: ABILITY_HUD_MODULE_NAME, hudPosition: { ...cfg.hudPosition } }); }
+        }
+      }
+      if (keystrokesState?.container?.isConnected) {
+        const rect = keystrokesState.container.getBoundingClientRect();
+        const cfg = moduleCfg(KEYSTROKES_MODULE_NAME);
+        if (cfg && typeof cfg === "object") {
+          cfg.x = Math.round(rect.left);
+          cfg.y = Math.round(rect.top);
+          keystrokesState.config = { ...getKeystrokesConfig(), x: cfg.x, y: cfg.y };
+          window.__zyroxKeystrokesConfig = { ...keystrokesState.config };
         }
       }
     } catch (_) {}
